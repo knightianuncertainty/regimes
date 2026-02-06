@@ -49,30 +49,41 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 
 ## Planned Phases
 
-### Phase 3: v0.3.0 - Advanced Models
-
-- [ ] VAR (Vector Autoregression) model with breaks
-- [ ] Cointegration model
-- [ ] Comprehensive example notebooks
-- [ ] Full Sphinx documentation on Read the Docs
-- [ ] Target: 85%+ test coverage
-
-### Phase 4: v0.4.0 - Additional Tests
+### Phase 3: v0.3.0 - Structural Break Tests & Markov-Switching
 
 - [ ] Chow test
-- [ ] CUSUM/CUSUM-SQ tests
+- [ ] CUSUM / CUSUM-SQ tests
 - [ ] Andrews-Ploberger test
+- [ ] Markov-switching models
+- [ ] *(Tentative)* Time-varying parameter models
+- [ ] Target: 85%+ test coverage
+
+### Phase 4: v0.4.0 - Model Selection & Indicator Saturation
+
+- [ ] Autometrics-inspired general-to-specific model-selection algorithm
+- [ ] Step-indicator saturation (SIS)
+- [ ] Multiplicative step-indicator saturation
+- [ ] Target: 88%+ test coverage
+
+### Phase 5: v0.5.0 - Documentation & Release
+
 - [ ] Real data examples (US interest rates, inflation)
+- [ ] Comprehensive example notebooks
+- [ ] Full Sphinx documentation on Read the Docs
 - [ ] PyPI stable release
 - [ ] Target: 90%+ test coverage
 
-### Phase 5: v0.5.0+ - Future Extensions
+### Phase 6: v0.6.0 - Advanced Models
 
-- [ ] Time-varying parameter models
-- [ ] Markov-switching models
+- [ ] VAR (Vector Autoregression) model with breaks
+- [ ] Cointegration model
 - [ ] Panel data extensions
 - [ ] Bootstrap inference methods
-- [ ] Ox code translation utilities (as needed)
+
+### Phase 7: v0.7.0+ - Forecasting Workflow
+
+- [ ] End-to-end forecasting workflow with structural change
+- [ ] *(Details to be defined as the research program develops)*
 
 ### Future Additions (Not Planned)
 
@@ -88,8 +99,10 @@ These features are deferred and may be added in future versions based on need:
 
 | Version | Status | Description |
 |---------|--------|-------------|
-| 0.1.0 | Complete | Foundation: package structure, base classes, OLS/AR models, Bai-Perron test, basic visualization, CI/CD |
-| 0.2.0 | Complete | Estimation tools: rolling/recursive estimation, ADL model, diagnostic plots, style system, 88% test coverage. GitHub repo live. |
-| 0.3.0 | Planned | Advanced models: VAR, cointegration, full documentation |
-| 0.4.0 | Planned | Additional tests: Chow, CUSUM, Andrews-Ploberger, PyPI release |
-| 0.5.0+ | Future | Extensions: TVP, Markov-switching, panel data, bootstrap |
+| 0.1.0 | Complete | Foundation: OLS, AR, Bai-Perron, visualization, CI/CD |
+| 0.2.0 | Complete | Estimation tools: rolling/recursive, ADL, diagnostics, style system, 88% coverage |
+| 0.3.0 | Planned | Structural break tests (Chow, CUSUM, Andrews-Ploberger), Markov-switching |
+| 0.4.0 | Planned | Autometrics-inspired model selection, step-indicator saturation |
+| 0.5.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
+| 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
+| 0.7.0+ | Future | End-to-end forecasting workflow with structural change |
