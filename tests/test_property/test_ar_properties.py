@@ -36,9 +36,7 @@ class TestARRootProperties:
         n_roots = len(results.roots)
         n_lags = len(lags)
 
-        assert n_roots == n_lags, (
-            f"Root count {n_roots} != AR order {n_lags}"
-        )
+        assert n_roots == n_lags, f"Root count {n_roots} != AR order {n_lags}"
 
     @given(data=stationary_ar_data(max_p=3))
     @settings(max_examples=50, deadline=None)
@@ -134,8 +132,7 @@ class TestARParameterProperties:
         # AR params should appear in full params
         # Find indices of y.L* parameters
         ar_indices = [
-            i for i, name in enumerate(results.param_names)
-            if name.startswith("y.L")
+            i for i, name in enumerate(results.param_names) if name.startswith("y.L")
         ]
 
         expected_ar_params = results.params[ar_indices]
@@ -261,6 +258,4 @@ class TestARInheritedOLSProperties:
         model = rg.AR(y, lags=lags)
         results = model.fit()
 
-        assert 0 <= results.rsquared <= 1, (
-            f"R-squared {results.rsquared} not in [0, 1]"
-        )
+        assert 0 <= results.rsquared <= 1, f"R-squared {results.rsquared} not in [0, 1]"

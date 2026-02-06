@@ -69,7 +69,7 @@ class TestColorPalette:
             REGIMES_COLORS["grey"],
             REGIMES_COLORS["mauve"],
         ]
-        assert REGIMES_COLOR_CYCLE == expected
+        assert expected == REGIMES_COLOR_CYCLE
 
 
 class TestGetStyle:
@@ -176,10 +176,9 @@ class TestUseStyle:
         """Test that rcParams are restored even on exception."""
         original = mpl.rcParams["axes.spines.top"]
 
-        with pytest.raises(ValueError):
-            with use_style():
-                assert mpl.rcParams["axes.spines.top"] is False
-                raise ValueError("test exception")
+        with pytest.raises(ValueError), use_style():
+            assert mpl.rcParams["axes.spines.top"] is False
+            raise ValueError("test exception")
 
         # Should still be restored
         assert mpl.rcParams["axes.spines.top"] == original
@@ -230,7 +229,9 @@ class TestAddBreakDates:
         add_break_dates(ax, [25, 50, 75])
 
         # Check that lines were added
-        lines = [child for child in ax.get_children() if hasattr(child, "get_linestyle")]
+        lines = [
+            child for child in ax.get_children() if hasattr(child, "get_linestyle")
+        ]
         # At least 3 vertical lines should be added (plus the original plot line)
         assert len(lines) >= 3
 
@@ -307,7 +308,7 @@ class TestShadeRegimes:
 
         # Should have 3 regimes: [0-30], [30-60], [60-100]
         # Check patches were added
-        patches = [p for p in ax.patches]
+        patches = list(ax.patches)
         assert len(patches) == 3
 
         plt.close(fig)

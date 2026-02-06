@@ -2,12 +2,12 @@
 
 from regimes.results.base import (
     BreakResultsBase,
-    RegressionResultsBase,
     RegimesResultsBase,
+    RegressionResultsBase,
 )
 
 __all__ = [
+    "BreakResultsBase",
     "RegimesResultsBase",
     "RegressionResultsBase",
-    "BreakResultsBase",
 ]

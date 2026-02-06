@@ -322,7 +322,8 @@ class TestRollingOLSWorkflow:
 
         # Test plot method doesn't error (don't actually display)
         import matplotlib
-        matplotlib.use('Agg')  # Non-interactive backend
+
+        matplotlib.use("Agg")  # Non-interactive backend
         fig, axes = rolling_results.plot_coefficients()
         assert fig is not None
 

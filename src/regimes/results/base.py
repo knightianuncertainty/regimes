@@ -211,10 +211,18 @@ class RegressionResultsBase(RegimesResultsBase):
         lines.append("=" * 78)
         lines.append(f"{self.model_name:^78}")
         lines.append("=" * 78)
-        lines.append(f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}")
-        lines.append(f"Model:          {self.model_name:>10}   Df Residuals:        {self.df_resid:>10}")
-        lines.append(f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}")
-        lines.append(f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}")
+        lines.append(
+            f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}"
+        )
+        lines.append(
+            f"Model:          {self.model_name:>10}   Df Residuals:        {self.df_resid:>10}"
+        )
+        lines.append(
+            f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}"
+        )
+        lines.append(
+            f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}"
+        )
         lines.append("=" * 78)
 
         # Parameter table header

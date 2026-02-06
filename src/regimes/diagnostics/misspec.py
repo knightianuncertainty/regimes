@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy import stats
 import statsmodels.api as sm
+from scipy import stats
 from statsmodels.stats.diagnostic import het_white
 
 if TYPE_CHECKING:
@@ -110,8 +110,7 @@ class DiagnosticsResults:
         for test in tests:
             if test is not None:
                 lines.append(
-                    f"{test.test_name:<35} {test.statistic:>12.4f} "
-                    f"{test.pvalue:>12.4f}"
+                    f"{test.test_name:<35} {test.statistic:>12.4f} {test.pvalue:>12.4f}"
                 )
 
         lines.append("=" * 81)
@@ -149,9 +148,7 @@ def normality_test(resid: NDArray[np.floating[Any]]) -> DiagnosticTestResult:
     )
 
 
-def arch_test(
-    resid: NDArray[np.floating[Any]], nlags: int = 1
-) -> DiagnosticTestResult:
+def arch_test(resid: NDArray[np.floating[Any]], nlags: int = 1) -> DiagnosticTestResult:
     """Engle's ARCH-LM test for conditional heteroskedasticity.
 
     Tests the null hypothesis that there are no ARCH effects (no
@@ -233,9 +230,7 @@ def heteroskedasticity_test(
     a constant column is prepended for the auxiliary regression.
     """
     # Check if exog has a constant column (all values ≈ 1.0)
-    has_constant = any(
-        np.allclose(exog[:, i], 1.0) for i in range(exog.shape[1])
-    )
+    has_constant = any(np.allclose(exog[:, i], 1.0) for i in range(exog.shape[1]))
 
     # Add constant if needed for White's test auxiliary regression
     if has_constant:
@@ -243,7 +238,7 @@ def heteroskedasticity_test(
     else:
         exog_for_test = np.column_stack([np.ones(len(resid)), exog])
 
-    lm_stat, lm_pvalue, f_stat, f_pvalue = het_white(resid, exog_for_test)
+    lm_stat, lm_pvalue, _f_stat, _f_pvalue = het_white(resid, exog_for_test)
     return DiagnosticTestResult(
         test_name="Hetero test (White)",
         null_hypothesis="Homoskedasticity",

@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 import regimes as rg
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -23,7 +22,9 @@ def rng() -> np.random.Generator:
 
 
 @pytest.fixture
-def adl_data(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
+def adl_data(
+    rng: np.random.Generator,
+) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
     """Simulated ADL(1,1) process.
 
     y_t = 0.5 + 0.6*y_{t-1} + 0.3*x_t + 0.15*x_{t-1} + e_t
@@ -38,7 +39,9 @@ def adl_data(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], NDArr
     y = np.zeros(n)
 
     for t in range(1, n):
-        y[t] = 0.5 + 0.6 * y[t - 1] + 0.3 * x[t] + 0.15 * x[t - 1] + rng.standard_normal()
+        y[t] = (
+            0.5 + 0.6 * y[t - 1] + 0.3 * x[t] + 0.15 * x[t - 1] + rng.standard_normal()
+        )
 
     return y, x
 
@@ -62,7 +65,14 @@ def adl_data_multiple_exog(
     y = np.zeros(n)
 
     for t in range(1, n):
-        y[t] = 0.5 + 0.5 * y[t - 1] + 0.3 * x1[t] + 0.1 * x1[t - 1] + 0.2 * x2[t] + rng.standard_normal()
+        y[t] = (
+            0.5
+            + 0.5 * y[t - 1]
+            + 0.3 * x1[t]
+            + 0.1 * x1[t - 1]
+            + 0.2 * x2[t]
+            + rng.standard_normal()
+        )
 
     X = np.column_stack([x1, x2])
     return y, X
@@ -177,7 +187,9 @@ class TestADLMultipleExog:
 
     def test_adl_multiple_exog_same_lags(
         self,
-        adl_data_multiple_exog: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        adl_data_multiple_exog: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         """Test ADL with multiple exog variables, same lag structure."""
         y, X = adl_data_multiple_exog
@@ -195,7 +207,9 @@ class TestADLMultipleExog:
 
     def test_adl_multiple_exog_different_lags(
         self,
-        adl_data_multiple_exog: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        adl_data_multiple_exog: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         """Test ADL with multiple exog variables, different lag structures."""
         y, X = adl_data_multiple_exog
@@ -256,9 +270,7 @@ class TestADLDistributedLagProperties:
         # True: (0.3 + 0.15) / (1 - 0.6) = 0.45 / 0.4 = 1.125
         assert np.isclose(lr_mult["x0"], 1.125, atol=0.4)
 
-    def test_long_run_multiplier_nonstationary(
-        self, rng: np.random.Generator
-    ) -> None:
+    def test_long_run_multiplier_nonstationary(self, rng: np.random.Generator) -> None:
         """Test long-run multiplier returns NaN for non-stationary model."""
         # Create data where estimated AR coefficient will be close to 1
         n = 200
@@ -326,7 +338,9 @@ class TestADLWithBreaks:
 
     def test_adl_with_break(
         self,
-        adl_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        adl_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test ADL with known structural break."""
         y, x, break_point = adl_data_with_break
@@ -340,7 +354,9 @@ class TestADLWithBreaks:
 
     def test_adl_break_estimates(
         self,
-        adl_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        adl_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test that AR coefficients differ across regimes."""
         y, x, break_point = adl_data_with_break
@@ -370,16 +386,22 @@ class TestADLVariableBreaks:
         """Test that breaks and variable_breaks cannot both be specified."""
         y, x = adl_data
         with pytest.raises(ValueError, match="Cannot specify both"):
-            rg.ADL(y, x, lags=1, exog_lags=0, breaks=[100], variable_breaks={"const": [50]})
+            rg.ADL(
+                y, x, lags=1, exog_lags=0, breaks=[100], variable_breaks={"const": [50]}
+            )
 
     def test_variable_breaks_const_only(
         self,
-        adl_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        adl_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test variable breaks on constant only (intercept shift)."""
         y, x, break_point = adl_data_with_break
 
-        model = rg.ADL(y, x, lags=1, exog_lags=0, variable_breaks={"const": [break_point]})
+        model = rg.ADL(
+            y, x, lags=1, exog_lags=0, variable_breaks={"const": [break_point]}
+        )
         results = model.fit()
 
         param_names = results.param_names or []
@@ -390,12 +412,16 @@ class TestADLVariableBreaks:
 
     def test_variable_breaks_ar_only(
         self,
-        adl_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        adl_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test variable breaks on AR coefficient only."""
         y, x, break_point = adl_data_with_break
 
-        model = rg.ADL(y, x, lags=1, exog_lags=0, variable_breaks={"y.L1": [break_point]})
+        model = rg.ADL(
+            y, x, lags=1, exog_lags=0, variable_breaks={"y.L1": [break_point]}
+        )
         results = model.fit()
 
         param_names = results.param_names or []
@@ -420,7 +446,9 @@ class TestADLLagSelection:
         y, x = adl_data
         model = rg.ADL(y, x, lags=1, exog_lags=0)
 
-        optimal_p, optimal_q = model.select_lags(max_ar_lags=3, max_exog_lags=3, criterion="aic")
+        optimal_p, optimal_q = model.select_lags(
+            max_ar_lags=3, max_exog_lags=3, criterion="aic"
+        )
 
         # Should select some reasonable lag structure
         assert 0 <= optimal_p <= 3
@@ -433,7 +461,9 @@ class TestADLLagSelection:
         y, x = adl_data
         model = rg.ADL(y, x, lags=1, exog_lags=0)
 
-        optimal_p, optimal_q = model.select_lags(max_ar_lags=3, max_exog_lags=3, criterion="bic")
+        optimal_p, optimal_q = model.select_lags(
+            max_ar_lags=3, max_exog_lags=3, criterion="bic"
+        )
 
         # BIC typically selects more parsimonious models
         assert 0 <= optimal_p <= 3

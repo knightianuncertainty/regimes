@@ -21,11 +21,10 @@ from regimes.rolling.base import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
     from numpy.typing import ArrayLike, NDArray
-
-    import pandas as pd
 
     from regimes.models.ar import AR
 
@@ -146,7 +145,9 @@ class RollingARResults(RollingResultsBase):
                     f"{np.max(valid_params):>12.4f}"
                 )
             else:
-                lines.append(f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}")
+                lines.append(
+                    f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}"
+                )
 
         lines.append("=" * 70)
         return "\n".join(lines)
@@ -261,7 +262,7 @@ class RollingAR(RollingEstimatorBase):
             y (dependent), X (design matrix), and parameter names.
         """
         # Effective sample (after dropping initial observations for lags)
-        y = self._endog_full[self.maxlag:]
+        y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
         # Build design matrix components
@@ -274,7 +275,9 @@ class RollingAR(RollingEstimatorBase):
             param_names.append("const")
 
         if self.trend == "ct":
-            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(-1, 1)
+            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(
+                -1, 1
+            )
             components.append(trend_var)
             param_names.append("trend")
 
@@ -285,7 +288,7 @@ class RollingAR(RollingEstimatorBase):
 
         # Exogenous variables
         if self._exog_full is not None:
-            X_eff = self._exog_full[self.maxlag:]
+            X_eff = self._exog_full[self.maxlag :]
             if X_eff.ndim == 1:
                 X_eff = X_eff.reshape(-1, 1)
             components.append(X_eff)
@@ -321,7 +324,7 @@ class RollingAR(RollingEstimatorBase):
         return lag_matrix
 
     @classmethod
-    def from_model(cls, model: "AR", window: int) -> "RollingAR":
+    def from_model(cls, model: AR, window: int) -> RollingAR:
         """Create RollingAR estimator from an existing AR model.
 
         Parameters
@@ -524,7 +527,7 @@ class RecursiveAR(RollingEstimatorBase):
             y (dependent), X (design matrix), and parameter names.
         """
         # Effective sample (after dropping initial observations for lags)
-        y = self._endog_full[self.maxlag:]
+        y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
         # Build design matrix components
@@ -537,7 +540,9 @@ class RecursiveAR(RollingEstimatorBase):
             param_names.append("const")
 
         if self.trend == "ct":
-            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(-1, 1)
+            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(
+                -1, 1
+            )
             components.append(trend_var)
             param_names.append("trend")
 
@@ -548,7 +553,7 @@ class RecursiveAR(RollingEstimatorBase):
 
         # Exogenous variables
         if self._exog_full is not None:
-            X_eff = self._exog_full[self.maxlag:]
+            X_eff = self._exog_full[self.maxlag :]
             if X_eff.ndim == 1:
                 X_eff = X_eff.reshape(-1, 1)
             components.append(X_eff)
@@ -584,7 +589,7 @@ class RecursiveAR(RollingEstimatorBase):
         return lag_matrix
 
     @classmethod
-    def from_model(cls, model: "AR", min_nobs: int | None = None) -> "RecursiveAR":
+    def from_model(cls, model: AR, min_nobs: int | None = None) -> RecursiveAR:
         """Create RecursiveAR estimator from an existing AR model.
 
         Parameters

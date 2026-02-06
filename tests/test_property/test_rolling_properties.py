@@ -334,6 +334,4 @@ class TestRollingDataFrameConversionProperties:
 
         # Check that SE columns exist
         for name in rolling_results.param_names:
-            assert f"{name}_se" in df_full.columns, (
-                f"Missing SE column for {name}"
-            )
+            assert f"{name}_se" in df_full.columns, f"Missing SE column for {name}"

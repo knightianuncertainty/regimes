@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 
     from regimes.models.adl import ADL
     from regimes.models.ar import AR
-    from regimes.models.ols import OLS, OLSResults
     from regimes.models.base import CovType
+    from regimes.models.ols import OLS, OLSResults
 
 
 # Critical values for Bai-Perron tests (approximations from tables)
@@ -38,20 +38,44 @@ if TYPE_CHECKING:
 # Keys are (q, m) where q = number of breaking regressors, m = number of breaks
 _SUPF_CRITICAL_VALUES: dict[tuple[int, int], float] = {
     # q=1
-    (1, 1): 8.58, (1, 2): 7.22, (1, 3): 5.96, (1, 4): 4.99, (1, 5): 4.09,
+    (1, 1): 8.58,
+    (1, 2): 7.22,
+    (1, 3): 5.96,
+    (1, 4): 4.99,
+    (1, 5): 4.09,
     # q=2
-    (2, 1): 10.13, (2, 2): 8.51, (2, 3): 7.42, (2, 4): 6.38, (2, 5): 5.60,
+    (2, 1): 10.13,
+    (2, 2): 8.51,
+    (2, 3): 7.42,
+    (2, 4): 6.38,
+    (2, 5): 5.60,
     # q=3
-    (3, 1): 11.47, (3, 2): 9.75, (3, 3): 8.36, (3, 4): 7.42, (3, 5): 6.57,
+    (3, 1): 11.47,
+    (3, 2): 9.75,
+    (3, 3): 8.36,
+    (3, 4): 7.42,
+    (3, 5): 6.57,
     # q=4
-    (4, 1): 12.77, (4, 2): 10.58, (4, 3): 9.35, (4, 4): 8.19, (4, 5): 7.45,
+    (4, 1): 12.77,
+    (4, 2): 10.58,
+    (4, 3): 9.35,
+    (4, 4): 8.19,
+    (4, 5): 7.45,
     # q=5
-    (5, 1): 13.96, (5, 2): 11.65, (5, 3): 10.18, (5, 4): 9.12, (5, 5): 8.26,
+    (5, 1): 13.96,
+    (5, 2): 11.65,
+    (5, 3): 10.18,
+    (5, 4): 9.12,
+    (5, 5): 8.26,
 }
 
 # UDmax critical values at 5% (from Bai-Perron tables)
 _UDMAX_CRITICAL_VALUES: dict[int, float] = {
-    1: 8.88, 2: 10.55, 3: 11.70, 4: 12.81, 5: 13.83,
+    1: 8.88,
+    2: 10.55,
+    3: 11.70,
+    4: 12.81,
+    5: 13.83,
 }
 
 
@@ -114,9 +138,9 @@ class BaiPerronResults(BreakTestResultsBase):
     break_ci: dict[int, tuple[int, int]] = field(default_factory=dict)
 
     # Private field to store reference back to the test for to_ols()
-    _test: "BaiPerronTest | None" = field(default=None, repr=False)
+    _test: BaiPerronTest | None = field(default=None, repr=False)
 
-    def to_ols(self, cov_type: "CovType" = "nonrobust") -> "OLSResults":
+    def to_ols(self, cov_type: CovType = "nonrobust") -> OLSResults:
         """Convert to OLSResults with detected breaks.
 
         Returns a fitted OLS model using the break dates selected
@@ -204,7 +228,9 @@ class BaiPerronResults(BreakTestResultsBase):
 
         # Sup-F tests
         lines.append("\nSup-F Tests (H0: 0 breaks vs H1: m breaks):")
-        lines.append(f"{'m':>5} {'Sup-F':>12} {'Critical':>12} {'p-value':>12} {'Reject':>10}")
+        lines.append(
+            f"{'m':>5} {'Sup-F':>12} {'Critical':>12} {'p-value':>12} {'Reject':>10}"
+        )
         lines.append("-" * 51)
         for m in sorted(self.supf_stats.keys()):
             stat = self.supf_stats[m]
@@ -212,10 +238,14 @@ class BaiPerronResults(BreakTestResultsBase):
             pval = self.supf_pvalues.get(m, np.nan)
             reject = "Yes" if stat > crit else "No"
             pval_str = f"{pval:.4f}" if not np.isnan(pval) else "N/A"
-            lines.append(f"{m:>5} {stat:>12.3f} {crit:>12.3f} {pval_str:>12} {reject:>10}")
+            lines.append(
+                f"{m:>5} {stat:>12.3f} {crit:>12.3f} {pval_str:>12} {reject:>10}"
+            )
 
         # UDmax test
-        lines.append(f"\nUDmax statistic: {self.udmax:.3f} (5% critical: {self.udmax_critical:.3f})")
+        lines.append(
+            f"\nUDmax statistic: {self.udmax:.3f} (5% critical: {self.udmax_critical:.3f})"
+        )
         if self.udmax > self.udmax_critical:
             lines.append("  => Reject null of no breaks")
         else:
@@ -224,13 +254,17 @@ class BaiPerronResults(BreakTestResultsBase):
         # Sequential tests
         if self.seqf_stats:
             lines.append("\nSequential Sup-F Tests (H0: m breaks vs H1: m+1 breaks):")
-            lines.append(f"{'m':>5} {'m+1':>5} {'Seq-F':>12} {'Critical':>12} {'Reject':>10}")
+            lines.append(
+                f"{'m':>5} {'m+1':>5} {'Seq-F':>12} {'Critical':>12} {'Reject':>10}"
+            )
             lines.append("-" * 46)
             for m in sorted(self.seqf_stats.keys()):
                 stat = self.seqf_stats[m]
                 crit = self.seqf_critical.get(m, np.nan)
                 reject = "Yes" if stat > crit else "No"
-                lines.append(f"{m:>5} {m+1:>5} {stat:>12.3f} {crit:>12.3f} {reject:>10}")
+                lines.append(
+                    f"{m:>5} {m + 1:>5} {stat:>12.3f} {crit:>12.3f} {reject:>10}"
+                )
 
         # Information criteria
         lines.append("\nInformation Criteria:")
@@ -244,7 +278,9 @@ class BaiPerronResults(BreakTestResultsBase):
 
         # Selected breaks
         lines.append("-" * 78)
-        lines.append(f"\nSelected number of breaks ({self.selection_method.upper()}): {self.n_breaks}")
+        lines.append(
+            f"\nSelected number of breaks ({self.selection_method.upper()}): {self.n_breaks}"
+        )
 
         if self.n_breaks > 0:
             lines.append(f"Break dates: {list(self.break_indices)}")
@@ -329,9 +365,9 @@ class BaiPerronTest(BreakTestBase):
     @classmethod
     def from_model(
         cls,
-        model: "OLS | AR | ADL",
+        model: OLS | AR | ADL,
         break_vars: Literal["all", "const"] = "all",
-    ) -> "BaiPerronTest":
+    ) -> BaiPerronTest:
         """Create BaiPerronTest from an OLS, AR, or ADL model.
 
         This class method provides a convenient way to create a Bai-Perron
@@ -406,9 +442,7 @@ class BaiPerronTest(BreakTestBase):
             # exog_break defaults to constant
             return cls(endog, exog=exog_all)
         else:
-            raise ValueError(
-                f"break_vars must be 'all' or 'const', got {break_vars!r}"
-            )
+            raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
     @property
     def q(self) -> int:
@@ -442,7 +476,6 @@ class BaiPerronTest(BreakTestBase):
             Sum of squared residuals and OLS coefficients.
         """
         y = self.endog[start:end]
-        n_seg = len(y)
 
         # Build regressor matrix
         X_list = []
@@ -460,7 +493,7 @@ class BaiPerronTest(BreakTestBase):
 
         # OLS estimation
         try:
-            beta, residuals, rank, s = np.linalg.lstsq(X, y, rcond=None)
+            beta, residuals, _rank, _s = np.linalg.lstsq(X, y, rcond=None)
             if len(residuals) > 0:
                 ssr = float(residuals[0])
             else:
@@ -471,9 +504,7 @@ class BaiPerronTest(BreakTestBase):
 
         return ssr, beta
 
-    def _build_ssr_matrix(
-        self, h: int
-    ) -> NDArray[np.floating[Any]]:
+    def _build_ssr_matrix(self, h: int) -> NDArray[np.floating[Any]]:
         """Build matrix of segment SSRs.
 
         Computes SSR[i,j] = SSR for segment from observation i to j.
@@ -646,9 +677,7 @@ class BaiPerronTest(BreakTestBase):
         f_stat = ((ssr_m - ssr_m1) / q) / (ssr_m1 / df2)
         return max(0.0, f_stat)
 
-    def _compute_information_criteria(
-        self, ssr: float, m: int
-    ) -> tuple[float, float]:
+    def _compute_information_criteria(self, ssr: float, m: int) -> tuple[float, float]:
         """Compute BIC and LWZ for model with m breaks.
 
         Parameters
@@ -955,7 +984,11 @@ class BaiPerronTest(BreakTestBase):
                     Q = 1.0
 
             # Compute shrinkage factor λ = σ² / (δ'Qδ)
-            delta_Q_delta = float(delta @ delta) * Q if self.q == 1 else float(delta @ (Q_matrix @ delta))
+            delta_Q_delta = (
+                float(delta @ delta) * Q
+                if self.q == 1
+                else float(delta @ (Q_matrix @ delta))
+            )
             if delta_Q_delta < 1e-10:
                 # If parameter change is tiny, CI is very wide
                 lambda_factor = self.nobs  # Conservative upper bound

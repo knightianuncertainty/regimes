@@ -7,7 +7,7 @@ procedures in the regimes package.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -15,7 +15,7 @@ import numpy as np
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from numpy.typing import ArrayLike, NDArray
+    from numpy.typing import ArrayLike
 
 
 @dataclass

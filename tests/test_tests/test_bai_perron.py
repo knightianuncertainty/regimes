@@ -9,7 +9,7 @@ import pytest
 from numpy.typing import NDArray
 
 import regimes as rg
-from regimes import OLS, AR, BaiPerronTest
+from regimes import AR, OLS, BaiPerronTest
 
 
 class TestBaiPerronBasic:
@@ -238,9 +238,7 @@ class TestBaiPerronParameters:
         assert results.max_breaks == 2
         assert max(results.supf_stats.keys()) == 2
 
-    def test_exog_break_custom(
-        self, rng: np.random.Generator
-    ) -> None:
+    def test_exog_break_custom(self, rng: np.random.Generator) -> None:
         """Test with custom breaking regressors."""
         n = 200
         x = rng.standard_normal(n)
@@ -401,7 +399,9 @@ class TestBaiPerronFromModel:
         # Only constant breaks, so q=1
         assert test.q == 1
 
-    def test_from_ar_model(self, ar1_data_with_break: tuple[NDArray[np.floating[Any]], int]) -> None:
+    def test_from_ar_model(
+        self, ar1_data_with_break: tuple[NDArray[np.floating[Any]], int]
+    ) -> None:
         """Test creating BaiPerronTest from AR model."""
         y, true_break = ar1_data_with_break
 
@@ -548,7 +548,9 @@ class TestOLSBaiPerronMethod:
 
     def test_ols_bai_perron_workflow(
         self,
-        regression_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        regression_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test complete workflow: model -> bai_perron -> to_ols."""
         y, X, true_break = regression_data_with_break
@@ -592,7 +594,9 @@ class TestARBaiPerronMethod:
         # Should detect at least one break
         assert bp_results.n_breaks >= 0  # May not always detect
 
-    def test_ar_bai_perron_with_options(self, ar1_data: NDArray[np.floating[Any]]) -> None:
+    def test_ar_bai_perron_with_options(
+        self, ar1_data: NDArray[np.floating[Any]]
+    ) -> None:
         """Test AR.bai_perron() with custom options."""
         model = AR(ar1_data, lags=1)
         bp_results = model.bai_perron(

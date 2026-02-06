@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
-    from numpy.typing import ArrayLike, NDArray
+    from numpy.typing import ArrayLike
 
     from regimes.results.base import BreakResultsBase
     from regimes.tests.base import BreakTestResultsBase
@@ -141,7 +141,13 @@ def plot_breaks(
             for i in range(len(all_breaks) - 1):
                 start, end = all_breaks[i], all_breaks[i + 1]
                 color = regime_colors[i % len(regime_colors)]
-                ax.axvspan(start, end, alpha=regime_alpha, color=color, label=f"Regime {i + 1}" if i < 3 else None)
+                ax.axvspan(
+                    start,
+                    end,
+                    alpha=regime_alpha,
+                    color=color,
+                    label=f"Regime {i + 1}" if i < 3 else None,
+                )
 
         # Plot break lines
         for i, b in enumerate(sorted(breaks)):
@@ -249,7 +255,15 @@ def plot_regime_means(
 
         # Plot data
         x = np.arange(n)
-        ax.plot(x, y_arr, "o", color=series_color, alpha=series_alpha, markersize=3, label="Data")
+        ax.plot(
+            x,
+            y_arr,
+            "o",
+            color=series_color,
+            alpha=series_alpha,
+            markersize=3,
+            label="Data",
+        )
 
         # Compute and plot regime means
         all_breaks = [0] + breaks_list + [n]
@@ -269,7 +283,14 @@ def plot_regime_means(
         # Plot break lines
         for i, b in enumerate(breaks_list):
             label = "Breaks" if i == 0 else None
-            ax.axvline(x=b, color=break_color, linestyle="--", alpha=0.7, linewidth=0.8, label=label)
+            ax.axvline(
+                x=b,
+                color=break_color,
+                linestyle="--",
+                alpha=0.7,
+                linewidth=0.8,
+                label=label,
+            )
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -333,7 +354,7 @@ def plot_break_confidence(
 
     # Add confidence intervals
     if confidence_intervals is not None:
-        for (lower, upper) in confidence_intervals:
+        for lower, upper in confidence_intervals:
             ax.axvspan(lower, upper, alpha=ci_alpha, color=ci_color)
 
     if title is not None:

@@ -22,7 +22,9 @@ def simple_data(rng: np.random.Generator) -> NDArray[np.floating[Any]]:
 
 
 @pytest.fixture
-def data_with_mean_shift(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], int]:
+def data_with_mean_shift(
+    rng: np.random.Generator,
+) -> tuple[NDArray[np.floating[Any]], int]:
     """Data with a single mean shift at t=100.
 
     Returns
@@ -36,7 +38,9 @@ def data_with_mean_shift(rng: np.random.Generator) -> tuple[NDArray[np.floating[
 
 
 @pytest.fixture
-def data_with_two_breaks(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], list[int]]:
+def data_with_two_breaks(
+    rng: np.random.Generator,
+) -> tuple[NDArray[np.floating[Any]], list[int]]:
     """Data with two mean shifts.
 
     Returns
@@ -62,7 +66,9 @@ def ar1_data(rng: np.random.Generator) -> NDArray[np.floating[Any]]:
 
 
 @pytest.fixture
-def ar1_data_with_break(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], int]:
+def ar1_data_with_break(
+    rng: np.random.Generator,
+) -> tuple[NDArray[np.floating[Any]], int]:
     """AR(1) process with structural break in AR coefficient.
 
     First half: phi = 0.3
@@ -135,7 +141,9 @@ def regression_data_with_break(
 
 
 @pytest.fixture
-def adl_data(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
+def adl_data(
+    rng: np.random.Generator,
+) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
     """Simulated ADL(1,1) process.
 
     y_t = 0.5 + 0.6*y_{t-1} + 0.3*x_t + 0.15*x_{t-1} + e_t
@@ -150,7 +158,9 @@ def adl_data(rng: np.random.Generator) -> tuple[NDArray[np.floating[Any]], NDArr
     y = np.zeros(n)
 
     for t in range(1, n):
-        y[t] = 0.5 + 0.6 * y[t - 1] + 0.3 * x[t] + 0.15 * x[t - 1] + rng.standard_normal()
+        y[t] = (
+            0.5 + 0.6 * y[t - 1] + 0.3 * x[t] + 0.15 * x[t - 1] + rng.standard_normal()
+        )
 
     return y, x
 

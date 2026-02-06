@@ -8,8 +8,8 @@ This module provides PcGive-style diagnostic tests for regression models:
 """
 
 from regimes.diagnostics.misspec import (
-    DiagnosticTestResult,
     DiagnosticsResults,
+    DiagnosticTestResult,
     arch_test,
     autocorrelation_test,
     compute_diagnostics,
@@ -20,9 +20,9 @@ from regimes.diagnostics.misspec import (
 __all__ = [
     "DiagnosticTestResult",
     "DiagnosticsResults",
-    "compute_diagnostics",
-    "autocorrelation_test",
     "arch_test",
-    "normality_test",
+    "autocorrelation_test",
+    "compute_diagnostics",
     "heteroskedasticity_test",
+    "normality_test",
 ]

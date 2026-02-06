@@ -13,7 +13,6 @@ from numpy.typing import NDArray
 import regimes as rg
 from regimes.visualization.rolling import plot_rolling_coefficients
 
-
 # Use non-interactive backend for testing
 matplotlib.use("Agg")
 
@@ -27,7 +26,8 @@ class TestPlotRollingCoefficientsBasic:
     """Basic tests for plot_rolling_coefficients."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and Axes."""
         y, X = regression_data
@@ -39,7 +39,8 @@ class TestPlotRollingCoefficientsBasic:
         plt.close(fig)
 
     def test_rolling_ols_results(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with RollingOLS results."""
         y, X = regression_data
@@ -50,7 +51,8 @@ class TestPlotRollingCoefficientsBasic:
         plt.close(fig)
 
     def test_recursive_ols_results(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with RecursiveOLS results."""
         y, X = regression_data
@@ -60,9 +62,7 @@ class TestPlotRollingCoefficientsBasic:
         assert fig is not None
         plt.close(fig)
 
-    def test_rolling_ar_results(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_results(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test with RollingAR results."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=40).fit()
@@ -71,9 +71,7 @@ class TestPlotRollingCoefficientsBasic:
         assert fig is not None
         plt.close(fig)
 
-    def test_recursive_ar_results(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_recursive_ar_results(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test with RecursiveAR results."""
         y = ar1_data
         results = rg.RecursiveAR(y, lags=1, min_nobs=30).fit()
@@ -114,7 +112,8 @@ class TestVariableSelection:
     """Test variable selection for plotting."""
 
     def test_select_all_variables(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting all variables (default)."""
         y, X = regression_data
@@ -126,7 +125,8 @@ class TestVariableSelection:
         plt.close(fig)
 
     def test_select_subset_variables(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting subset of variables."""
         y, X = regression_data
@@ -149,7 +149,8 @@ class TestVariableSelection:
         plt.close(fig)
 
     def test_invalid_variable_raises(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test error for invalid variable name."""
         y, X = regression_data
@@ -168,7 +169,8 @@ class TestConfidenceIntervals:
     """Test confidence interval settings."""
 
     def test_default_alpha(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test default alpha (0.05)."""
         y, X = regression_data
@@ -193,7 +195,8 @@ class TestConfidenceIntervals:
         plt.close(fig)
 
     def test_ci_alpha_transparency(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test CI shading transparency."""
         y, X = regression_data
@@ -235,7 +238,8 @@ class TestSubplotLayout:
         plt.close(fig)
 
     def test_custom_figsize(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test custom figure size."""
         y, X = regression_data
@@ -255,7 +259,8 @@ class TestCustomAxes:
     """Test plotting on provided axes."""
 
     def test_single_ax(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test providing single axes for single variable."""
         y, X = regression_data
@@ -290,7 +295,8 @@ class TestAppearanceOptions:
     """Test appearance customization."""
 
     def test_show_zero_line(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test zero line option."""
         y, X = regression_data
@@ -305,7 +311,8 @@ class TestAppearanceOptions:
         plt.close(fig2)
 
     def test_custom_color(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test custom plot color."""
         y, X = regression_data
@@ -316,7 +323,8 @@ class TestAppearanceOptions:
         plt.close(fig)
 
     def test_custom_title(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test custom title."""
         y, X = regression_data
@@ -329,7 +337,8 @@ class TestAppearanceOptions:
         plt.close(fig)
 
     def test_default_title_rolling(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test default title for rolling estimation."""
         y, X = regression_data
@@ -342,7 +351,8 @@ class TestAppearanceOptions:
         plt.close(fig)
 
     def test_default_title_recursive(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test default title for recursive estimation."""
         y, X = regression_data
@@ -364,7 +374,8 @@ class TestResultsMethod:
     """Test plot_coefficients method on results objects."""
 
     def test_rolling_ols_method(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test RollingOLS results method."""
         y, X = regression_data
@@ -375,7 +386,8 @@ class TestResultsMethod:
         plt.close(fig)
 
     def test_recursive_ols_method(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test RecursiveOLS results method."""
         y, X = regression_data
@@ -385,9 +397,7 @@ class TestResultsMethod:
         assert fig is not None
         plt.close(fig)
 
-    def test_rolling_ar_method(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_method(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RollingAR results method."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=40).fit()
@@ -408,7 +418,8 @@ class TestResultsMethod:
         plt.close(fig)
 
     def test_method_with_parameters(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test method accepts parameters."""
         y, X = regression_data
@@ -434,7 +445,8 @@ class TestAPIExports:
         assert hasattr(rg, "plot_rolling_coefficients")
 
     def test_function_callable_from_api(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test function is callable via API."""
         y, X = regression_data
@@ -454,7 +466,8 @@ class TestEdgeCases:
     """Test edge cases for rolling visualization."""
 
     def test_small_window(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with small window size."""
         y, X = regression_data

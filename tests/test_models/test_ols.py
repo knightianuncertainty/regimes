@@ -64,9 +64,7 @@ class TestOLSBasic:
         assert np.isclose(np.sum(results.resid), 0, atol=1e-10)
 
         # Fitted values + residuals = y
-        np.testing.assert_array_almost_equal(
-            results.fittedvalues + results.resid, y
-        )
+        np.testing.assert_array_almost_equal(results.fittedvalues + results.resid, y)
 
 
 class TestOLSCovarianceTypes:
@@ -209,7 +207,9 @@ class TestOLSResults:
 class TestOLSAllCovTypes:
     """Test all covariance estimators."""
 
-    @pytest.mark.parametrize("cov_type", ["nonrobust", "HC0", "HC1", "HC2", "HC3", "HAC"])
+    @pytest.mark.parametrize(
+        "cov_type", ["nonrobust", "HC0", "HC1", "HC2", "HC3", "HAC"]
+    )
     def test_all_cov_types(
         self,
         regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
@@ -314,7 +314,9 @@ class TestOLSEdgeCases:
         """Test with many regressors."""
         n = 200
         k = 10
-        X = np.column_stack([np.ones(n)] + [rng.standard_normal(n) for _ in range(k - 1)])
+        X = np.column_stack(
+            [np.ones(n)] + [rng.standard_normal(n) for _ in range(k - 1)]
+        )
         y = X @ np.ones(k) + rng.standard_normal(n)
 
         model = rg.OLS(y, X, has_constant=False)
@@ -372,9 +374,7 @@ class TestOLSEdgeCases:
         model = rg.OLS(y, X, has_constant=False)
         results = model.fit()
 
-        np.testing.assert_array_almost_equal(
-            results.fittedvalues + results.resid, y
-        )
+        np.testing.assert_array_almost_equal(results.fittedvalues + results.resid, y)
 
 
 # =============================================================================
@@ -454,6 +454,7 @@ class TestOLSDiagnostics:
     ) -> None:
         """Test plot_diagnostics() method on results."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
@@ -478,7 +479,9 @@ class TestOLSVariableBreaks:
     def test_variable_breaks_by_index(self, rng: np.random.Generator) -> None:
         """Test variable_breaks with integer indices."""
         n = 200
-        X = np.column_stack([np.ones(n), rng.standard_normal(n), rng.standard_normal(n)])
+        X = np.column_stack(
+            [np.ones(n), rng.standard_normal(n), rng.standard_normal(n)]
+        )
         y = rng.standard_normal(n)
 
         # Variable 1 breaks at obs 100, variable 2 has no breaks
@@ -504,11 +507,13 @@ class TestOLSVariableBreaks:
     def test_variable_breaks_multiple_vars(self, rng: np.random.Generator) -> None:
         """Test variable_breaks with multiple variables having different breaks."""
         n = 200
-        X = np.column_stack([
-            np.ones(n),
-            rng.standard_normal(n),
-            rng.standard_normal(n),
-        ])
+        X = np.column_stack(
+            [
+                np.ones(n),
+                rng.standard_normal(n),
+                rng.standard_normal(n),
+            ]
+        )
         y = rng.standard_normal(n)
 
         # Different breaks for different variables using auto-generated names
@@ -538,7 +543,9 @@ class TestOLSVariableBreaks:
         assert "Regime 1" in summary
         assert "Regime 2" in summary
 
-    def test_variable_breaks_invalid_index_raises(self, rng: np.random.Generator) -> None:
+    def test_variable_breaks_invalid_index_raises(
+        self, rng: np.random.Generator
+    ) -> None:
         """Test that invalid variable index raises ValueError."""
         n = 100
         X = np.column_stack([np.ones(n), rng.standard_normal(n)])
@@ -549,7 +556,9 @@ class TestOLSVariableBreaks:
         with pytest.raises(ValueError, match="out of bounds"):
             model.fit()
 
-    def test_variable_breaks_invalid_name_raises(self, rng: np.random.Generator) -> None:
+    def test_variable_breaks_invalid_name_raises(
+        self, rng: np.random.Generator
+    ) -> None:
         """Test that invalid variable name raises ValueError."""
         n = 100
         X = np.column_stack([np.ones(n), rng.standard_normal(n)])
@@ -561,7 +570,9 @@ class TestOLSVariableBreaks:
         with pytest.raises(ValueError, match="not found"):
             model.fit()
 
-    def test_variable_breaks_invalid_break_point_raises(self, rng: np.random.Generator) -> None:
+    def test_variable_breaks_invalid_break_point_raises(
+        self, rng: np.random.Generator
+    ) -> None:
         """Test that break point at boundary raises ValueError."""
         n = 100
         X = np.column_stack([np.ones(n), rng.standard_normal(n)])
@@ -611,7 +622,9 @@ class TestSummaryByRegime:
         model = rg.OLS(y, X, breaks=[break_point], has_constant=False)
         regime_results = model.fit_by_regime()
 
-        summary = summary_by_regime(regime_results, breaks=[break_point], nobs_total=len(y))
+        summary = summary_by_regime(
+            regime_results, breaks=[break_point], nobs_total=len(y)
+        )
         assert "OLS Regression Results by Regime" in summary
         assert "Regime 1" in summary
         assert "Regime 2" in summary

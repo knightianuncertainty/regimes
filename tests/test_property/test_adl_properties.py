@@ -66,7 +66,11 @@ class TestADLLongRunMultiplierProperties:
         model = rg.ADL(y, x, lags=p if p > 0 else [], exog_lags=q)
         results = model.fit()
 
-        ar_sum = np.sum(results.ar_params) if results.ar_params is not None and len(results.ar_params) > 0 else 0.0
+        ar_sum = (
+            np.sum(results.ar_params)
+            if results.ar_params is not None and len(results.ar_params) > 0
+            else 0.0
+        )
 
         # Check if stationary
         if abs(ar_sum) >= 1:
@@ -109,7 +113,11 @@ class TestADLLongRunMultiplierProperties:
         model = rg.ADL(y, x, lags=p if p > 0 else [], exog_lags=q)
         results = model.fit()
 
-        ar_sum = np.sum(results.ar_params) if results.ar_params is not None and len(results.ar_params) > 0 else 0.0
+        ar_sum = (
+            np.sum(results.ar_params)
+            if results.ar_params is not None and len(results.ar_params) > 0
+            else 0.0
+        )
 
         # Only check for stationary case with positive AR sum
         if 0 < ar_sum < 1:
@@ -270,9 +278,7 @@ class TestADLInheritedOLSProperties:
         model = rg.ADL(y, x, lags=p if p > 0 else [], exog_lags=q)
         results = model.fit()
 
-        assert 0 <= results.rsquared <= 1, (
-            f"R-squared {results.rsquared} not in [0, 1]"
-        )
+        assert 0 <= results.rsquared <= 1, f"R-squared {results.rsquared} not in [0, 1]"
 
 
 class TestADLInformationCriteriaProperties:

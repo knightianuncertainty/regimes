@@ -14,9 +14,7 @@ import regimes as rg
 class TestRollingARBasic:
     """Basic RollingAR tests."""
 
-    def test_rolling_ar_creation(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_creation(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RollingAR can be created."""
         y = ar1_data
         rolling = rg.RollingAR(y, lags=1, window=30)
@@ -26,9 +24,7 @@ class TestRollingARBasic:
         assert rolling.window == 30
         assert rolling.is_rolling
 
-    def test_rolling_ar_from_model(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_from_model(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RollingAR.from_model() factory method."""
         y = ar1_data
         model = rg.AR(y, lags=1)
@@ -48,9 +44,7 @@ class TestRollingARBasic:
         assert isinstance(rolling, rg.RollingAR)
         assert rolling.window == 30
 
-    def test_rolling_ar_fit(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_fit(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RollingAR.fit() produces results."""
         y = ar1_data
         rolling = rg.RollingAR(y, lags=1, window=30)
@@ -61,9 +55,7 @@ class TestRollingARBasic:
         assert results.is_rolling
         assert results.lags == [1]
 
-    def test_rolling_ar_nan_padding(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_nan_padding(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test that early observations are NaN-padded."""
         y = ar1_data
         window = 30
@@ -104,9 +96,7 @@ class TestRollingARBasic:
 class TestRecursiveARBasic:
     """Basic RecursiveAR tests."""
 
-    def test_recursive_ar_creation(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_recursive_ar_creation(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RecursiveAR can be created."""
         y = ar1_data
         recursive = rg.RecursiveAR(y, lags=1, min_nobs=20)
@@ -114,9 +104,7 @@ class TestRecursiveARBasic:
         assert recursive.min_nobs == 20
         assert not recursive.is_rolling
 
-    def test_recursive_ar_from_model(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_recursive_ar_from_model(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RecursiveAR.from_model() factory method."""
         y = ar1_data
         model = rg.AR(y, lags=1)
@@ -135,9 +123,7 @@ class TestRecursiveARBasic:
         assert isinstance(recursive, rg.RecursiveAR)
         assert recursive.min_nobs == 20
 
-    def test_recursive_ar_fit(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_recursive_ar_fit(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test RecursiveAR.fit() produces results."""
         y = ar1_data
         recursive = rg.RecursiveAR(y, lags=1, min_nobs=20)
@@ -163,9 +149,7 @@ class TestRecursiveARBasic:
 class TestRollingARResults:
     """Test RollingAR results properties."""
 
-    def test_ar_params_extraction(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_ar_params_extraction(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test ar_params property extracts AR coefficients."""
         y = ar1_data
         results = rg.RollingAR(y, lags=2, window=40).fit()
@@ -174,9 +158,7 @@ class TestRollingARResults:
         # Should have shape (nobs, 2) for AR(2)
         assert ar_params.shape[1] == 2
 
-    def test_summary(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_summary(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test summary generation."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=30).fit()
@@ -186,9 +168,7 @@ class TestRollingARResults:
         assert "Window Size" in summary
         assert "y.L1" in summary
 
-    def test_to_dataframe(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_to_dataframe(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test DataFrame conversion."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=30).fit()
@@ -202,17 +182,13 @@ class TestRollingARResults:
 class TestRollingARCovTypes:
     """Test different covariance types."""
 
-    def test_rolling_ar_nonrobust(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_nonrobust(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test nonrobust covariance."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=30).fit(cov_type="nonrobust")
         assert results.cov_type == "nonrobust"
 
-    def test_rolling_ar_hc0(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_hc0(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test HC0 covariance."""
         y = ar1_data
         results = rg.RollingAR(y, lags=1, window=30).fit(cov_type="HC0")
@@ -222,9 +198,7 @@ class TestRollingARCovTypes:
 class TestRollingARTrend:
     """Test different trend options."""
 
-    def test_rolling_ar_constant(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_constant(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test AR with constant."""
         y = ar1_data
         rolling = rg.RollingAR(y, lags=1, window=30, trend="c")
@@ -232,9 +206,7 @@ class TestRollingARTrend:
 
         assert "const" in results.param_names
 
-    def test_rolling_ar_no_trend(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_rolling_ar_no_trend(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test AR without deterministic terms."""
         y = ar1_data
         rolling = rg.RollingAR(y, lags=1, window=30, trend="n")
@@ -270,9 +242,7 @@ class TestRollingARValidation:
 class TestRollingARWorkflow:
     """Test complete workflow integration."""
 
-    def test_full_workflow(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_full_workflow(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test model -> rolling -> fit -> plot workflow."""
         y = ar1_data
 
@@ -287,13 +257,12 @@ class TestRollingARWorkflow:
 
         # Test plot method doesn't error
         import matplotlib
-        matplotlib.use('Agg')
+
+        matplotlib.use("Agg")
         fig, axes = rolling_results.plot_coefficients()
         assert fig is not None
 
-    def test_recursive_workflow(
-        self, ar1_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_recursive_workflow(self, ar1_data: NDArray[np.floating[Any]]) -> None:
         """Test model -> recursive -> fit workflow."""
         y = ar1_data
 
@@ -318,7 +287,9 @@ class TestRollingARWorkflow:
         rolling_results = model.rolling(window=40).fit()
 
         # Check that AR coefficient shows some variation
-        valid_ar = rolling_results.ar_params[~np.isnan(rolling_results.ar_params[:, 0]), 0]
+        valid_ar = rolling_results.ar_params[
+            ~np.isnan(rolling_results.ar_params[:, 0]), 0
+        ]
         assert len(valid_ar) > 0
         # There should be some variation if there's a break
         assert np.std(valid_ar) > 0

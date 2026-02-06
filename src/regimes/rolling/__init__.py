@@ -56,23 +56,19 @@ from regimes.rolling.ols import (
 )
 
 __all__ = [
-    # Base classes
-    "RollingEstimatorBase",
-    "RollingResultsBase",
-    "RollingCovType",
-    # OLS
-    "RollingOLS",
-    "RollingOLSResults",
-    "RecursiveOLS",
-    "RecursiveOLSResults",
-    # AR
-    "RollingAR",
-    "RollingARResults",
-    "RecursiveAR",
-    "RecursiveARResults",
-    # ADL
-    "RollingADL",
-    "RollingADLResults",
     "RecursiveADL",
     "RecursiveADLResults",
+    "RecursiveAR",
+    "RecursiveARResults",
+    "RecursiveOLS",
+    "RecursiveOLSResults",
+    "RollingADL",
+    "RollingADLResults",
+    "RollingAR",
+    "RollingARResults",
+    "RollingCovType",
+    "RollingEstimatorBase",
+    "RollingOLS",
+    "RollingOLSResults",
+    "RollingResultsBase",
 ]

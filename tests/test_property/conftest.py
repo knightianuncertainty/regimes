@@ -10,7 +10,6 @@ from typing import Any
 
 import numpy as np
 from hypothesis import strategies as st
-from hypothesis.extra.numpy import arrays
 from numpy.typing import NDArray
 
 
@@ -129,7 +128,12 @@ def stationary_ar_data(
     ar_params = np.array(
         draw(
             st.lists(
-                st.floats(min_value=-0.8 / p, max_value=0.8 / p, allow_nan=False, allow_infinity=False),
+                st.floats(
+                    min_value=-0.8 / p,
+                    max_value=0.8 / p,
+                    allow_nan=False,
+                    allow_infinity=False,
+                ),
                 min_size=p,
                 max_size=p,
             )
@@ -191,7 +195,9 @@ def adl_data(
     """
     # Draw specifications
     p = draw(st.integers(min_value=1, max_value=2))  # AR order
-    q = draw(st.integers(min_value=0, max_value=2))  # DL order (includes contemporaneous)
+    q = draw(
+        st.integers(min_value=0, max_value=2)
+    )  # DL order (includes contemporaneous)
     maxlag = max(p, q)
 
     # Draw sample size
@@ -201,7 +207,12 @@ def adl_data(
     ar_params = np.array(
         draw(
             st.lists(
-                st.floats(min_value=-0.7 / p, max_value=0.7 / p, allow_nan=False, allow_infinity=False),
+                st.floats(
+                    min_value=-0.7 / p,
+                    max_value=0.7 / p,
+                    allow_nan=False,
+                    allow_infinity=False,
+                ),
                 min_size=p,
                 max_size=p,
             )
@@ -218,7 +229,9 @@ def adl_data(
     dl_params = np.array(
         draw(
             st.lists(
-                st.floats(min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+                st.floats(
+                    min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False
+                ),
                 min_size=n_dl_coefs,
                 max_size=n_dl_coefs,
             )
@@ -235,11 +248,15 @@ def adl_data(
     y_full = np.zeros(n + burn_in)
     x_full = np.concatenate([rng.standard_normal(burn_in), x])
 
-    const = draw(st.floats(min_value=-2, max_value=2, allow_nan=False, allow_infinity=False))
+    const = draw(
+        st.floats(min_value=-2, max_value=2, allow_nan=False, allow_infinity=False)
+    )
 
     for t in range(maxlag, n + burn_in):
         ar_term = np.sum(ar_params * y_full[t - p : t][::-1]) if p > 0 else 0
-        dl_term = np.sum(dl_params * x_full[t - q : t + 1][::-1]) if n_dl_coefs > 0 else 0
+        dl_term = (
+            np.sum(dl_params * x_full[t - q : t + 1][::-1]) if n_dl_coefs > 0 else 0
+        )
         y_full[t] = const + ar_term + dl_term + rng.standard_normal() * 0.5
 
     y = y_full[burn_in:]

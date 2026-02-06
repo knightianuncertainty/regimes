@@ -263,9 +263,7 @@ class RegimesModelBase(ABC):
         return endog_regime, exog_regime
 
     @abstractmethod
-    def fit(
-        self, cov_type: CovType = "nonrobust", **kwargs: Any
-    ) -> RegimesResultsBase:
+    def fit(self, cov_type: CovType = "nonrobust", **kwargs: Any) -> RegimesResultsBase:
         """Fit the model and return results.
 
         Parameters

@@ -7,7 +7,6 @@ from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 import regimes as rg
@@ -19,7 +18,6 @@ from regimes.visualization.diagnostics import (
     plot_scaled_residuals,
 )
 
-
 # Use non-interactive backend for testing
 matplotlib.use("Agg")
 
@@ -28,7 +26,8 @@ class TestPlotActualFitted:
     """Tests for plot_actual_fitted function."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and Axes."""
         y, X = regression_data
@@ -41,7 +40,8 @@ class TestPlotActualFitted:
         plt.close(fig)
 
     def test_custom_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting on provided axes."""
         y, X = regression_data
@@ -55,7 +55,8 @@ class TestPlotActualFitted:
         plt.close(fig)
 
     def test_with_endog_provided(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with explicit endog array."""
         y, X = regression_data
@@ -79,7 +80,8 @@ class TestPlotActualFitted:
         plt.close(fig)
 
     def test_custom_title(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test custom title parameter."""
         y, X = regression_data
@@ -95,7 +97,8 @@ class TestPlotScaledResiduals:
     """Tests for plot_scaled_residuals function."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and Axes."""
         y, X = regression_data
@@ -108,7 +111,8 @@ class TestPlotScaledResiduals:
         plt.close(fig)
 
     def test_custom_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting on provided axes."""
         y, X = regression_data
@@ -122,7 +126,8 @@ class TestPlotScaledResiduals:
         plt.close(fig)
 
     def test_no_bands(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with reference bands disabled."""
         y, X = regression_data
@@ -150,7 +155,8 @@ class TestPlotResidualDistribution:
     """Tests for plot_residual_distribution function."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and Axes."""
         y, X = regression_data
@@ -163,7 +169,8 @@ class TestPlotResidualDistribution:
         plt.close(fig)
 
     def test_custom_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting on provided axes."""
         y, X = regression_data
@@ -177,7 +184,8 @@ class TestPlotResidualDistribution:
         plt.close(fig)
 
     def test_no_normal_overlay(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with normal overlay disabled."""
         y, X = regression_data
@@ -189,7 +197,8 @@ class TestPlotResidualDistribution:
         plt.close(fig)
 
     def test_custom_bins(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with custom number of bins."""
         y, X = regression_data
@@ -205,7 +214,8 @@ class TestPlotResidualAcf:
     """Tests for plot_residual_acf function."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and array of Axes."""
         y, X = regression_data
@@ -219,7 +229,8 @@ class TestPlotResidualAcf:
         plt.close(fig)
 
     def test_custom_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting on provided axes."""
         y, X = regression_data
@@ -232,7 +243,8 @@ class TestPlotResidualAcf:
         plt.close(fig)
 
     def test_custom_nlags(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with custom number of lags."""
         y, X = regression_data
@@ -244,7 +256,8 @@ class TestPlotResidualAcf:
         plt.close(fig)
 
     def test_custom_alpha(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with custom significance level."""
         y, X = regression_data
@@ -260,7 +273,8 @@ class TestPlotDiagnostics:
     """Tests for plot_diagnostics combined function."""
 
     def test_returns_figure_and_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that function returns Figure and array of Axes."""
         y, X = regression_data
@@ -274,7 +288,8 @@ class TestPlotDiagnostics:
         plt.close(fig)
 
     def test_with_ols_results(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with OLSResults."""
         y, X = regression_data
@@ -310,7 +325,8 @@ class TestPlotDiagnostics:
         plt.close(fig)
 
     def test_custom_nlags(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with custom number of lags for ACF/PACF."""
         y, X = regression_data
@@ -322,7 +338,8 @@ class TestPlotDiagnostics:
         plt.close(fig)
 
     def test_custom_figsize(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test with custom figure size."""
         y, X = regression_data
@@ -353,7 +370,8 @@ class TestMethodAccess:
     """Tests for plot_diagnostics method on results classes."""
 
     def test_ols_results_method(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that OLSResults has plot_diagnostics method."""
         y, X = regression_data
@@ -389,7 +407,8 @@ class TestMethodAccess:
         plt.close(fig)
 
     def test_method_with_params(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test method accepts parameters."""
         y, X = regression_data
@@ -425,7 +444,8 @@ class TestAPIExports:
         assert hasattr(rg, "plot_residual_acf")
 
     def test_functions_callable_from_api(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that all functions are callable via API."""
         y, X = regression_data

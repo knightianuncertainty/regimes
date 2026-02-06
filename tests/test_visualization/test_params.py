@@ -18,7 +18,6 @@ from regimes.visualization.params import (
     _parse_param_name,
 )
 
-
 # Use non-interactive backend for testing
 matplotlib.use("Agg")
 
@@ -61,7 +60,8 @@ class TestNormalizeResultsInput:
     """Tests for _normalize_results_input helper."""
 
     def test_single_result(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test normalizing a single result object."""
         y, X = regression_data
@@ -73,7 +73,8 @@ class TestNormalizeResultsInput:
         assert "Model" in normalized
 
     def test_list_of_results(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test normalizing a list of results."""
         y, X = regression_data
@@ -87,7 +88,8 @@ class TestNormalizeResultsInput:
         assert "Model 2" in normalized
 
     def test_dict_of_results(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test normalizing a dict of results (passthrough)."""
         y, X = regression_data
@@ -103,7 +105,8 @@ class TestGetBaseParamNames:
     """Tests for _get_base_param_names helper."""
 
     def test_ols_no_breaks(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test extracting base names from OLS without breaks."""
         y, X = regression_data
@@ -136,7 +139,8 @@ class TestExtractParamData:
     """Tests for _extract_param_data helper."""
 
     def test_ols_no_breaks(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test extracting param data from OLS without breaks."""
         y, X = regression_data
@@ -190,7 +194,8 @@ class TestPlotParamsOverTime:
     """Tests for plot_params_over_time function."""
 
     def test_single_ols_no_breaks(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting OLS results without breaks."""
         y, X = regression_data
@@ -230,12 +235,16 @@ class TestPlotParamsOverTime:
         # Model without breaks
         results_no_break = rg.OLS(y, X, has_constant=False).fit()
         # Model with breaks
-        results_with_break = rg.OLS(y, X, breaks=[break_point], has_constant=False).fit()
+        results_with_break = rg.OLS(
+            y, X, breaks=[break_point], has_constant=False
+        ).fit()
 
-        fig, axes = rg.plot_params_over_time({
-            "No breaks": results_no_break,
-            "With break": results_with_break,
-        })
+        fig, axes = rg.plot_params_over_time(
+            {
+                "No breaks": results_no_break,
+                "With break": results_with_break,
+            }
+        )
 
         assert fig is not None
         plt.close(fig)
@@ -274,7 +283,8 @@ class TestPlotParamsOverTime:
         plt.close(fig)
 
     def test_custom_axes(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test plotting on provided axes."""
         y, X = regression_data
@@ -306,7 +316,9 @@ class TestPlotParamsOverTime:
         assert fig is not None
         plt.close(fig)
 
-    def test_ar_results(self, ar1_data_with_break: tuple[NDArray[np.floating[Any]], int]) -> None:
+    def test_ar_results(
+        self, ar1_data_with_break: tuple[NDArray[np.floating[Any]], int]
+    ) -> None:
         """Test plotting AR model results."""
         y, break_point = ar1_data_with_break
         results = rg.AR(y, lags=1, breaks=[break_point]).fit()
@@ -335,7 +347,8 @@ class TestPlotParamsOverTime:
         plt.close(fig2)
 
     def test_custom_colors(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test custom colors parameter."""
         y, X = regression_data
@@ -367,7 +380,8 @@ class TestPlotParamsOverTime:
         plt.close(fig)
 
     def test_title_parameter(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test title parameter."""
         y, X = regression_data
@@ -381,7 +395,8 @@ class TestPlotParamsOverTime:
         plt.close(fig)
 
     def test_empty_params_raises(
-        self, regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]
+        self,
+        regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
     ) -> None:
         """Test that empty params list raises error."""
         y, X = regression_data

@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy import stats
 import statsmodels.api as sm
+from scipy import stats
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
 from regimes.models.base import CovType, RegimesModelBase
@@ -22,9 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Literal
 
-    from numpy.typing import ArrayLike, NDArray
-
     import pandas as pd
+    from numpy.typing import ArrayLike, NDArray
 
     from regimes.rolling.ols import RecursiveOLS, RollingOLS
     from regimes.tests.bai_perron import BaiPerronResults
@@ -59,7 +58,9 @@ class OLSResults(RegressionResultsBase):
 
     # Break information (not shown in repr)
     _breaks: Sequence[int] | None = field(default=None, repr=False)
-    _variable_breaks: dict[str | int, Sequence[int]] | None = field(default=None, repr=False)
+    _variable_breaks: dict[str | int, Sequence[int]] | None = field(
+        default=None, repr=False
+    )
     _nobs_original: int | None = field(default=None, repr=False)
 
     @property
@@ -189,7 +190,9 @@ class OLSResults(RegressionResultsBase):
                 start = boundaries[i]
                 end = boundaries[i + 1] - 1
                 n_regime = boundaries[i + 1] - boundaries[i]
-                lines.append(f"  Regime {i + 1}: observations {start}-{end} (n={n_regime})")
+                lines.append(
+                    f"  Regime {i + 1}: observations {start}-{end} (n={n_regime})"
+                )
 
         elif self._variable_breaks:
             # Variable-specific breaks
@@ -234,15 +237,29 @@ class OLSResults(RegressionResultsBase):
         lines.append("=" * 81)
         lines.append(f"{'OLS Regression Results':^81}")
         lines.append("=" * 81)
-        lines.append(f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}")
-        lines.append(f"Model:                 OLS   Df Residuals:        {self.df_resid:>10}")
-        lines.append(f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}")
-        lines.append(f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}")
-        lines.append(f"Residual Std Err:  {self.sigma:>7.4f}   Residual Variance:   {self.sigma_squared:>10.4f}")
+        lines.append(
+            f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}"
+        )
+        lines.append(
+            f"Model:                 OLS   Df Residuals:        {self.df_resid:>10}"
+        )
+        lines.append(
+            f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}"
+        )
+        lines.append(
+            f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}"
+        )
+        lines.append(
+            f"Residual Std Err:  {self.sigma:>7.4f}   Residual Variance:   {self.sigma_squared:>10.4f}"
+        )
 
         if self.llf is not None:
-            lines.append(f"Log-Likelihood:    {self.llf:>7.2f}   AIC:                 {self.aic:>10.2f}")
-            lines.append(f"F-statistic:       {self.fvalue:>7.2f}   BIC:                 {self.bic:>10.2f}")
+            lines.append(
+                f"Log-Likelihood:    {self.llf:>7.2f}   AIC:                 {self.aic:>10.2f}"
+            )
+            lines.append(
+                f"F-statistic:       {self.fvalue:>7.2f}   BIC:                 {self.bic:>10.2f}"
+            )
             if not np.isnan(self.f_pvalue):
                 lines.append(f"Prob (F-statistic): {self.f_pvalue:>.2e}")
 
@@ -266,7 +283,11 @@ class OLSResults(RegressionResultsBase):
         ci = self.conf_int()
         names = self.param_names or [f"x{i}" for i in range(len(self.params))]
         for i, name in enumerate(names):
-            pval_str = f"{self.pvalues[i]:.3f}" if self.pvalues[i] >= 0.001 else f"{self.pvalues[i]:.2e}"
+            pval_str = (
+                f"{self.pvalues[i]:.3f}"
+                if self.pvalues[i] >= 0.001
+                else f"{self.pvalues[i]:.2e}"
+            )
             lines.append(
                 f"{name:>15} {self.params[i]:>10.4f} {self.bse[i]:>10.4f} "
                 f"{self.tvalues[i]:>10.3f} {pval_str:>10} "
@@ -277,7 +298,9 @@ class OLSResults(RegressionResultsBase):
         if self.cov_type == "HAC":
             lines.append("Note: Standard errors are HAC (Newey-West) robust.")
         elif self.cov_type.startswith("HC"):
-            lines.append(f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust.")
+            lines.append(
+                f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust."
+            )
 
         # Add diagnostics section if requested
         if diagnostics and self._exog is not None:
@@ -436,9 +459,7 @@ class OLS(RegimesModelBase):
 
         return normalized
 
-    def _get_variable_regime_indices(
-        self, breaks: list[int]
-    ) -> list[tuple[int, int]]:
+    def _get_variable_regime_indices(self, breaks: list[int]) -> list[tuple[int, int]]:
         """Get regime start/end indices for a variable's break points.
 
         Parameters
@@ -671,11 +692,11 @@ class OLS(RegimesModelBase):
 
     def bai_perron(
         self,
-        break_vars: "Literal['all', 'const']" = "all",
+        break_vars: Literal["all", "const"] = "all",
         max_breaks: int = 5,
         trimming: float = 0.15,
-        selection: "Literal['bic', 'lwz', 'sequential']" = "bic",
-    ) -> "BaiPerronResults":
+        selection: Literal["bic", "lwz", "sequential"] = "bic",
+    ) -> BaiPerronResults:
         """Test for structural breaks using Bai-Perron procedure.
 
         Convenience method that creates a BaiPerronTest from this model
@@ -729,7 +750,7 @@ class OLS(RegimesModelBase):
         test = BaiPerronTest.from_model(self, break_vars=break_vars)
         return test.fit(max_breaks=max_breaks, trimming=trimming, selection=selection)
 
-    def rolling(self, window: int) -> "RollingOLS":
+    def rolling(self, window: int) -> RollingOLS:
         """Create a rolling OLS estimator from this model.
 
         Parameters
@@ -764,7 +785,7 @@ class OLS(RegimesModelBase):
 
         return RollingOLS.from_model(self, window=window)
 
-    def recursive(self, min_nobs: int | None = None) -> "RecursiveOLS":
+    def recursive(self, min_nobs: int | None = None) -> RecursiveOLS:
         """Create a recursive (expanding window) OLS estimator from this model.
 
         Parameters
@@ -876,9 +897,15 @@ def summary_by_regime(
         lines.append("-" * 81)
 
         # Add fit statistics
-        lines.append(f"No. Observations: {result.nobs:>6}   R-squared:     {result.rsquared:>10.4f}")
-        lines.append(f"Cov. Type:    {result.cov_type:>10}   Adj. R-squared: {result.rsquared_adj:>9.4f}")
-        lines.append(f"Residual Std Err: {result.sigma:>6.4f}   Residual Var:  {result.sigma_squared:>10.4f}")
+        lines.append(
+            f"No. Observations: {result.nobs:>6}   R-squared:     {result.rsquared:>10.4f}"
+        )
+        lines.append(
+            f"Cov. Type:    {result.cov_type:>10}   Adj. R-squared: {result.rsquared_adj:>9.4f}"
+        )
+        lines.append(
+            f"Residual Std Err: {result.sigma:>6.4f}   Residual Var:  {result.sigma_squared:>10.4f}"
+        )
         lines.append("")
 
         # Parameter table header
@@ -906,7 +933,9 @@ def summary_by_regime(
         if result.cov_type == "HAC":
             lines.append("Note: Standard errors are HAC (Newey-West) robust.")
         elif result.cov_type.startswith("HC"):
-            lines.append(f"Note: Standard errors are {result.cov_type} heteroskedasticity-robust.")
+            lines.append(
+                f"Note: Standard errors are {result.cov_type} heteroskedasticity-robust."
+            )
 
         lines.append("")
 

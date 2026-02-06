@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def plot_rolling_coefficients(
-    results: "RollingResultsBase",
+    results: RollingResultsBase,
     variables: Sequence[str] | None = None,
     alpha: float = 0.05,
     ax: Axes | Sequence[Axes] | None = None,
@@ -103,10 +103,7 @@ def plot_rolling_coefficients(
             if v in param_names:
                 vars_to_plot.append(v)
             else:
-                raise ValueError(
-                    f"Variable '{v}' not found. "
-                    f"Available: {param_names}"
-                )
+                raise ValueError(f"Variable '{v}' not found. Available: {param_names}")
 
     if not vars_to_plot:
         raise ValueError("No variables to plot")

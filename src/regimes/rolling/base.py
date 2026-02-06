@@ -182,9 +182,7 @@ class RollingEstimatorBase(ABC):
         return self.window is not None
 
     @abstractmethod
-    def fit(
-        self, cov_type: RollingCovType = "nonrobust"
-    ) -> "RollingResultsBase":
+    def fit(self, cov_type: RollingCovType = "nonrobust") -> RollingResultsBase:
         """Fit the rolling/recursive model.
 
         Parameters
@@ -205,7 +203,9 @@ class RollingEstimatorBase(ABC):
         """Return string representation of the estimator."""
         class_name = self.__class__.__name__
         est_type = "rolling" if self.is_rolling else "recursive"
-        window_info = f"window={self.window}" if self.is_rolling else f"min_nobs={self.min_nobs}"
+        window_info = (
+            f"window={self.window}" if self.is_rolling else f"min_nobs={self.min_nobs}"
+        )
         return f"{class_name}({est_type}, {window_info}, nobs={self.nobs})"
 
 

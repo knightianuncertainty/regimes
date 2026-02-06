@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from typing import Any
 
 import regimes as rg
 from regimes.diagnostics import (
-    DiagnosticTestResult,
     DiagnosticsResults,
+    DiagnosticTestResult,
     arch_test,
     autocorrelation_test,
     compute_diagnostics,
     heteroskedasticity_test,
     normality_test,
 )
-
 
 # =============================================================================
 # Fixtures for generating test data

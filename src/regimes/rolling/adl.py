@@ -21,11 +21,10 @@ from regimes.rolling.base import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
     from numpy.typing import ArrayLike, NDArray
-
-    import pandas as pd
 
     from regimes.models.adl import ADL
 
@@ -159,7 +158,9 @@ class RollingADLResults(RollingResultsBase):
                     f"{np.max(valid_params):>12.4f}"
                 )
             else:
-                lines.append(f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}")
+                lines.append(
+                    f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}"
+                )
 
         lines.append("=" * 70)
         return "\n".join(lines)
@@ -273,7 +274,11 @@ class RollingADL(RollingEstimatorBase):
         # Store exog_lags dict for results
         self._exog_lags_result: dict[str, list[int]] = {}
         for col_idx, lag_list in exog_lags_dict.items():
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
             self._exog_lags_result[var_name] = lag_list
 
         # Initialize base class with effective sample
@@ -348,7 +353,7 @@ class RollingADL(RollingEstimatorBase):
 
             for lag in lag_list:
                 if lag == 0:
-                    col_data = self._exog_full[self.maxlag:, col_idx]
+                    col_data = self._exog_full[self.maxlag :, col_idx]
                     param_names.append(var_name)
                 else:
                     col_data = self._exog_full[self.maxlag - lag : n - lag, col_idx]
@@ -362,7 +367,12 @@ class RollingADL(RollingEstimatorBase):
 
     def _build_design_matrix(
         self,
-    ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], list[str], dict[int, list[int]]]:
+    ) -> tuple[
+        NDArray[np.floating[Any]],
+        NDArray[np.floating[Any]],
+        list[str],
+        dict[int, list[int]],
+    ]:
         """Build the design matrix for ADL estimation.
 
         Returns
@@ -372,7 +382,7 @@ class RollingADL(RollingEstimatorBase):
         """
         exog_lags_dict = self._process_exog_lags()
 
-        y = self._endog_full[self.maxlag:]
+        y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
         components = []
@@ -384,7 +394,9 @@ class RollingADL(RollingEstimatorBase):
             param_names.append("const")
 
         if self.trend == "ct":
-            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(-1, 1)
+            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(
+                -1, 1
+            )
             components.append(trend_var)
             param_names.append("trend")
 
@@ -404,7 +416,7 @@ class RollingADL(RollingEstimatorBase):
         return y, X, param_names, exog_lags_dict
 
     @classmethod
-    def from_model(cls, model: "ADL", window: int) -> "RollingADL":
+    def from_model(cls, model: ADL, window: int) -> RollingADL:
         """Create RollingADL estimator from an existing ADL model.
 
         Parameters
@@ -601,7 +613,11 @@ class RecursiveADL(RollingEstimatorBase):
         # Store exog_lags dict for results
         self._exog_lags_result: dict[str, list[int]] = {}
         for col_idx, lag_list in exog_lags_dict.items():
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
             self._exog_lags_result[var_name] = lag_list
 
         # Initialize base class with effective sample
@@ -676,7 +692,7 @@ class RecursiveADL(RollingEstimatorBase):
 
             for lag in lag_list:
                 if lag == 0:
-                    col_data = self._exog_full[self.maxlag:, col_idx]
+                    col_data = self._exog_full[self.maxlag :, col_idx]
                     param_names.append(var_name)
                 else:
                     col_data = self._exog_full[self.maxlag - lag : n - lag, col_idx]
@@ -690,7 +706,12 @@ class RecursiveADL(RollingEstimatorBase):
 
     def _build_design_matrix(
         self,
-    ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], list[str], dict[int, list[int]]]:
+    ) -> tuple[
+        NDArray[np.floating[Any]],
+        NDArray[np.floating[Any]],
+        list[str],
+        dict[int, list[int]],
+    ]:
         """Build the design matrix for ADL estimation.
 
         Returns
@@ -700,7 +721,7 @@ class RecursiveADL(RollingEstimatorBase):
         """
         exog_lags_dict = self._process_exog_lags()
 
-        y = self._endog_full[self.maxlag:]
+        y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
         components = []
@@ -712,7 +733,9 @@ class RecursiveADL(RollingEstimatorBase):
             param_names.append("const")
 
         if self.trend == "ct":
-            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(-1, 1)
+            trend_var = np.arange(self.maxlag + 1, len(self._endog_full) + 1).reshape(
+                -1, 1
+            )
             components.append(trend_var)
             param_names.append("trend")
 
@@ -732,7 +755,7 @@ class RecursiveADL(RollingEstimatorBase):
         return y, X, param_names, exog_lags_dict
 
     @classmethod
-    def from_model(cls, model: "ADL", min_nobs: int | None = None) -> "RecursiveADL":
+    def from_model(cls, model: ADL, min_nobs: int | None = None) -> RecursiveADL:
         """Create RecursiveADL estimator from an existing ADL model.
 
         Parameters

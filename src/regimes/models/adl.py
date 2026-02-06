@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy import stats
 import statsmodels.api as sm
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
@@ -30,9 +29,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Literal
 
-    from numpy.typing import ArrayLike, NDArray
-
     import pandas as pd
+    from numpy.typing import ArrayLike, NDArray
 
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.bai_perron import BaiPerronResults
@@ -73,7 +71,9 @@ class ADLResults(RegressionResultsBase):
 
     # Break information (not shown in repr)
     _breaks: Sequence[int] | None = field(default=None, repr=False)
-    _variable_breaks: dict[str | int, Sequence[int]] | None = field(default=None, repr=False)
+    _variable_breaks: dict[str | int, Sequence[int]] | None = field(
+        default=None, repr=False
+    )
     _nobs_original: int | None = field(default=None, repr=False)
 
     @property
@@ -166,7 +166,7 @@ class ADLResults(RegressionResultsBase):
         # Check for stationarity (sum of AR coefficients < 1 in absolute value)
         if abs(ar_sum) >= 1:
             # Non-stationary: long-run multiplier is undefined
-            return {var: np.nan for var in self.dl_params}
+            return dict.fromkeys(self.dl_params, np.nan)
 
         multiplier = 1.0 / (1.0 - ar_sum)
         return {
@@ -231,7 +231,9 @@ class ADLResults(RegressionResultsBase):
                 start = boundaries[i]
                 end = boundaries[i + 1] - 1
                 n_regime = boundaries[i + 1] - boundaries[i]
-                lines.append(f"  Regime {i + 1}: observations {start}-{end} (n={n_regime})")
+                lines.append(
+                    f"  Regime {i + 1}: observations {start}-{end} (n={n_regime})"
+                )
 
         elif self._variable_breaks:
             lines.append("-" * 81)
@@ -272,7 +274,9 @@ class ADLResults(RegressionResultsBase):
         lines.append("=" * 81)
         lines.append(f"{'ADL Model Results':^81}")
         lines.append("=" * 81)
-        lines.append(f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}")
+        lines.append(
+            f"Dep. Variable:           y   No. Observations:    {self.nobs:>10}"
+        )
 
         # Model specification string
         p = max(self.lags) if self.lags else 0
@@ -283,14 +287,26 @@ class ADLResults(RegressionResultsBase):
             q = 0
         model_str = f"ADL({p},{q})"
 
-        lines.append(f"Model:          {model_str:>10}   Df Residuals:        {self.df_resid:>10}")
-        lines.append(f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}")
-        lines.append(f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}")
-        lines.append(f"Residual Std Err:  {self.sigma:>7.4f}   Residual Variance:   {self.sigma_squared:>10.4f}")
+        lines.append(
+            f"Model:          {model_str:>10}   Df Residuals:        {self.df_resid:>10}"
+        )
+        lines.append(
+            f"Cov. Type:      {self.cov_type:>10}   Df Model:            {self.df_model:>10}"
+        )
+        lines.append(
+            f"R-squared:         {self.rsquared:>7.4f}   Adj. R-squared:      {self.rsquared_adj:>10.4f}"
+        )
+        lines.append(
+            f"Residual Std Err:  {self.sigma:>7.4f}   Residual Variance:   {self.sigma_squared:>10.4f}"
+        )
 
         if self.llf is not None:
-            lines.append(f"Log-Likelihood:    {self.llf:>7.2f}   AIC:                 {self.aic:>10.2f}")
-            lines.append(f"                             BIC:                 {self.bic:>10.2f}")
+            lines.append(
+                f"Log-Likelihood:    {self.llf:>7.2f}   AIC:                 {self.aic:>10.2f}"
+            )
+            lines.append(
+                f"                             BIC:                 {self.bic:>10.2f}"
+            )
 
         lines.append("=" * 81)
 
@@ -312,7 +328,11 @@ class ADLResults(RegressionResultsBase):
         ci = self.conf_int()
         names = self.param_names or [f"x{i}" for i in range(len(self.params))]
         for i, name in enumerate(names):
-            pval_str = f"{self.pvalues[i]:.3f}" if self.pvalues[i] >= 0.001 else f"{self.pvalues[i]:.2e}"
+            pval_str = (
+                f"{self.pvalues[i]:.3f}"
+                if self.pvalues[i] >= 0.001
+                else f"{self.pvalues[i]:.2e}"
+            )
             lines.append(
                 f"{name:>15} {self.params[i]:>10.4f} {self.bse[i]:>10.4f} "
                 f"{self.tvalues[i]:>10.3f} {pval_str:>10} "
@@ -326,7 +346,9 @@ class ADLResults(RegressionResultsBase):
             if self.is_stationary:
                 lines.append("AR roots are outside the unit circle (stationary).")
             else:
-                lines.append("WARNING: Some AR roots are inside the unit circle (non-stationary).")
+                lines.append(
+                    "WARNING: Some AR roots are inside the unit circle (non-stationary)."
+                )
 
         # Distributed lag effects
         if self.dl_params:
@@ -334,12 +356,16 @@ class ADLResults(RegressionResultsBase):
             lines.append("Distributed Lag Effects:")
             for var, cum_eff in self.cumulative_effect.items():
                 lr_mult = self.long_run_multiplier.get(var, np.nan)
-                lines.append(f"  {var}: Cumulative = {cum_eff:.4f}, Long-run = {lr_mult:.4f}")
+                lines.append(
+                    f"  {var}: Cumulative = {cum_eff:.4f}, Long-run = {lr_mult:.4f}"
+                )
 
         if self.cov_type == "HAC":
             lines.append("Note: Standard errors are HAC (Newey-West) robust.")
         elif self.cov_type.startswith("HC"):
-            lines.append(f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust.")
+            lines.append(
+                f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust."
+            )
 
         # Add diagnostics section if requested
         if diagnostics and self._exog is not None:
@@ -447,7 +473,9 @@ class ADL(RegimesModelBase):
 
         # Process exog lags
         self._exog_lags_raw = exog_lags
-        self._exog_lags: dict[int, list[int]] = {}  # Will be populated in _build_design_matrix
+        self._exog_lags: dict[
+            int, list[int]
+        ] = {}  # Will be populated in _build_design_matrix
 
         # Ensure exog is 2D
         if self.exog is not None and self.exog.ndim == 1:
@@ -586,12 +614,16 @@ class ADL(RegimesModelBase):
 
         for col_idx in sorted(exog_lags_dict.keys()):
             lag_list = exog_lags_dict[col_idx]
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
 
             for lag in lag_list:
                 if lag == 0:
                     # Contemporaneous
-                    col_data = self.exog[self.maxlag:, col_idx]
+                    col_data = self.exog[self.maxlag :, col_idx]
                     param_names.append(var_name)
                 else:
                     # Lagged
@@ -619,7 +651,7 @@ class ADL(RegimesModelBase):
         self._exog_lags = exog_lags_dict
 
         # Effective sample (after dropping initial observations for lags)
-        y = self.endog[self.maxlag:]
+        y = self.endog[self.maxlag :]
         n_eff = len(y)
 
         # Build design matrix components
@@ -701,7 +733,9 @@ class ADL(RegimesModelBase):
                     )
 
             # Adjust for effective sample (subtract maxlag)
-            adjusted_breaks = [bp - self.maxlag for bp in breaks_list if bp > self.maxlag]
+            adjusted_breaks = [
+                bp - self.maxlag for bp in breaks_list if bp > self.maxlag
+            ]
             if adjusted_breaks:
                 normalized[idx] = adjusted_breaks
 
@@ -760,7 +794,10 @@ class ADL(RegimesModelBase):
         return X_expanded, new_param_names
 
     def _create_break_design(
-        self, y: NDArray[np.floating[Any]], X: NDArray[np.floating[Any]], param_names: list[str]
+        self,
+        y: NDArray[np.floating[Any]],
+        X: NDArray[np.floating[Any]],
+        param_names: list[str],
     ) -> tuple[NDArray[np.floating[Any]], list[str]]:
         """Create design matrix with regime-specific coefficients."""
         # Handle variable-specific breaks first
@@ -872,7 +909,11 @@ class ADL(RegimesModelBase):
         # Build exog_lags dict with variable names for results
         exog_lags_result: dict[str, list[int]] = {}
         for col_idx, lag_list in self._exog_lags.items():
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
             exog_lags_result[var_name] = lag_list
 
         # Compute TSS for R-squared
@@ -907,7 +948,8 @@ class ADL(RegimesModelBase):
     ) -> NDArray[np.floating[Any]]:
         """Extract AR coefficients from full parameter vector."""
         ar_indices = [
-            i for i, name in enumerate(param_names)
+            i
+            for i, name in enumerate(param_names)
             if name.startswith("y.L") and ("regime1" in name or "regime" not in name)
         ]
         return params[ar_indices] if ar_indices else np.array([])
@@ -922,7 +964,11 @@ class ADL(RegimesModelBase):
         dl_params: dict[str, NDArray[np.floating[Any]]] = {}
 
         for col_idx, lag_list in self._exog_lags.items():
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
 
             # Find indices for this variable's lags (from first regime if breaks)
             coefs = []
@@ -949,7 +995,7 @@ class ADL(RegimesModelBase):
         self,
         max_ar_lags: int = 4,
         max_exog_lags: int = 4,
-        criterion: "Literal['aic', 'bic']" = "bic",
+        criterion: Literal["aic", "bic"] = "bic",
     ) -> tuple[int, int]:
         """Select optimal lag structure via information criteria grid search.
 
@@ -1004,11 +1050,11 @@ class ADL(RegimesModelBase):
 
     def bai_perron(
         self,
-        break_vars: "Literal['all', 'const']" = "all",
+        break_vars: Literal["all", "const"] = "all",
         max_breaks: int = 5,
         trimming: float = 0.15,
-        selection: "Literal['bic', 'lwz', 'sequential']" = "bic",
-    ) -> "BaiPerronResults":
+        selection: Literal["bic", "lwz", "sequential"] = "bic",
+    ) -> BaiPerronResults:
         """Test for structural breaks using Bai-Perron procedure.
 
         Convenience method that creates a BaiPerronTest from this ADL model
@@ -1038,7 +1084,7 @@ class ADL(RegimesModelBase):
         test = BaiPerronTest.from_model(self, break_vars=break_vars)
         return test.fit(max_breaks=max_breaks, trimming=trimming, selection=selection)
 
-    def rolling(self, window: int) -> "RollingADL":
+    def rolling(self, window: int) -> RollingADL:
         """Create a rolling ADL estimator from this model.
 
         Parameters
@@ -1055,7 +1101,7 @@ class ADL(RegimesModelBase):
 
         return RollingADL.from_model(self, window=window)
 
-    def recursive(self, min_nobs: int | None = None) -> "RecursiveADL":
+    def recursive(self, min_nobs: int | None = None) -> RecursiveADL:
         """Create a recursive (expanding window) ADL estimator from this model.
 
         Parameters
@@ -1143,14 +1189,26 @@ def adl_summary_by_regime(
             q = 0
         model_str = f"ADL({p},{q})"
 
-        lines.append(f"Model:            {model_str:>10}   No. Observations:        {result.nobs:>6}")
-        lines.append(f"Cov. Type:        {result.cov_type:>10}   Df Residuals:            {result.df_resid:>6}")
-        lines.append(f"R-squared:           {result.rsquared:>7.4f}   Adj. R-squared:      {result.rsquared_adj:>10.4f}")
-        lines.append(f"Residual Std Err:    {result.sigma:>7.4f}   Residual Variance:   {result.sigma_squared:>10.4f}")
+        lines.append(
+            f"Model:            {model_str:>10}   No. Observations:        {result.nobs:>6}"
+        )
+        lines.append(
+            f"Cov. Type:        {result.cov_type:>10}   Df Residuals:            {result.df_resid:>6}"
+        )
+        lines.append(
+            f"R-squared:           {result.rsquared:>7.4f}   Adj. R-squared:      {result.rsquared_adj:>10.4f}"
+        )
+        lines.append(
+            f"Residual Std Err:    {result.sigma:>7.4f}   Residual Variance:   {result.sigma_squared:>10.4f}"
+        )
 
         if result.llf is not None:
-            lines.append(f"Log-Likelihood:      {result.llf:>7.2f}   AIC:                 {result.aic:>10.2f}")
-            lines.append(f"                               BIC:                 {result.bic:>10.2f}")
+            lines.append(
+                f"Log-Likelihood:      {result.llf:>7.2f}   AIC:                 {result.aic:>10.2f}"
+            )
+            lines.append(
+                f"                               BIC:                 {result.bic:>10.2f}"
+            )
         lines.append("")
 
         # Stationarity check
@@ -1158,7 +1216,9 @@ def adl_summary_by_regime(
             if result.is_stationary:
                 lines.append("AR roots outside unit circle (stationary).")
             else:
-                lines.append("WARNING: Some AR roots inside unit circle (non-stationary).")
+                lines.append(
+                    "WARNING: Some AR roots inside unit circle (non-stationary)."
+                )
             lines.append("")
 
         # Parameter table
@@ -1186,13 +1246,17 @@ def adl_summary_by_regime(
             lines.append("Distributed Lag Effects:")
             for var, cum_eff in result.cumulative_effect.items():
                 lr_mult = result.long_run_multiplier.get(var, np.nan)
-                lines.append(f"  {var}: Cumulative = {cum_eff:.4f}, Long-run = {lr_mult:.4f}")
+                lines.append(
+                    f"  {var}: Cumulative = {cum_eff:.4f}, Long-run = {lr_mult:.4f}"
+                )
             lines.append("")
 
         if result.cov_type == "HAC":
             lines.append("Note: Standard errors are HAC (Newey-West) robust.")
         elif result.cov_type.startswith("HC"):
-            lines.append(f"Note: Standard errors are {result.cov_type} heteroskedasticity-robust.")
+            lines.append(
+                f"Note: Standard errors are {result.cov_type} heteroskedasticity-robust."
+            )
 
         if diagnostics and result._exog is not None:
             try:

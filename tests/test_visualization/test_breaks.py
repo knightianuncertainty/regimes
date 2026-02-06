@@ -7,7 +7,6 @@ from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 import regimes as rg
@@ -16,7 +15,6 @@ from regimes.visualization.breaks import (
     plot_breaks,
     plot_regime_means,
 )
-
 
 # Use non-interactive backend for testing
 matplotlib.use("Agg")
@@ -302,7 +300,9 @@ class TestPlotBreakConfidence:
         """Test that function returns Figure and Axes."""
         y, break_point = data_with_mean_shift
         ci = [(break_point - 10, break_point + 10)]
-        fig, ax = plot_break_confidence(y, breaks=[break_point], confidence_intervals=ci)
+        fig, ax = plot_break_confidence(
+            y, breaks=[break_point], confidence_intervals=ci
+        )
 
         assert fig is not None
         assert ax is not None

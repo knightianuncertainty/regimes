@@ -282,10 +282,18 @@ def plot_scaled_residuals(
         # Plot +/- 2 reference bands
         if show_bands:
             ax.axhline(
-                y=2, color=band_color, linestyle=band_linestyle, alpha=band_alpha, linewidth=1.0
+                y=2,
+                color=band_color,
+                linestyle=band_linestyle,
+                alpha=band_alpha,
+                linewidth=1.0,
             )
             ax.axhline(
-                y=-2, color=band_color, linestyle=band_linestyle, alpha=band_alpha, linewidth=1.0
+                y=-2,
+                color=band_color,
+                linestyle=band_linestyle,
+                alpha=band_alpha,
+                linewidth=1.0,
             )
 
         # Labels and title
@@ -383,12 +391,25 @@ def plot_residual_distribution(
             fig = ax.get_figure()  # type: ignore[union-attr]
 
         # Plot histogram
-        ax.hist(scaled_resid, bins=bins, density=True, color=hist_color, alpha=hist_alpha, edgecolor="white")
+        ax.hist(
+            scaled_resid,
+            bins=bins,
+            density=True,
+            color=hist_color,
+            alpha=hist_alpha,
+            edgecolor="white",
+        )
 
         # Overlay standard normal
         if show_normal:
             x = np.linspace(scaled_resid.min() - 0.5, scaled_resid.max() + 0.5, 200)
-            ax.plot(x, stats.norm.pdf(x), color=normal_color, linewidth=normal_linewidth, label="N(0,1)")
+            ax.plot(
+                x,
+                stats.norm.pdf(x),
+                color=normal_color,
+                linewidth=normal_linewidth,
+                label="N(0,1)",
+            )
             ax.legend(loc="best")
 
         # Labels and title
@@ -492,9 +513,7 @@ def plot_residual_acf(
         ax_acf.axhline(y=0, color=REGIMES_COLORS["near_black"], linewidth=0.5)
         ax_acf.axhline(y=ci_bound, color=ci_color, linestyle="--", alpha=0.8)
         ax_acf.axhline(y=-ci_bound, color=ci_color, linestyle="--", alpha=0.8)
-        ax_acf.fill_between(
-            lags, -ci_bound, ci_bound, color=ci_color, alpha=ci_alpha
-        )
+        ax_acf.fill_between(lags, -ci_bound, ci_bound, color=ci_color, alpha=ci_alpha)
         ax_acf.set_xlabel("Lag")
         ax_acf.set_ylabel("ACF")
         ax_acf.set_title("Autocorrelation Function")
@@ -506,9 +525,7 @@ def plot_residual_acf(
         ax_pacf.axhline(y=0, color=REGIMES_COLORS["near_black"], linewidth=0.5)
         ax_pacf.axhline(y=ci_bound, color=ci_color, linestyle="--", alpha=0.8)
         ax_pacf.axhline(y=-ci_bound, color=ci_color, linestyle="--", alpha=0.8)
-        ax_pacf.fill_between(
-            lags, -ci_bound, ci_bound, color=ci_color, alpha=ci_alpha
-        )
+        ax_pacf.fill_between(lags, -ci_bound, ci_bound, color=ci_color, alpha=ci_alpha)
         ax_pacf.set_xlabel("Lag")
         ax_pacf.set_ylabel("PACF")
         ax_pacf.set_title("Partial Autocorrelation Function")
@@ -627,27 +644,65 @@ def plot_diagnostics(
         scaled_resid = resid / sigma
 
         # Panel 1: Actual vs Fitted
-        ax_actual_fitted.plot(time_index, actual, color=actual_color, linewidth=1.5, alpha=0.7, label="Actual")
-        ax_actual_fitted.plot(time_index, fitted, color=primary_color, linewidth=2.0, alpha=0.9, label="Fitted")
+        ax_actual_fitted.plot(
+            time_index,
+            actual,
+            color=actual_color,
+            linewidth=1.5,
+            alpha=0.7,
+            label="Actual",
+        )
+        ax_actual_fitted.plot(
+            time_index,
+            fitted,
+            color=primary_color,
+            linewidth=2.0,
+            alpha=0.9,
+            label="Fitted",
+        )
         ax_actual_fitted.set_xlabel("Observation")
         ax_actual_fitted.set_ylabel("Value")
         ax_actual_fitted.set_title("Actual vs Fitted")
         ax_actual_fitted.legend(loc="best")
 
         # Panel 2: Residual Distribution
-        ax_distribution.hist(scaled_resid, bins="auto", density=True, color=primary_color, alpha=0.7, edgecolor="white")
+        ax_distribution.hist(
+            scaled_resid,
+            bins="auto",
+            density=True,
+            color=primary_color,
+            alpha=0.7,
+            edgecolor="white",
+        )
         x_norm = np.linspace(scaled_resid.min() - 0.5, scaled_resid.max() + 0.5, 200)
-        ax_distribution.plot(x_norm, stats.norm.pdf(x_norm), color=secondary_color, linewidth=2.0, label="N(0,1)")
+        ax_distribution.plot(
+            x_norm,
+            stats.norm.pdf(x_norm),
+            color=secondary_color,
+            linewidth=2.0,
+            label="N(0,1)",
+        )
         ax_distribution.set_xlabel("Scaled Residual")
         ax_distribution.set_ylabel("Density")
         ax_distribution.set_title("Residual Distribution")
         ax_distribution.legend(loc="best")
 
         # Panel 3: Scaled Residuals
-        ax_scaled_resid.vlines(time_index, ymin=0, ymax=scaled_resid, colors=primary_color, linewidth=0.8, alpha=0.8)
+        ax_scaled_resid.vlines(
+            time_index,
+            ymin=0,
+            ymax=scaled_resid,
+            colors=primary_color,
+            linewidth=0.8,
+            alpha=0.8,
+        )
         ax_scaled_resid.axhline(y=0, color=near_black, linewidth=0.5)
-        ax_scaled_resid.axhline(y=2, color=secondary_color, linestyle="--", alpha=0.3, linewidth=1.0)
-        ax_scaled_resid.axhline(y=-2, color=secondary_color, linestyle="--", alpha=0.3, linewidth=1.0)
+        ax_scaled_resid.axhline(
+            y=2, color=secondary_color, linestyle="--", alpha=0.3, linewidth=1.0
+        )
+        ax_scaled_resid.axhline(
+            y=-2, color=secondary_color, linestyle="--", alpha=0.3, linewidth=1.0
+        )
         ax_scaled_resid.set_xlabel("Observation")
         ax_scaled_resid.set_ylabel("Scaled Residual")
         ax_scaled_resid.set_title("Scaled Residuals")
@@ -687,7 +742,9 @@ def plot_diagnostics(
         fig.suptitle(f"{model_name} Diagnostic Plots", fontsize=12, fontweight="bold")
 
     # Collect axes into array for return
-    axes = np.array([[ax_actual_fitted, ax_distribution], [ax_scaled_resid, None]], dtype=object)
+    axes = np.array(
+        [[ax_actual_fitted, ax_distribution], [ax_scaled_resid, None]], dtype=object
+    )
     # Store ACF/PACF axes in a nested way
     axes[1, 1] = np.array([ax_acf, ax_pacf])
 

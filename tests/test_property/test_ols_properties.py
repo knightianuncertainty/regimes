@@ -36,7 +36,11 @@ class TestOLSResidualProperties:
 
         # Residuals should sum to approximately zero (relative to scale)
         # Use a tolerance scaled by the magnitude of residuals
-        resid_scale = np.std(results.resid) * len(results.resid) if np.std(results.resid) > 0 else 1.0
+        resid_scale = (
+            np.std(results.resid) * len(results.resid)
+            if np.std(results.resid) > 0
+            else 1.0
+        )
         relative_sum = abs(np.sum(results.resid)) / resid_scale
 
         assert relative_sum < 1e-6, (
@@ -120,7 +124,7 @@ class TestOLSRSquaredProperties:
         y_mean = np.mean(y)
         tss = np.sum((y - y_mean) ** 2)
         ess = np.sum((results.fittedvalues - y_mean) ** 2)
-        rss = np.sum(results.resid ** 2)
+        rss = np.sum(results.resid**2)
 
         # Skip test if TSS is near zero (degenerate case)
         if tss < 1e-10:

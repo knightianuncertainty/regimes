@@ -6,7 +6,7 @@ OLS regressions with rolling (fixed) or recursive (expanding) windows.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,11 +21,10 @@ from regimes.rolling.base import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
     from numpy.typing import ArrayLike, NDArray
-
-    import pandas as pd
 
     from regimes.models.ols import OLS
 
@@ -124,7 +123,9 @@ class RollingOLSResults(RollingResultsBase):
                     f"{np.max(valid_params):>12.4f}"
                 )
             else:
-                lines.append(f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}")
+                lines.append(
+                    f"{name:>15} {'N/A':>12} {'N/A':>12} {'N/A':>12} {'N/A':>12}"
+                )
 
         lines.append("=" * 70)
         return "\n".join(lines)
@@ -193,7 +194,7 @@ class RollingOLS(RollingEstimatorBase):
         )
 
     @classmethod
-    def from_model(cls, model: "OLS", window: int) -> "RollingOLS":
+    def from_model(cls, model: OLS, window: int) -> RollingOLS:
         """Create RollingOLS estimator from an existing OLS model.
 
         Parameters
@@ -352,7 +353,7 @@ class RecursiveOLS(RollingEstimatorBase):
         )
 
     @classmethod
-    def from_model(cls, model: "OLS", min_nobs: int | None = None) -> "RecursiveOLS":
+    def from_model(cls, model: OLS, min_nobs: int | None = None) -> RecursiveOLS:
         """Create RecursiveOLS estimator from an existing OLS model.
 
         Parameters

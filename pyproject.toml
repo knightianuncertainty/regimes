@@ -89,6 +89,7 @@ packages = ["src/regimes"]
 target-version = "py310"
 line-length = 88
 src = ["src", "tests"]
+exclude = ["src/regimes/_version.py"]
 
 [tool.ruff.lint]
 select = [
@@ -113,11 +114,16 @@ ignore = [
     "C901",   # too complex
     "ARG001", # unused function argument (common in base classes)
     "ARG002", # unused method argument
+    "RUF005", # consider iterable unpacking instead of concatenation
+    "SIM108", # use ternary operator (readability judgment call)
+    "C414",   # unnecessary list() call within sorted()
+    "RUF043", # ambiguous implicit concatenation in collection
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["ARG", "PLR2004"]
+"tests/**/*" = ["ARG", "PLR2004", "RUF059", "NPY002", "TC002", "B905", "B007"]
 "__init__.py" = ["F401"]
+"src/regimes/tests/bai_perron.py" = ["RUF002"]  # deliberate mathematical Unicode (α, λ, σ, δ)
 
 [tool.ruff.lint.isort]
 known-first-party = ["regimes"]
@@ -138,7 +144,7 @@ warn_no_return = true
 no_implicit_reexport = true
 strict_equality = true
 show_error_codes = true
-plugins = ["numpy.typing.mypy_plugin"]
+# plugins = ["numpy.typing.mypy_plugin"]  # deprecated in NumPy 2.3, removed
 
 [[tool.mypy.overrides]]
 module = [

@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 import regimes as rg
 
-
 # =============================================================================
 # Basic RollingADL Tests
 # =============================================================================
@@ -376,7 +375,13 @@ class TestRollingADLEdgeCases:
         X = np.column_stack([x1, x2])
         y = np.zeros(n)
         for t in range(2, n):
-            y[t] = 0.5 * y[t - 1] + 0.3 * x1[t] + 0.15 * x1[t - 1] + 0.2 * x2[t] + rng.standard_normal()
+            y[t] = (
+                0.5 * y[t - 1]
+                + 0.3 * x1[t]
+                + 0.15 * x1[t - 1]
+                + 0.2 * x2[t]
+                + rng.standard_normal()
+            )
 
         # Dict-style: x0 has lags 0,1; x1 has only lag 0
         rolling = rg.RollingADL(y, X, lags=1, exog_lags={0: 1, 1: 0}, window=40)
@@ -550,7 +555,9 @@ class TestRollingADLCovTypes:
     ) -> None:
         """Test nonrobust covariance."""
         y, x = adl_data
-        results = rg.RollingADL(y, x, lags=1, exog_lags=1, window=40).fit(cov_type="nonrobust")
+        results = rg.RollingADL(y, x, lags=1, exog_lags=1, window=40).fit(
+            cov_type="nonrobust"
+        )
         assert results.cov_type == "nonrobust"
 
     def test_rolling_adl_hc0(
@@ -559,7 +566,9 @@ class TestRollingADLCovTypes:
     ) -> None:
         """Test HC0 covariance."""
         y, x = adl_data
-        results = rg.RollingADL(y, x, lags=1, exog_lags=1, window=40).fit(cov_type="HC0")
+        results = rg.RollingADL(y, x, lags=1, exog_lags=1, window=40).fit(
+            cov_type="HC0"
+        )
         assert results.cov_type == "HC0"
 
     def test_recursive_adl_nonrobust(
@@ -568,7 +577,9 @@ class TestRollingADLCovTypes:
     ) -> None:
         """Test nonrobust covariance for recursive."""
         y, x = adl_data
-        results = rg.RecursiveADL(y, x, lags=1, exog_lags=1, min_nobs=30).fit(cov_type="nonrobust")
+        results = rg.RecursiveADL(y, x, lags=1, exog_lags=1, min_nobs=30).fit(
+            cov_type="nonrobust"
+        )
         assert results.cov_type == "nonrobust"
 
     def test_recursive_adl_hc0(
@@ -577,7 +588,9 @@ class TestRollingADLCovTypes:
     ) -> None:
         """Test HC0 covariance for recursive."""
         y, x = adl_data
-        results = rg.RecursiveADL(y, x, lags=1, exog_lags=1, min_nobs=30).fit(cov_type="HC0")
+        results = rg.RecursiveADL(y, x, lags=1, exog_lags=1, min_nobs=30).fit(
+            cov_type="HC0"
+        )
         assert results.cov_type == "HC0"
 
 
@@ -786,7 +799,9 @@ class TestRollingADLWorkflow:
 
     def test_adl_with_break_detection_workflow(
         self,
-        adl_data_with_break: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], int],
+        adl_data_with_break: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]], int
+        ],
     ) -> None:
         """Test ADL with both rolling estimation and break detection."""
         y, x, break_point = adl_data_with_break

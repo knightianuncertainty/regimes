@@ -10,16 +10,16 @@ from regimes.models.base import (
 from regimes.models.ols import OLS, OLSResults, summary_by_regime
 
 __all__ = [
+    "ADL",
+    "AR",
+    "OLS",
+    "ADLResults",
+    "ARResults",
+    "CovType",
+    "OLSResults",
     "RegimesModelBase",
     "TimeSeriesModelBase",
-    "CovType",
-    "OLS",
-    "OLSResults",
-    "summary_by_regime",
-    "AR",
-    "ARResults",
-    "ar_summary_by_regime",
-    "ADL",
-    "ADLResults",
     "adl_summary_by_regime",
+    "ar_summary_by_regime",
+    "summary_by_regime",
 ]

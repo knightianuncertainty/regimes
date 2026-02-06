@@ -7,7 +7,7 @@ parameter estimates as step functions over the sample period.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from regimes.tests.bai_perron import BaiPerronResults, BaiPerronTest
 
     # Type alias for result objects this function can accept
-    ResultType = Union[OLSResults, ARResults, BaiPerronTest, BaiPerronResults]
+    ResultType = OLSResults | ARResults | BaiPerronTest | BaiPerronResults
 
 
 def _normalize_results_input(
@@ -217,7 +217,9 @@ def _extract_param_data(
     param_names = getattr(result, "param_names", None)
     params = getattr(result, "params", None)
     bse = getattr(result, "bse", None)
-    df_resid = getattr(result, "df_resid", nobs - len(params) if params is not None else nobs)
+    df_resid = getattr(
+        result, "df_resid", nobs - len(params) if params is not None else nobs
+    )
 
     if params is None or param_names is None:
         return {}
