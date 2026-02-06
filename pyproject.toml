@@ -144,7 +144,7 @@ warn_no_return = true
 no_implicit_reexport = true
 strict_equality = true
 show_error_codes = true
-# plugins = ["numpy.typing.mypy_plugin"]  # deprecated in NumPy 2.3, removed
+
 
 [[tool.mypy.overrides]]
 module = [

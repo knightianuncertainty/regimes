@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 2: v0.2.0 - Estimation Tools** Complete
+**Phase 2: v0.2.0 - Estimation Tools** Complete — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -89,7 +89,7 @@ These features are deferred and may be added in future versions based on need:
 | Version | Status | Description |
 |---------|--------|-------------|
 | 0.1.0 | Complete | Foundation: package structure, base classes, OLS/AR models, Bai-Perron test, basic visualization, CI/CD |
-| 0.2.0 | Complete | Estimation tools: rolling/recursive estimation, ADL model, diagnostic plots, style system, 88% test coverage |
+| 0.2.0 | Complete | Estimation tools: rolling/recursive estimation, ADL model, diagnostic plots, style system, 88% test coverage. GitHub repo live. |
 | 0.3.0 | Planned | Advanced models: VAR, cointegration, full documentation |
 | 0.4.0 | Planned | Additional tests: Chow, CUSUM, Andrews-Ploberger, PyPI release |
 | 0.5.0+ | Future | Extensions: TVP, Markov-switching, panel data, bootstrap |

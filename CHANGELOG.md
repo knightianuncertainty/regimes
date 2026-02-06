@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub repository**: Published at [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+  - CI pipeline: ruff lint/format, mypy (advisory), tests on Python 3.10/3.11/3.12, package build
+  - Git tag `v0.2.0` for hatch-vcs versioning
+
+### Changed
+
+- Fixed all ruff lint errors and applied ruff format across codebase
+- Removed non-existent `types-matplotlib` from dev dependencies
+- Removed deprecated `numpy.typing.mypy_plugin` from mypy config
+- Excluded auto-generated `_version.py` from ruff checks
+
 ## [0.2.0] - 2025-02-05
 
 ### Added
@@ -80,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Test coverage increased from 17.88% to 88% (540 tests total)
 
-## [0.1.0] - TBD
+## [0.1.0] - 2025-02-03
 
 ### Added
 
