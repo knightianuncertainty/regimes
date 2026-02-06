@@ -48,7 +48,6 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
     "pandas-stubs",
-    "types-matplotlib",
 ]
 test = [
     "pytest>=7.0",
