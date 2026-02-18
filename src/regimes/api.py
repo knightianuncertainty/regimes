@@ -51,7 +51,7 @@ from regimes.rolling import (
 )
 
 # Tests
-from regimes.tests import BaiPerronResults, BaiPerronTest
+from regimes.tests import BaiPerronResults, BaiPerronTest, ChowTest, ChowTestResults
 
 # Visualization
 from regimes.visualization import (
@@ -77,6 +77,8 @@ __all__ = [
     "BaiPerronResults",
     # Tests
     "BaiPerronTest",
+    "ChowTest",
+    "ChowTestResults",
     "BreakResultsBase",
     "CovType",
     # Diagnostics

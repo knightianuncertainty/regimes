@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GitHub repository**: Published at [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
   - CI pipeline: ruff lint/format, mypy (advisory), tests on Python 3.10/3.11/3.12, package build
   - Git tag `v0.2.0` for hatch-vcs versioning
+- **Chow test for structural breaks at known break points**
+  - `ChowTest` class with standard and predictive variants
+  - `ChowTestResults` dataclass with F-statistics, p-values, degrees of freedom
+  - Auto-detection of predictive variant when sub-samples are too small
+  - `ChowTest.from_model()` class method for OLS, AR, and ADL models
+  - `.chow_test()` convenience method on OLS, AR, and ADL models
+  - Partial coefficient testing via `exog` vs `exog_break` split
+  - 48 new tests across 11 test classes
 
 ### Changed
 

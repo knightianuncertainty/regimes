@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.bai_perron import BaiPerronResults
+    from regimes.tests.chow import ChowTestResults
 
 
 @dataclass(kw_only=True)
@@ -1083,6 +1084,45 @@ class ADL(RegimesModelBase):
 
         test = BaiPerronTest.from_model(self, break_vars=break_vars)
         return test.fit(max_breaks=max_breaks, trimming=trimming, selection=selection)
+
+    def chow_test(
+        self,
+        break_points: int | Sequence[int],
+        break_vars: Literal["all", "const"] = "all",
+        significance: float = 0.05,
+    ) -> ChowTestResults:
+        """Test for structural breaks at known break points using the Chow test.
+
+        Convenience method that creates a ChowTest from this ADL model
+        and runs it. The test uses the effective sample (after dropping
+        initial observations for lags).
+
+        Parameters
+        ----------
+        break_points : int | Sequence[int]
+            One or more break point indices to test (in effective sample
+            coordinates, after lag trimming).
+        break_vars : "all" | "const"
+            Which variables can have breaks:
+            - "all": All regressors can break (default)
+            - "const": Only intercept can break (mean-shift model)
+        significance : float
+            Significance level for rejection decisions. Default is 0.05.
+
+        Returns
+        -------
+        ChowTestResults
+            Test results with F-statistics and p-values.
+
+        See Also
+        --------
+        ChowTest : The underlying test class.
+        bai_perron : Test for breaks at unknown break points.
+        """
+        from regimes.tests.chow import ChowTest
+
+        test = ChowTest.from_model(self, break_vars=break_vars)
+        return test.fit(break_points=break_points, significance=significance)
 
     def rolling(self, window: int) -> RollingADL:
         """Create a rolling ADL estimator from this model.

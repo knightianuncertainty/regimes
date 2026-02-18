@@ -10,6 +10,7 @@ A Python package for structural break detection and estimation in time-series ec
 ## Features
 
 - **Structural Break Tests**: Bai-Perron test for multiple structural breaks with Sup-F, UDmax, and sequential testing procedures
+- **Chow Test**: Test for structural breaks at known break points with standard and predictive variants
 - **Time-Series Models**: AR, ADL, OLS with HAC standard errors and known break support
 - **ADL Models**: Autoregressive Distributed Lag models with flexible lag specification and distributed lag diagnostics
 - **Rolling & Recursive Estimation**: Track parameter evolution with fixed or expanding windows
@@ -92,6 +93,30 @@ You can also use the explicit class method approach:
 ```python
 # Equivalent to model.bai_perron()
 bp_results = rg.BaiPerronTest.from_model(model).fit()
+```
+
+### Testing Known Break Points (Chow Test)
+
+```python
+import numpy as np
+import regimes as rg
+
+# Simulate data with a mean shift at t=100
+np.random.seed(42)
+y = np.concatenate([
+    np.random.randn(100),      # regime 1: mean = 0
+    np.random.randn(100) + 2,  # regime 2: mean = 2
+])
+
+# Test for a break at the hypothesized date
+test = rg.ChowTest(y)
+results = test.fit(break_points=100)
+print(results.summary())
+
+# Or use the convenience method on a model
+model = rg.OLS(y, np.ones((200, 1)), has_constant=False)
+results = model.chow_test(break_points=[80, 100])
+print(results.summary())
 ```
 
 ### OLS with HAC Standard Errors
@@ -300,6 +325,7 @@ fig, axes = rg.plot_residual_acf(results, nlags=15)
 
 All models (`OLS`, `AR`, `ADL`) have:
 - `.bai_perron()` method for integrated break detection
+- `.chow_test(break_points)` method for testing breaks at known dates
 - `.rolling(window)` method for rolling window estimation
 - `.recursive(min_nobs)` method for recursive (expanding window) estimation
 
@@ -327,10 +353,13 @@ All models (`OLS`, `AR`, `ADL`) have:
 | Class | Description |
 |-------|-------------|
 | `BaiPerronTest` | Bai-Perron test for multiple structural breaks |
+| `ChowTest` | Chow test for breaks at known break points (standard and predictive) |
 
 **Key methods:**
 - `BaiPerronTest.from_model(model)` - Create test from OLS or AR model
 - `BaiPerronResults.to_ols()` - Convert results to OLS with detected breaks
+- `ChowTest.from_model(model)` - Create test from OLS, AR, or ADL model
+- `.chow_test(break_points)` - Convenience method on all model classes
 
 ### Visualization
 
@@ -371,7 +400,7 @@ All regression models support multiple covariance estimators:
 
 ## Testing
 
-The package includes a comprehensive test suite with 88% coverage (540 tests):
+The package includes a comprehensive test suite with 88% coverage (588 tests):
 
 ```bash
 # Run all tests
@@ -399,6 +428,7 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 
 - Bai, J., & Perron, P. (1998). Estimating and testing linear models with multiple structural changes. *Econometrica*, 66(1), 47-78.
 - Bai, J., & Perron, P. (2003). Computation and analysis of multiple structural change models. *Journal of Applied Econometrics*, 18(1), 1-22.
+- Chow, G. C. (1960). Tests of equality between sets of coefficients in two linear regressions. *Econometrica*, 28(3), 591-605.
 
 ## License
 

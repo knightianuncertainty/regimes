@@ -51,9 +51,10 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 
 ### Phase 3: v0.3.0 - Structural Break Tests & Markov-Switching
 
-- [ ] Chow test
+- [x] Chow test
 - [ ] CUSUM / CUSUM-SQ tests
 - [ ] Andrews-Ploberger test
+- [ ] Unit root tests (ADF, KPSS, Phillips-Perron)
 - [ ] Markov-switching models
 - [ ] *(Tentative)* Time-varying parameter models
 - [ ] Target: 85%+ test coverage

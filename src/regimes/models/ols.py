@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from regimes.rolling.ols import RecursiveOLS, RollingOLS
     from regimes.tests.bai_perron import BaiPerronResults
+    from regimes.tests.chow import ChowTestResults
 
 
 @dataclass(kw_only=True)
@@ -749,6 +750,57 @@ class OLS(RegimesModelBase):
 
         test = BaiPerronTest.from_model(self, break_vars=break_vars)
         return test.fit(max_breaks=max_breaks, trimming=trimming, selection=selection)
+
+    def chow_test(
+        self,
+        break_points: int | Sequence[int],
+        break_vars: Literal["all", "const"] = "all",
+        significance: float = 0.05,
+    ) -> ChowTestResults:
+        """Test for structural breaks at known break points using the Chow test.
+
+        Convenience method that creates a ChowTest from this model and
+        runs it. Each break point is tested individually.
+
+        Parameters
+        ----------
+        break_points : int | Sequence[int]
+            One or more break point indices to test.
+        break_vars : "all" | "const"
+            Which variables can have breaks:
+            - "all": All regressors can break (default)
+            - "const": Only intercept can break (mean-shift model)
+        significance : float
+            Significance level for rejection decisions. Default is 0.05.
+
+        Returns
+        -------
+        ChowTestResults
+            Test results with F-statistics and p-values.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from regimes import OLS
+        >>> np.random.seed(42)
+        >>> n = 200
+        >>> X = np.column_stack([np.ones(n), np.random.randn(n)])
+        >>> y = np.zeros(n)
+        >>> y[:100] = 1 + 0.5 * X[:100, 1] + np.random.randn(100) * 0.5
+        >>> y[100:] = 3 + 1.5 * X[100:, 1] + np.random.randn(100) * 0.5
+        >>> model = OLS(y, X, has_constant=False)
+        >>> results = model.chow_test(break_points=100)
+        >>> print(results.summary())
+
+        See Also
+        --------
+        ChowTest : The underlying test class.
+        bai_perron : Test for breaks at unknown break points.
+        """
+        from regimes.tests.chow import ChowTest
+
+        test = ChowTest.from_model(self, break_vars=break_vars)
+        return test.fit(break_points=break_points, significance=significance)
 
     def rolling(self, window: int) -> RollingOLS:
         """Create a rolling OLS estimator from this model.
