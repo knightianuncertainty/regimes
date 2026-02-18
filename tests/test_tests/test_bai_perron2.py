@@ -237,3 +237,120 @@ class TestBaiPerronCorrectness:
         )
         with pytest.raises(ValueError, match="Cannot convert to OLS"):
             results.to_ols()
+
+    def test_selection_sequential(self) -> None:
+        """
+        Verify that selection='sequential' works for partial structural
+        change and returns a valid result.
+        """
+        np.random.seed(42)
+        n = 200
+
+        x = np.random.randn(n, 1)
+        z = np.ones((n, 1))
+
+        y = 1.0 * x.flatten()
+        y[:100] += 1.0
+        y[100:] += 5.0
+        y += np.random.randn(n) * 0.1
+
+        bp = BaiPerronTest(y, exog=x, exog_break=z)
+        results = bp.fit(max_breaks=3, selection="sequential")
+
+        assert results.selection_method == "sequential"
+        assert results.n_breaks >= 1, (
+            "Sequential selection should detect at least 1 break"
+        )
+        # Sequential F-stats should be populated
+        assert len(results.seqf_stats) > 0
+
+    def test_selection_lwz(self) -> None:
+        """
+        Verify that selection='lwz' works and selects a valid number
+        of breaks.
+        """
+        np.random.seed(42)
+        n = 200
+
+        y = np.zeros(n)
+        y[:100] = 1.0 + np.random.randn(100) * 0.1
+        y[100:] = 5.0 + np.random.randn(100) * 0.1
+
+        bp = BaiPerronTest(y)
+        results = bp.fit(max_breaks=3, selection="lwz")
+
+        assert results.selection_method == "lwz"
+        assert results.n_breaks >= 0
+        assert len(results.lwz) > 0
+        # LWZ values should be finite
+        for m, val in results.lwz.items():
+            assert np.isfinite(val), f"LWZ for m={m} is not finite"
+
+    def test_from_model_ar(self) -> None:
+        """
+        Verify that from_model works correctly with an AR model.
+        """
+        from regimes import AR
+
+        np.random.seed(42)
+        n = 200
+        y = np.zeros(n)
+        for t in range(1, n):
+            y[t] = 0.7 * y[t - 1] + np.random.randn()
+
+        model = AR(y, lags=1)
+        bp = BaiPerronTest.from_model(model, break_vars="all")
+        results = bp.fit(max_breaks=2)
+
+        assert results is not None
+        assert results.nobs > 0
+        assert 0 in results.ssr
+
+    def test_from_model_adl(self) -> None:
+        """
+        Verify that from_model works correctly with an ADL model.
+        """
+        from regimes import ADL
+
+        np.random.seed(42)
+        n = 200
+        x = np.random.randn(n)
+        y = np.zeros(n)
+        for t in range(1, n):
+            y[t] = 0.5 * y[t - 1] + 0.3 * x[t] + np.random.randn()
+
+        model = ADL(y, x, lags=1, exog_lags=1)
+        bp = BaiPerronTest.from_model(model, break_vars="all")
+        results = bp.fit(max_breaks=2)
+
+        assert results is not None
+        assert results.nobs > 0
+        assert 0 in results.ssr
+
+    def test_convergence_warning_not_raised_on_easy_problem(self) -> None:
+        """
+        Verify that no convergence warning is emitted for a simple
+        well-separated DGP.
+        """
+        import warnings
+
+        np.random.seed(42)
+        n = 100
+        x = np.random.randn(n, 1)
+        z = np.ones((n, 1))
+
+        y = 2.0 * x.flatten()
+        y[:50] += 1.0
+        y[50:] += 10.0
+        y += np.random.randn(n) * 0.05
+
+        bp = BaiPerronTest(y, exog=x, exog_break=z)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            bp.fit(max_breaks=1)
+            convergence_warnings = [
+                x for x in w if "did not converge" in str(x.message)
+            ]
+            assert len(convergence_warnings) == 0, (
+                "Convergence warning should not fire on well-separated data"
+            )

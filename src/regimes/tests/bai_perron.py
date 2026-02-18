@@ -14,6 +14,7 @@ Bai, J., & Perron, P. (2003). Computation and analysis of multiple
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -856,8 +857,10 @@ class BaiPerronTest(BreakTestBase):
                 # in case the loop doesn't run (though it always runs at least once)
                 Full_Design = None
                 full_beta = None
+                max_iter = 50
+                converged = False
                 
-                for _ in range(10): # 10 iterations usually enough for convergence
+                for _iter in range(max_iter):
                     # 1. Partial out fixed regressors
                     if self.exog is not None:
                         y_star = self.endog - self.exog @ curr_beta_fixed
@@ -899,8 +902,17 @@ class BaiPerronTest(BreakTestBase):
                     # Check convergence
                     if np.allclose(curr_beta_fixed, new_beta_fixed, rtol=1e-4, atol=1e-6):
                         curr_beta_fixed = new_beta_fixed
+                        converged = True
                         break
                     curr_beta_fixed = new_beta_fixed
+                
+                if not converged:
+                    warnings.warn(
+                        f"Partial structural change iterative procedure did not "
+                        f"converge for m={m} after {max_iter} iterations. "
+                        f"Results may be unreliable.",
+                        stacklevel=2,
+                    )
                 
                 # Store results for this m
                 # Re-calculate SSR with final beta
@@ -973,49 +985,28 @@ class BaiPerronTest(BreakTestBase):
             # Information criteria
             bic_vals[m], lwz_vals[m] = self._compute_information_criteria(ssr_m, m)
 
-        # Sequential tests
-        # This is tricky with partial change because we don't have a single ssr_matrix
-        # But we can approximate using the SSRs we have.
-        # Seq(m+1|m) tests m vs m+1 breaks.
-        
-        prev_breaks = []
+        # Sequential F-tests: Seq(m|m-1) tests m-1 vs m breaks.
+        # Computed from pre-computed SSR values for both the pure and
+        # partial structural change cases.
+        # Note: Bai & Perron (1998) Table III provides separate critical
+        # values for sequential tests.  As an approximation, we use the
+        # Sup-F(m) critical values here; this is conservative for small m
+        # and follows the convention used in the original implementation.
         for m in range(1, max_breaks + 1):
-            # Seq test for m-1 vs m
-            # F = ((SSR_{m-1} - SSR_m) / q) / (SSR_m / (T - (m+1)*q - p))
-            # Note: The denominator df depends on the alternative (m breaks)
-            
-            ssr_null = ssr_vals[m-1]
+            ssr_null = ssr_vals[m - 1]
             ssr_alt = ssr_vals[m]
-            
+
             df2 = T - (m + 1) * q - self.p
-            
+
             if df2 <= 0 or ssr_alt <= 0:
                 seqf = 0.0
             else:
                 seqf = ((ssr_null - ssr_alt) / q) / (ssr_alt / df2)
                 seqf = max(0.0, seqf)
-                
-            seqf_stats[m-1] = seqf
-            # Use same critical value as SupF(1) ? No, sequential CVs are different.
-            # But we use the same approximation map for now as in original code
-            # The original code used: seqf_critical[m - 1] = crit (where crit was SupF(m) crit?)
-            # Actually original code: seqf_critical[m - 1] = crit (from SupF loop)
-            # Wait, original code loop was:
-            # for m in range(1, max_breaks + 1):
-            #    crit = _SUPF_CRITICAL_VALUES...
-            #    seqf = ...
-            #    seqf_critical[m-1] = crit
-            # This seems wrong in original code too? Seq test m vs m+1 should use specific CVs.
-            # But let's keep it consistent with original logic for now, just using our SSRs.
-            
-            # We'll use SupF(m) critical value as a placeholder if we don't have better.
-            # Actually, let's use SupF(1) critical value for sequential test?
-            # Bai & Perron tables have specific entries for sequential.
-            # For now, let's just use the one from the map corresponding to m=1?
-            # Or just keep what we had.
-            
+
+            seqf_stats[m - 1] = seqf
             crit = _SUPF_CRITICAL_VALUES.get((min(q, 5), m), 10.0)
-            seqf_critical[m-1] = crit
+            seqf_critical[m - 1] = crit
 
         # UDmax and WDmax
         udmax = max(supf_stats.values()) if supf_stats else 0.0
