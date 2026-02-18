@@ -51,13 +51,24 @@ from regimes.rolling import (
 )
 
 # Tests
-from regimes.tests import BaiPerronResults, BaiPerronTest, ChowTest, ChowTestResults
+from regimes.tests import (
+    BaiPerronResults,
+    BaiPerronTest,
+    CUSUMResults,
+    CUSUMSQResults,
+    CUSUMSQTest,
+    CUSUMTest,
+    ChowTest,
+    ChowTestResults,
+)
 
 # Visualization
 from regimes.visualization import (
     plot_actual_fitted,
     plot_break_confidence,
     plot_breaks,
+    plot_cusum,
+    plot_cusum_sq,
     plot_diagnostics,
     plot_params_over_time,
     plot_regime_means,
@@ -77,6 +88,10 @@ __all__ = [
     "BaiPerronResults",
     # Tests
     "BaiPerronTest",
+    "CUSUMResults",
+    "CUSUMSQResults",
+    "CUSUMSQTest",
+    "CUSUMTest",
     "ChowTest",
     "ChowTestResults",
     "BreakResultsBase",
@@ -112,6 +127,8 @@ __all__ = [
     "plot_break_confidence",
     # Visualization
     "plot_breaks",
+    "plot_cusum",
+    "plot_cusum_sq",
     "plot_diagnostics",
     "plot_params_over_time",
     "plot_regime_means",

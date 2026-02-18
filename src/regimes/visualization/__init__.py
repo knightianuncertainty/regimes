@@ -5,6 +5,7 @@ from regimes.visualization.breaks import (
     plot_breaks,
     plot_regime_means,
 )
+from regimes.visualization.cusum import plot_cusum, plot_cusum_sq
 from regimes.visualization.diagnostics import (
     plot_actual_fitted,
     plot_diagnostics,
@@ -38,6 +39,8 @@ __all__ = [
     "plot_actual_fitted",
     "plot_break_confidence",
     "plot_breaks",
+    "plot_cusum",
+    "plot_cusum_sq",
     "plot_diagnostics",
     "plot_params_over_time",
     "plot_regime_means",

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.bai_perron import BaiPerronResults
     from regimes.tests.chow import ChowTestResults
+    from regimes.tests.cusum import CUSUMResults, CUSUMSQResults
 
 
 @dataclass(kw_only=True)
@@ -1123,6 +1124,60 @@ class ADL(RegimesModelBase):
 
         test = ChowTest.from_model(self, break_vars=break_vars)
         return test.fit(break_points=break_points, significance=significance)
+
+    def cusum_test(self, significance: float = 0.05) -> CUSUMResults:
+        """Test for parameter instability using the CUSUM test.
+
+        Convenience method that creates a CUSUMTest from this ADL model
+        and runs it. The test uses the effective sample (after dropping
+        initial observations for lags).
+
+        Parameters
+        ----------
+        significance : float
+            Significance level. Must be one of 0.01, 0.05, 0.10.
+
+        Returns
+        -------
+        CUSUMResults
+            Test results with statistic path, boundaries, and decision.
+
+        See Also
+        --------
+        CUSUMTest : The underlying test class.
+        cusum_sq_test : Test for variance instability.
+        """
+        from regimes.tests.cusum import CUSUMTest
+
+        test = CUSUMTest.from_model(self)
+        return test.fit(significance=significance)
+
+    def cusum_sq_test(self, significance: float = 0.05) -> CUSUMSQResults:
+        """Test for variance instability using the CUSUM-SQ test.
+
+        Convenience method that creates a CUSUMSQTest from this ADL model
+        and runs it. The test uses the effective sample (after dropping
+        initial observations for lags).
+
+        Parameters
+        ----------
+        significance : float
+            Significance level for KS critical value. Any value in (0, 1).
+
+        Returns
+        -------
+        CUSUMSQResults
+            Test results with statistic path, boundaries, and decision.
+
+        See Also
+        --------
+        CUSUMSQTest : The underlying test class.
+        cusum_test : Test for parameter instability.
+        """
+        from regimes.tests.cusum import CUSUMSQTest
+
+        test = CUSUMSQTest.from_model(self)
+        return test.fit(significance=significance)
 
     def rolling(self, window: int) -> RollingADL:
         """Create a rolling ADL estimator from this model.
