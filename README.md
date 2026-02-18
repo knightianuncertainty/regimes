@@ -433,7 +433,3 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
