@@ -45,7 +45,7 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
   - [x] Helper functions: `add_break_dates()`, `add_confidence_band()`, `shade_regimes()`, `label_line_end()`, `add_source()`
   - [x] All 10 plotting functions updated to use centralized style
   - [x] 30 tests for style module
-- [x] Target: 80%+ test coverage (achieved: 88% with 540 tests)
+- [x] Target: 80%+ test coverage (achieved: 88% with 718 tests)
 
 ## Planned Phases
 
