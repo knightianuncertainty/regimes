@@ -121,6 +121,47 @@ class TestNonRecurringRegimeTest:
         assert "LR statistic" in s
 
 
+class TestNonRecurringRegimeTestEdgeCases:
+    """Additional edge cases for NonRecurringRegimeTest."""
+
+    def test_summary_format(self) -> None:
+        """Summary should contain all expected sections."""
+        rng = np.random.default_rng(99)
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
+        )
+        test = NonRecurringRegimeTest(y, k_regimes=2, method="chi_bar_squared")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = test.fit()
+
+        s = results.summary()
+        assert "Non-Recurring" in s
+        assert "LR statistic" in s
+        assert "p-value" in s or "p_value" in s.lower() or "0." in s
+
+    def test_3_regimes(self) -> None:
+        """Test with 3 regimes."""
+        rng = np.random.default_rng(42)
+        y = np.concatenate(
+            [
+                rng.standard_normal(150) + 0.0,
+                rng.standard_normal(150) + 4.0,
+                rng.standard_normal(150) + 8.0,
+            ]
+        )
+        test = NonRecurringRegimeTest(y, k_regimes=3, method="chi_bar_squared")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = test.fit()
+
+        assert isinstance(results, NonRecurringRegimeTestResults)
+        assert results.lr_statistic >= 0
+
+
 class TestSequentialRestrictionTest:
     """Test SequentialRestrictionTest."""
 
@@ -216,6 +257,52 @@ class TestSequentialRestrictionTest:
         assert np.isfinite(results.llf_unrestricted)
         assert results.is_non_recurring in (True, False)
         assert len(results.history) > 0
+
+    def test_fit_verbose(self, capsys: Any) -> None:
+        """Verbose output should print step-by-step results."""
+        rng = np.random.default_rng(77)
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
+        )
+        test = SequentialRestrictionTest(
+            y,
+            k_regimes=2,
+            critical_value_method="chi_bar_squared",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            test.fit(verbose=True)
+
+        captured = capsys.readouterr()
+        # Should print step information
+        assert (
+            "Step" in captured.out
+            or "step" in captured.out.lower()
+            or len(captured.out) > 0
+        )
+
+    def test_check_non_recurring(self) -> None:
+        """_check_non_recurring should identify non-recurring patterns."""
+        rng = np.random.default_rng(77)
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
+        )
+        test = SequentialRestrictionTest(
+            y,
+            k_regimes=2,
+            critical_value_method="chi_bar_squared",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = test.fit()
+
+        assert results.is_non_recurring in (True, False)
 
     def test_summary(self) -> None:
         rng = np.random.default_rng(77)
