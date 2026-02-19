@@ -47,12 +47,14 @@ def ms_results(two_regime_data: NDArray[np.floating[Any]]) -> Any:
 
 @pytest.fixture
 def ic_table() -> pd.DataFrame:
-    return pd.DataFrame({
-        "K": [1, 2, 3],
-        "AIC": [500.0, 400.0, 410.0],
-        "BIC": [505.0, 415.0, 435.0],
-        "HQIC": [502.0, 405.0, 420.0],
-    })
+    return pd.DataFrame(
+        {
+            "K": [1, 2, 3],
+            "AIC": [500.0, 400.0, 410.0],
+            "BIC": [505.0, 415.0, 435.0],
+            "HQIC": [502.0, 405.0, 420.0],
+        }
+    )
 
 
 class TestPlotSmoothedProbabilities:
@@ -99,9 +101,7 @@ class TestPlotRegimeShading:
         two_regime_data: NDArray[np.floating[Any]],
         ms_results: Any,
     ) -> None:
-        fig, ax = plot_regime_shading(
-            two_regime_data, ms_results, title="My Title"
-        )
+        fig, ax = plot_regime_shading(two_regime_data, ms_results, title="My Title")
         assert ax.get_title() == "My Title"
         plt.close(fig)
 
@@ -110,9 +110,7 @@ class TestPlotRegimeShading:
         two_regime_data: NDArray[np.floating[Any]],
         ms_results: Any,
     ) -> None:
-        fig, ax = plot_regime_shading(
-            two_regime_data, ms_results, show_legend=False
-        )
+        fig, ax = plot_regime_shading(two_regime_data, ms_results, show_legend=False)
         plt.close(fig)
 
     def test_with_existing_ax(
@@ -178,16 +176,12 @@ class TestPlotParameterTimeSeries:
             all_params.update(params.keys())
         if all_params:
             param_name = sorted(all_params)[0]
-            fig, axes = plot_parameter_time_series(
-                ms_results, param_name=param_name
-            )
+            fig, axes = plot_parameter_time_series(ms_results, param_name=param_name)
             assert fig is not None
             plt.close(fig)
 
     def test_no_regime_shading(self, ms_results: Any) -> None:
-        fig, axes = plot_parameter_time_series(
-            ms_results, show_regime_shading=False
-        )
+        fig, axes = plot_parameter_time_series(ms_results, show_regime_shading=False)
         plt.close(fig)
 
     def test_result_method(self, ms_results: Any) -> None:

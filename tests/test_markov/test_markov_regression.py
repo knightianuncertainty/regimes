@@ -6,7 +6,6 @@ import warnings
 from typing import Any
 
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.models import MarkovRegression
@@ -32,7 +31,9 @@ class TestMarkovRegressionInit:
 
     def test_with_exog(
         self,
-        two_regime_regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_regression_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, X = two_regime_regression_data
         model = MarkovRegression(y, k_regimes=2, exog=X, trend="n")
@@ -41,18 +42,14 @@ class TestMarkovRegressionInit:
     def test_switching_variance(
         self, two_regime_data: NDArray[np.floating[Any]]
     ) -> None:
-        model = MarkovRegression(
-            two_regime_data, k_regimes=2, switching_variance=True
-        )
+        model = MarkovRegression(two_regime_data, k_regimes=2, switching_variance=True)
         assert model.switching_variance is True
 
 
 class TestMarkovRegressionFit:
     """Test MarkovRegression.fit()."""
 
-    def test_basic_fit(
-        self, ms_regression_results: MarkovRegressionResults
-    ) -> None:
+    def test_basic_fit(self, ms_regression_results: MarkovRegressionResults) -> None:
         results = ms_regression_results
         assert isinstance(results, MarkovRegressionResults)
         assert isinstance(results, MarkovSwitchingResultsBase)
@@ -140,24 +137,18 @@ class TestMarkovRegressionFit:
         assert len(r.pvalues) == len(r.params)
         assert all(0 <= p <= 1 for p in r.pvalues)
 
-    def test_conf_int(
-        self, ms_regression_results: MarkovRegressionResults
-    ) -> None:
+    def test_conf_int(self, ms_regression_results: MarkovRegressionResults) -> None:
         ci = ms_regression_results.conf_int()
         assert ci.shape == (len(ms_regression_results.params), 2)
         # Lower bound should be less than upper bound
         assert all(ci[i, 0] < ci[i, 1] for i in range(ci.shape[0]))
 
-    def test_summary(
-        self, ms_regression_results: MarkovRegressionResults
-    ) -> None:
+    def test_summary(self, ms_regression_results: MarkovRegressionResults) -> None:
         s = ms_regression_results.summary()
         assert "Markov" in s
         assert "Regime" in s
 
-    def test_to_dataframe(
-        self, ms_regression_results: MarkovRegressionResults
-    ) -> None:
+    def test_to_dataframe(self, ms_regression_results: MarkovRegressionResults) -> None:
         import pandas as pd
 
         df = ms_regression_results.to_dataframe()
@@ -170,7 +161,9 @@ class TestMarkovRegressionFromModel:
 
     def test_from_ols(
         self,
-        two_regime_regression_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_regression_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         from regimes.models import OLS
 
@@ -209,10 +202,12 @@ class TestMarkovRegressionParameterRecovery:
 
     def test_recovers_mean_shift(self) -> None:
         rng = np.random.default_rng(123)
-        y = np.concatenate([
-            rng.standard_normal(150) + 0.0,
-            rng.standard_normal(150) + 5.0,
-        ])
+        y = np.concatenate(
+            [
+                rng.standard_normal(150) + 0.0,
+                rng.standard_normal(150) + 5.0,
+            ]
+        )
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

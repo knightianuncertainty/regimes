@@ -21,18 +21,14 @@ are unidentified under the null. We use bootstrap critical values for this.
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
-    import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
-    from numpy.typing import NDArray
-
-    from regimes.markov.results import MarkovSwitchingResultsBase
 
 
 @dataclass(kw_only=True)
@@ -67,15 +63,18 @@ class RegimeNumberSelectionResults:
         lines.append("=" * 65)
         lines.append(f"Method:              {self.method.upper()}")
         lines.append(f"Selected K:          {self.selected_k}")
-        lines.append(f"Models estimated:    K = {min(self.results_by_k)}"
-                     f" to {max(self.results_by_k)}")
+        lines.append(
+            f"Models estimated:    K = {min(self.results_by_k)}"
+            f" to {max(self.results_by_k)}"
+        )
         lines.append("")
 
         # IC table
         lines.append("Information Criteria:")
         lines.append("-" * 65)
-        lines.append(f"{'K':>3}  {'Log-lik':>12}  {'AIC':>12}  "
-                     f"{'BIC':>12}  {'HQIC':>12}")
+        lines.append(
+            f"{'K':>3}  {'Log-lik':>12}  {'AIC':>12}  {'BIC':>12}  {'HQIC':>12}"
+        )
         lines.append("-" * 65)
 
         for _, row in self.ic_table.iterrows():
@@ -229,13 +228,10 @@ class RegimeNumberSelection:
 
             if self.model_type == "ar":
                 model = MarkovAR(
-                    self.endog, k_regimes=k, order=self.order,
-                    **self.model_kwargs
+                    self.endog, k_regimes=k, order=self.order, **self.model_kwargs
                 )
             else:
-                model = MarkovRegression(
-                    self.endog, k_regimes=k, **self.model_kwargs
-                )
+                model = MarkovRegression(self.endog, k_regimes=k, **self.model_kwargs)
 
             results = model.fit(search_reps=5)
 
@@ -248,23 +244,23 @@ class RegimeNumberSelection:
             "n_params": len(results.params),
         }
 
-    def _build_ic_table(
-        self, fitted: dict[int, dict[str, Any]]
-    ) -> Any:
+    def _build_ic_table(self, fitted: dict[int, dict[str, Any]]) -> Any:
         """Build the IC comparison table."""
         import pandas as pd
 
         rows = []
         for k in sorted(fitted.keys()):
             info = fitted[k]
-            rows.append({
-                "K": k,
-                "llf": info["llf"],
-                "AIC": info["aic"],
-                "BIC": info["bic"],
-                "HQIC": info["hqic"],
-                "n_params": info["n_params"],
-            })
+            rows.append(
+                {
+                    "K": k,
+                    "llf": info["llf"],
+                    "AIC": info["aic"],
+                    "BIC": info["bic"],
+                    "HQIC": info["hqic"],
+                    "n_params": info["n_params"],
+                }
+            )
 
         return pd.DataFrame(rows)
 
@@ -309,14 +305,16 @@ class RegimeNumberSelection:
 
             rejected = p_value < self.significance
 
-            tests.append({
-                "k0": k0,
-                "k1": k1,
-                "lr_statistic": lr_stat,
-                "p_value": p_value,
-                "n_extra_params": n_extra,
-                "rejected": rejected,
-            })
+            tests.append(
+                {
+                    "k0": k0,
+                    "k1": k1,
+                    "lr_statistic": lr_stat,
+                    "p_value": p_value,
+                    "n_extra_params": n_extra,
+                    "rejected": rejected,
+                }
+            )
 
             if rejected:
                 selected_k = k1

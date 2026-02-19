@@ -64,7 +64,8 @@ def plot_smoothed_probabilities(
     with use_style():
         if ax is None:
             fig, axes = plt.subplots(
-                k, 1,
+                k,
+                1,
                 figsize=(figsize[0], figsize[1] * k),
                 sharex=True,
                 squeeze=False,
@@ -79,8 +80,12 @@ def plot_smoothed_probabilities(
         for j in range(k):
             color = REGIMES_COLOR_CYCLE[j % len(REGIMES_COLOR_CYCLE)]
             axes[j].fill_between(
-                x, 0, probs[:, j],
-                color=color, alpha=alpha, linewidth=0,
+                x,
+                0,
+                probs[:, j],
+                color=color,
+                alpha=alpha,
+                linewidth=0,
             )
             axes[j].plot(x, probs[:, j], color=color, linewidth=1.5)
             axes[j].set_ylim(0, 1)
@@ -185,7 +190,9 @@ def plot_regime_shading(
             patches = []
             for j in range(k):
                 color = REGIMES_COLOR_CYCLE[j % len(REGIMES_COLOR_CYCLE)]
-                patches.append(mpatches.Patch(color=color, alpha=0.3, label=f"Regime {j}"))
+                patches.append(
+                    mpatches.Patch(color=color, alpha=0.3, label=f"Regime {j}")
+                )
             ax.legend(handles=patches, loc="best")
 
         fig.tight_layout()
@@ -249,28 +256,46 @@ def plot_transition_matrix(
                     val = P[i, j]
                     # Use dark text on light cells, light on dark
                     text_color = "white" if val > 0.5 else REGIMES_COLORS["near_black"]
-                    if results.restricted_transitions and (i, j) in results.restricted_transitions:
+                    if (
+                        results.restricted_transitions
+                        and (i, j) in results.restricted_transitions
+                    ):
                         text_color = REGIMES_COLORS["grey"]
                     ax.text(
-                        j, i, f"{val:{fmt}}",
-                        ha="center", va="center",
-                        color=text_color, fontsize=11, fontweight="bold",
+                        j,
+                        i,
+                        f"{val:{fmt}}",
+                        ha="center",
+                        va="center",
+                        color=text_color,
+                        fontsize=11,
+                        fontweight="bold",
                     )
 
         # Highlight restricted (zero) cells
         if results.restricted_transitions:
             for (i, j), val in results.restricted_transitions.items():
                 if val == 0.0:
-                    ax.add_patch(plt.Rectangle(
-                        (j - 0.5, i - 0.5), 1, 1,
-                        fill=True, facecolor=REGIMES_COLORS["light_grey"],
-                        edgecolor=REGIMES_COLORS["grey"], linewidth=1,
-                        zorder=1,
-                    ))
+                    ax.add_patch(
+                        plt.Rectangle(
+                            (j - 0.5, i - 0.5),
+                            1,
+                            1,
+                            fill=True,
+                            facecolor=REGIMES_COLORS["light_grey"],
+                            edgecolor=REGIMES_COLORS["grey"],
+                            linewidth=1,
+                            zorder=1,
+                        )
+                    )
                     ax.text(
-                        j, i, "0",
-                        ha="center", va="center",
-                        color=REGIMES_COLORS["grey"], fontsize=11,
+                        j,
+                        i,
+                        "0",
+                        ha="center",
+                        va="center",
+                        color=REGIMES_COLORS["grey"],
+                        fontsize=11,
                     )
 
         ax.set_xticks(range(k))
@@ -351,7 +376,10 @@ def plot_parameter_time_series(
                 for j in range(k)
                 if p in results.regime_params.get(j, {})
             ]
-            if len(values) >= 2 and len(set(f"{v:.6f}" for v in values if v is not None)) > 1:
+            if (
+                len(values) >= 2
+                and len({f"{v:.6f}" for v in values if v is not None}) > 1
+            ):
                 switching_params.append(p)
 
         param_names = switching_params if switching_params else list(all_params)[:1]
@@ -361,7 +389,8 @@ def plot_parameter_time_series(
     with use_style():
         if ax is None:
             fig, axes = plt.subplots(
-                n_params, 1,
+                n_params,
+                1,
                 figsize=(figsize[0], figsize[1] * n_params / 2),
                 sharex=True,
                 squeeze=False,
@@ -389,19 +418,23 @@ def plot_parameter_time_series(
                 for j, val in regime_values.items():
                     param_ts += probs[:, j] * val
                 axes[idx].plot(
-                    x, param_ts,
+                    x,
+                    param_ts,
                     color=REGIMES_COLORS["blue"],
                     linewidth=2.0,
                 )
             else:
                 # Step function based on most likely regime
                 assignments = results.most_likely_regime
-                param_ts = np.array([
-                    regime_values.get(int(assignments[t]), np.nan)
-                    for t in range(results.nobs)
-                ])
+                param_ts = np.array(
+                    [
+                        regime_values.get(int(assignments[t]), np.nan)
+                        for t in range(results.nobs)
+                    ]
+                )
                 axes[idx].step(
-                    x, param_ts,
+                    x,
+                    param_ts,
                     color=REGIMES_COLORS["blue"],
                     linewidth=2.0,
                     where="post",
@@ -411,16 +444,22 @@ def plot_parameter_time_series(
             for j, val in regime_values.items():
                 color = REGIMES_COLOR_CYCLE[j % len(REGIMES_COLOR_CYCLE)]
                 axes[idx].axhline(
-                    y=val, color=color, linestyle="--",
-                    linewidth=0.8, alpha=0.7,
+                    y=val,
+                    color=color,
+                    linestyle="--",
+                    linewidth=0.8,
+                    alpha=0.7,
                 )
                 # Label at right edge
                 axes[idx].annotate(
                     f"Regime {j}: {val:.3f}",
                     xy=(1.02, val),
                     xycoords=("axes fraction", "data"),
-                    fontsize=9, color=color, fontweight="bold",
-                    va="center", clip_on=False,
+                    fontsize=9,
+                    color=color,
+                    fontweight="bold",
+                    va="center",
+                    clip_on=False,
                 )
 
             # Regime shading
@@ -429,7 +468,11 @@ def plot_parameter_time_series(
                 for regime, start, end in periods:
                     color = REGIMES_COLOR_CYCLE[regime % len(REGIMES_COLOR_CYCLE)]
                     axes[idx].axvspan(
-                        start, end, facecolor=color, alpha=0.08, zorder=0,
+                        start,
+                        end,
+                        facecolor=color,
+                        alpha=0.08,
+                        zorder=0,
                     )
 
             axes[idx].set_ylabel(pname)
@@ -491,9 +534,12 @@ def plot_ic(
             if crit in ic_table.columns:
                 color = colors[i % len(colors)]
                 ax.plot(
-                    ic_table["K"], ic_table[crit],
-                    marker="o", color=color,
-                    linewidth=2, markersize=6,
+                    ic_table["K"],
+                    ic_table[crit],
+                    marker="o",
+                    color=color,
+                    linewidth=2,
+                    markersize=6,
                     label=crit,
                 )
 
@@ -502,15 +548,21 @@ def plot_ic(
                 min_k = ic_table.loc[min_idx, "K"]
                 min_val = ic_table.loc[min_idx, crit]
                 ax.plot(
-                    min_k, min_val,
-                    marker="*", color=color,
-                    markersize=15, zorder=5,
+                    min_k,
+                    min_val,
+                    marker="*",
+                    color=color,
+                    markersize=15,
+                    zorder=5,
                 )
 
         if selected_k is not None:
             ax.axvline(
-                x=selected_k, color=REGIMES_COLORS["grey"],
-                linestyle="--", linewidth=0.8, alpha=0.7,
+                x=selected_k,
+                color=REGIMES_COLORS["grey"],
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.7,
                 label=f"Selected: K={selected_k}",
             )
 

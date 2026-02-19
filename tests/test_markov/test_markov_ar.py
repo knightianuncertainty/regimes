@@ -6,7 +6,6 @@ import warnings
 from typing import Any
 
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.models import MarkovAR
@@ -25,14 +24,10 @@ class TestMarkovARInit:
     def test_non_switching_ar(
         self, two_regime_ar_data: NDArray[np.floating[Any]]
     ) -> None:
-        model = MarkovAR(
-            two_regime_ar_data, k_regimes=2, order=1, switching_ar=False
-        )
+        model = MarkovAR(two_regime_ar_data, k_regimes=2, order=1, switching_ar=False)
         assert model.switching_ar is False
 
-    def test_order_2(
-        self, two_regime_ar_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_order_2(self, two_regime_ar_data: NDArray[np.floating[Any]]) -> None:
         model = MarkovAR(two_regime_ar_data, k_regimes=2, order=2)
         assert model.order == 2
 
@@ -80,9 +75,7 @@ class TestMarkovARFit:
 class TestMarkovARFromModel:
     """Test MarkovAR.from_model()."""
 
-    def test_from_ar(
-        self, two_regime_ar_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_from_ar(self, two_regime_ar_data: NDArray[np.floating[Any]]) -> None:
         from regimes.models import AR
 
         ar = AR(two_regime_ar_data, lags=1)

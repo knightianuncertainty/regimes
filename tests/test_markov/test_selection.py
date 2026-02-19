@@ -6,7 +6,6 @@ import warnings
 from typing import Any
 
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.selection import RegimeNumberSelection, RegimeNumberSelectionResults
@@ -67,10 +66,12 @@ class TestRegimeNumberSelection:
     def test_selects_correct_k_on_well_separated(self) -> None:
         """BIC should select K=2 on data with two well-separated regimes."""
         rng = np.random.default_rng(42)
-        y = np.concatenate([
-            rng.standard_normal(150) + 0.0,
-            rng.standard_normal(150) + 6.0,
-        ])
+        y = np.concatenate(
+            [
+                rng.standard_normal(150) + 0.0,
+                rng.standard_normal(150) + 6.0,
+            ]
+        )
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -84,9 +85,7 @@ class TestRegimeNumberSelection:
     ) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            sel = RegimeNumberSelection(
-                two_regime_data, k_max=3, method="sequential"
-            )
+            sel = RegimeNumberSelection(two_regime_data, k_max=3, method="sequential")
             results = sel.fit()
 
         assert results.selected_k >= 1
@@ -104,14 +103,15 @@ class TestRegimeNumberSelection:
         assert "Regime Number Selection" in s
         assert "BIC" in s
 
-    def test_ar_model_type(
-        self, two_regime_ar_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_ar_model_type(self, two_regime_ar_data: NDArray[np.floating[Any]]) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             sel = RegimeNumberSelection(
-                two_regime_ar_data, k_max=3, method="bic",
-                model_type="ar", order=1,
+                two_regime_ar_data,
+                k_max=3,
+                method="bic",
+                model_type="ar",
+                order=1,
             )
             results = sel.fit()
 
@@ -123,6 +123,7 @@ class TestRegimeNumberSelectionResults:
 
     def test_plot_ic(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         import matplotlib
+
         matplotlib.use("Agg")
 
         with warnings.catch_warnings():
@@ -134,4 +135,5 @@ class TestRegimeNumberSelectionResults:
         assert fig is not None
         assert ax is not None
         import matplotlib.pyplot as plt
+
         plt.close(fig)

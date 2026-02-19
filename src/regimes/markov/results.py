@@ -18,8 +18,6 @@ from scipy import stats
 from regimes.results.base import RegimesResultsBase
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
     from numpy.typing import NDArray
@@ -251,9 +249,7 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
         # Transition matrix
         lines.append("")
         lines.append("Regime Transition Matrix")
-        lines.append(
-            "  P(S_t = row | S_{t-1} = col)"
-        )
+        lines.append("  P(S_t = row | S_{t-1} = col)")
         lines.append("-" * 81)
 
         # Column headers

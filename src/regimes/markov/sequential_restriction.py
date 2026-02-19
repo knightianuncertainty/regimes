@@ -21,7 +21,7 @@ References
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -104,14 +104,16 @@ class NonRecurringRegimeTestResults:
         lines.append("=" * 60)
         lines.append("Non-Recurring Regime Test")
         lines.append("=" * 60)
-        lines.append(f"H0: Non-recurring (structural break) transitions")
-        lines.append(f"H1: Unrestricted (recurring) Markov switching")
+        lines.append("H0: Non-recurring (structural break) transitions")
+        lines.append("H1: Unrestricted (recurring) Markov switching")
         lines.append("-" * 60)
         lines.append(f"LR statistic:         {self.lr_statistic:>10.4f}")
         lines.append(f"p-value:              {self.p_value:>10.4f}")
         lines.append(f"Significance level:   {self.significance:>10.4f}")
         lines.append(f"Method:               {self.method:>10}")
-        lines.append(f"Decision:             {'Reject H0' if self.rejected else 'Fail to reject H0'}")
+        lines.append(
+            f"Decision:             {'Reject H0' if self.rejected else 'Fail to reject H0'}"
+        )
         lines.append("-" * 60)
         lines.append(f"Log-lik (unrestricted): {self.llf_unrestricted:>10.4f}")
         lines.append(f"Log-lik (restricted):   {self.llf_restricted:>10.4f}")
@@ -154,7 +156,9 @@ class SequentialRestrictionResults:
         lines.append("Sequential Restriction Test Results")
         lines.append("=" * 70)
         lines.append(f"Number of restrictions imposed: {len(self.final_restrictions)}")
-        lines.append(f"Non-recurring structure: {'Yes' if self.is_non_recurring else 'No'}")
+        lines.append(
+            f"Non-recurring structure: {'Yes' if self.is_non_recurring else 'No'}"
+        )
         lines.append(f"Log-lik (unrestricted): {self.llf_unrestricted:.4f}")
         lines.append(f"Log-lik (final):        {self.llf_final:.4f}")
         lines.append("")
@@ -178,7 +182,9 @@ class SequentialRestrictionResults:
         lines.append("Final Transition Matrix:")
         k = self.final_transition.shape[0]
         for i in range(k):
-            row = "  " + " ".join(f"{self.final_transition[i, j]:.4f}" for j in range(k))
+            row = "  " + " ".join(
+                f"{self.final_transition[i, j]:.4f}" for j in range(k)
+            )
             lines.append(row)
 
         lines.append("=" * 70)
@@ -317,31 +323,37 @@ class NonRecurringRegimeTest:
 
         if self.model_type == "ar":
             model = MarkovAR(
-                self.endog, k_regimes=self.k_regimes,
-                order=self.order, ordering=None, **self.model_kwargs
+                self.endog,
+                k_regimes=self.k_regimes,
+                order=self.order,
+                ordering=None,
+                **self.model_kwargs,
             )
         else:
             model = MarkovRegression(
-                self.endog, k_regimes=self.k_regimes,
-                ordering=None, **self.model_kwargs
+                self.endog, k_regimes=self.k_regimes, ordering=None, **self.model_kwargs
             )
         return model.fit(search_reps=5)
 
     def _fit_restricted(self) -> Any:
         """Fit the restricted (non-recurring) MS model."""
-        from regimes.markov.restricted import RestrictedMarkovAR, RestrictedMarkovRegression
+        from regimes.markov.restricted import (
+            RestrictedMarkovAR,
+            RestrictedMarkovRegression,
+        )
 
-        restrictions = self._build_non_recurring_restrictions()
+        self._build_non_recurring_restrictions()
 
         if self.model_type == "ar":
             model = RestrictedMarkovAR.non_recurring(
-                self.endog, k_regimes=self.k_regimes,
-                order=self.order, **self.model_kwargs
+                self.endog,
+                k_regimes=self.k_regimes,
+                order=self.order,
+                **self.model_kwargs,
             )
         else:
             model = RestrictedMarkovRegression.non_recurring(
-                self.endog, k_regimes=self.k_regimes,
-                **self.model_kwargs
+                self.endog, k_regimes=self.k_regimes, **self.model_kwargs
             )
         return model.fit(search_reps=10)
 
@@ -375,10 +387,6 @@ class NonRecurringRegimeTest:
             p_value = self._bootstrap_pvalue(restricted, lr_stat, n_restrictions)
         else:
             p_value = _chi_bar_squared_pvalue(lr_stat, n_restrictions)
-
-        critical_value = _chi_bar_squared_critical_value(
-            self.significance, n_restrictions
-        )
 
         rejected = p_value < self.significance
 
@@ -423,7 +431,6 @@ class NonRecurringRegimeTest:
             return _chi_bar_squared_pvalue(observed_lr, n_restrictions)
 
         count_exceed = 0
-        rng = np.random.default_rng(42)
 
         for _ in range(self.n_bootstrap):
             try:
@@ -438,30 +445,38 @@ class NonRecurringRegimeTest:
 
                     if self.model_type == "regression":
                         u_model = MarkovRegression(
-                            sim_y, k_regimes=self.k_regimes,
-                            ordering=None, **self.model_kwargs
+                            sim_y,
+                            k_regimes=self.k_regimes,
+                            ordering=None,
+                            **self.model_kwargs,
                         )
                         u_res = u_model.fit()
 
                         from regimes.markov.restricted import RestrictedMarkovRegression
+
                         r_model = RestrictedMarkovRegression.non_recurring(
-                            sim_y, k_regimes=self.k_regimes,
-                            **self.model_kwargs
+                            sim_y, k_regimes=self.k_regimes, **self.model_kwargs
                         )
                         r_res = r_model.fit()
                     else:
                         from regimes.markov import MarkovAR
+
                         u_model = MarkovAR(
-                            sim_y, k_regimes=self.k_regimes,
-                            order=self.order, ordering=None,
-                            **self.model_kwargs
+                            sim_y,
+                            k_regimes=self.k_regimes,
+                            order=self.order,
+                            ordering=None,
+                            **self.model_kwargs,
                         )
                         u_res = u_model.fit()
 
                         from regimes.markov.restricted import RestrictedMarkovAR
+
                         r_model = RestrictedMarkovAR.non_recurring(
-                            sim_y, k_regimes=self.k_regimes,
-                            order=self.order, **self.model_kwargs
+                            sim_y,
+                            k_regimes=self.k_regimes,
+                            order=self.order,
+                            **self.model_kwargs,
                         )
                         r_res = r_model.fit()
 
@@ -550,15 +565,20 @@ class SequentialRestrictionTest:
 
                 if self.model_type == "ar":
                     model = RestrictedMarkovAR(
-                        self.endog, k_regimes=self.k_regimes,
-                        order=self.order, restrictions=restrictions,
-                        ordering=None, **self.model_kwargs
+                        self.endog,
+                        k_regimes=self.k_regimes,
+                        order=self.order,
+                        restrictions=restrictions,
+                        ordering=None,
+                        **self.model_kwargs,
                     )
                 else:
                     model = RestrictedMarkovRegression(
-                        self.endog, k_regimes=self.k_regimes,
-                        restrictions=restrictions, ordering=None,
-                        **self.model_kwargs
+                        self.endog,
+                        k_regimes=self.k_regimes,
+                        restrictions=restrictions,
+                        ordering=None,
+                        **self.model_kwargs,
                     )
                 return model.fit(search_reps=5)
             else:
@@ -566,14 +586,18 @@ class SequentialRestrictionTest:
 
                 if self.model_type == "ar":
                     model = MarkovAR(
-                        self.endog, k_regimes=self.k_regimes,
-                        order=self.order, ordering=None,
-                        **self.model_kwargs
+                        self.endog,
+                        k_regimes=self.k_regimes,
+                        order=self.order,
+                        ordering=None,
+                        **self.model_kwargs,
                     )
                 else:
                     model = MarkovRegression(
-                        self.endog, k_regimes=self.k_regimes,
-                        ordering=None, **self.model_kwargs
+                        self.endog,
+                        k_regimes=self.k_regimes,
+                        ordering=None,
+                        **self.model_kwargs,
                     )
                 return model.fit(search_reps=5)
 
@@ -691,9 +715,7 @@ class SequentialRestrictionTest:
 
         # Count total testable candidates for Holm correction
         total_candidates = sum(
-            1 for i in range(self.k_regimes)
-            for j in range(self.k_regimes)
-            if i != j
+            1 for i in range(self.k_regimes) for j in range(self.k_regimes) if i != j
         )
 
         step = 0
@@ -706,9 +728,7 @@ class SequentialRestrictionTest:
 
             if verbose:
                 prob = transition[target[0], target[1]]
-                print(
-                    f"Step {step + 1}: Testing P{target} = {prob:.4f} -> 0"
-                )
+                print(f"Step {step + 1}: Testing P{target} = {prob:.4f} -> 0")
 
             # Individual test
             adj_sig = self._holm_significance(step, total_candidates)
@@ -780,7 +800,11 @@ class SequentialRestrictionTest:
         k = self.k_regimes
         for j in range(k):
             for i in range(k):
-                if i != j and i != j + 1:
-                    if transition[i, j] > 1e-10 and (i, j) not in restrictions:
-                        return False
+                if (
+                    i != j
+                    and i != j + 1
+                    and transition[i, j] > 1e-10
+                    and (i, j) not in restrictions
+                ):
+                    return False
         return True

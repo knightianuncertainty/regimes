@@ -1254,7 +1254,6 @@ class ADL(RegimesModelBase):
 
         return RecursiveADL.from_model(self, min_nobs=min_nobs)
 
-
     def markov_switching(
         self,
         k_regimes: int = 2,

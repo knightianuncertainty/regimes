@@ -27,14 +27,11 @@ from regimes.markov.results import (
     MarkovADLResults,
     MarkovARResults,
     MarkovRegressionResults,
-    MarkovSwitchingResultsBase,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Literal
 
-    import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
     from regimes.models.adl import ADL
@@ -50,7 +47,9 @@ def _ensure_1d(y: ArrayLike | pd.Series[Any] | pd.DataFrame) -> NDArray[Any]:
     return arr
 
 
-def _ensure_2d(x: ArrayLike | pd.Series[Any] | pd.DataFrame | None) -> NDArray[Any] | None:
+def _ensure_2d(
+    x: ArrayLike | pd.Series[Any] | pd.DataFrame | None,
+) -> NDArray[Any] | None:
     """Convert exog to 2D numpy array, or None."""
     if x is None:
         return None
@@ -900,7 +899,11 @@ class MarkovADL:
         # Exogenous lags
         exog_lags_dict = self._process_exog_lags()
         for col_idx in sorted(exog_lags_dict.keys()):
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
             for lag in exog_lags_dict[col_idx]:
                 if lag == 0:
                     components.append(self.exog[ml:, col_idx])
@@ -950,7 +953,6 @@ class MarkovADL:
         # AR params: first ar_order columns
         # Exog params: remaining columns
         n_ar = self.ar_order
-        n_exog_cols = X.shape[1] - n_ar
 
         switching_exog_flags = []
         for i in range(X.shape[1]):
@@ -1081,7 +1083,11 @@ class MarkovADL:
         exog_lags_dict = self._process_exog_lags()
         exog_lags_result: dict[str, list[int]] = {}
         for col_idx, lags in exog_lags_dict.items():
-            var_name = self._exog_names[col_idx] if col_idx < len(self._exog_names) else f"x{col_idx}"
+            var_name = (
+                self._exog_names[col_idx]
+                if col_idx < len(self._exog_names)
+                else f"x{col_idx}"
+            )
             exog_lags_result[var_name] = lags
 
         return MarkovADLResults(

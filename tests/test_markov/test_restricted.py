@@ -6,7 +6,6 @@ import warnings
 from typing import Any
 
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.restricted import RestrictedMarkovAR, RestrictedMarkovRegression
@@ -76,8 +75,10 @@ class TestRestrictedMarkovRegression:
 
             # Restricted
             r_model = RestrictedMarkovRegression(
-                two_regime_data, k_regimes=2,
-                restrictions={(0, 1): 0.0}, ordering=None,
+                two_regime_data,
+                k_regimes=2,
+                restrictions={(0, 1): 0.0},
+                ordering=None,
             )
             r_results = r_model.fit(search_reps=5)
 
@@ -85,15 +86,14 @@ class TestRestrictedMarkovRegression:
             # Restricted should be <= unrestricted (with small tolerance)
             assert r_results.llf <= u_results.llf + 1.0
 
-    def test_result_type(
-        self, two_regime_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_result_type(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         from regimes.markov.results import MarkovRegressionResults
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = RestrictedMarkovRegression(
-                two_regime_data, k_regimes=2,
+                two_regime_data,
+                k_regimes=2,
                 restrictions={(0, 1): 0.0},
             )
             results = model.fit(search_reps=5)
@@ -112,7 +112,9 @@ class TestRestrictedMarkovAR:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = RestrictedMarkovAR(
-                two_regime_ar_data, k_regimes=2, order=1,
+                two_regime_ar_data,
+                k_regimes=2,
+                order=1,
                 restrictions=restrictions,
             )
             results = model.fit(search_reps=5)
@@ -132,15 +134,15 @@ class TestRestrictedMarkovAR:
 
         assert isinstance(results.restricted_transitions, dict)
 
-    def test_result_type(
-        self, two_regime_ar_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_result_type(self, two_regime_ar_data: NDArray[np.floating[Any]]) -> None:
         from regimes.markov.results import MarkovARResults
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = RestrictedMarkovAR(
-                two_regime_ar_data, k_regimes=2, order=1,
+                two_regime_ar_data,
+                k_regimes=2,
+                order=1,
                 restrictions={(0, 1): 0.0},
             )
             results = model.fit(search_reps=5)

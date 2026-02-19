@@ -967,7 +967,6 @@ class OLS(RegimesModelBase):
 
         return RecursiveOLS.from_model(self, min_nobs=min_nobs)
 
-
     def markov_switching(
         self,
         k_regimes: int = 2,

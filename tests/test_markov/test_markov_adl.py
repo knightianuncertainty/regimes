@@ -35,7 +35,9 @@ class TestMarkovADLInit:
 
     def test_basic_init(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, x = two_regime_adl_data
         model = MarkovADL(y, x, k_regimes=2, ar_order=1, exog_lags=1)
@@ -45,7 +47,9 @@ class TestMarkovADLInit:
 
     def test_no_exog_lags(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, x = two_regime_adl_data
         model = MarkovADL(y, x, k_regimes=2, ar_order=1, exog_lags=0)
@@ -57,7 +61,9 @@ class TestMarkovADLFit:
 
     def test_basic_fit(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, x = two_regime_adl_data
         with warnings.catch_warnings():
@@ -70,7 +76,9 @@ class TestMarkovADLFit:
 
     def test_result_fields(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, x = two_regime_adl_data
         with warnings.catch_warnings():
@@ -85,7 +93,9 @@ class TestMarkovADLFit:
 
     def test_summary(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         y, x = two_regime_adl_data
         with warnings.catch_warnings():
@@ -102,7 +112,9 @@ class TestMarkovADLFromModel:
 
     def test_from_adl(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         from regimes.models import ADL
 
@@ -123,7 +135,9 @@ class TestMarkovADLConvenience:
 
     def test_adl_markov_switching(
         self,
-        two_regime_adl_data: tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]],
+        two_regime_adl_data: tuple[
+            NDArray[np.floating[Any]], NDArray[np.floating[Any]]
+        ],
     ) -> None:
         from regimes.models import ADL
 

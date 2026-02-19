@@ -8,6 +8,25 @@ classes and functions in the regimes package.
 # Diagnostics
 from regimes.diagnostics import DiagnosticsResults, DiagnosticTestResult
 
+# Markov switching models
+from regimes.markov import (
+    MarkovADL,
+    MarkovADLResults,
+    MarkovAR,
+    MarkovARResults,
+    MarkovRegression,
+    MarkovRegressionResults,
+    MarkovSwitchingResultsBase,
+    NonRecurringRegimeTest,
+    NonRecurringRegimeTestResults,
+    RegimeNumberSelection,
+    RegimeNumberSelectionResults,
+    RestrictedMarkovAR,
+    RestrictedMarkovRegression,
+    SequentialRestrictionResults,
+    SequentialRestrictionTest,
+)
+
 # Model base classes (for extension)
 from regimes.models import (
     ADL,
@@ -62,25 +81,6 @@ from regimes.tests import (
     CUSUMSQResults,
     CUSUMSQTest,
     CUSUMTest,
-)
-
-# Markov switching models
-from regimes.markov import (
-    MarkovADL,
-    MarkovADLResults,
-    MarkovAR,
-    MarkovARResults,
-    MarkovRegression,
-    MarkovRegressionResults,
-    MarkovSwitchingResultsBase,
-    NonRecurringRegimeTest,
-    NonRecurringRegimeTestResults,
-    RegimeNumberSelection,
-    RegimeNumberSelectionResults,
-    RestrictedMarkovAR,
-    RestrictedMarkovRegression,
-    SequentialRestrictionResults,
-    SequentialRestrictionTest,
 )
 
 # Visualization

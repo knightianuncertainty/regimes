@@ -1163,7 +1163,6 @@ class AR(TimeSeriesModelBase):
 
         return RecursiveAR.from_model(self, min_nobs=min_nobs)
 
-
     def markov_switching(
         self,
         k_regimes: int = 2,

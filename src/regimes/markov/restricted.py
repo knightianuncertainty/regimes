@@ -12,7 +12,6 @@ probability mass among free entries via softmax.
 
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,21 +23,17 @@ from statsmodels.tsa.regime_switching.markov_regression import (
 )
 
 from regimes.markov.models import (
-    MarkovRegression,
     MarkovAR,
-    _ensure_1d,
-    _ensure_2d,
-    _extract_regime_params,
-    _relabel_regimes,
-    _apply_permutation,
-)
-from regimes.markov.results import (
-    MarkovRegressionResults,
-    MarkovARResults,
+    MarkovRegression,
 )
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from regimes.markov.results import (
+        MarkovARResults,
+        MarkovRegressionResults,
+    )
 
 
 def _softmax(x: NDArray[Any]) -> NDArray[Any]:
@@ -139,8 +134,8 @@ class _RestrictedSMMarkovRegression(SMMarkovRegression):
         idx = 0
         for j in range(k):
             # statsmodels convention: stores k-1 probs, the k-th is 1 - sum
-            probs = tp[idx:idx + k - 1]
-            P[:k - 1, j] = probs
+            probs = tp[idx : idx + k - 1]
+            P[: k - 1, j] = probs
             P[k - 1, j] = 1.0 - np.sum(probs)
             idx += k - 1
 
@@ -156,7 +151,7 @@ class _RestrictedSMMarkovRegression(SMMarkovRegression):
 
             if n_free == 0:
                 # All entries fixed — set them
-                for i, is_free, fv in entries:
+                for i, _is_free, fv in entries:
                     P[i, j] = fv
             elif n_free == 1:
                 # One free entry gets all remaining mass
@@ -185,7 +180,7 @@ class _RestrictedSMMarkovRegression(SMMarkovRegression):
         idx = 0
         new_tp = np.zeros(n_tp)
         for j in range(k):
-            new_tp[idx:idx + k - 1] = P[:k - 1, j]
+            new_tp[idx : idx + k - 1] = P[: k - 1, j]
             idx += k - 1
 
         constrained[tp_start:] = new_tp
@@ -234,8 +229,8 @@ class _RestrictedSMMarkovAutoregression(MarkovAutoregression):
         P = np.zeros((k, k))
         idx = 0
         for j in range(k):
-            probs = tp[idx:idx + k - 1]
-            P[:k - 1, j] = probs
+            probs = tp[idx : idx + k - 1]
+            P[: k - 1, j] = probs
             P[k - 1, j] = 1.0 - np.sum(probs)
             idx += k - 1
 
@@ -248,7 +243,7 @@ class _RestrictedSMMarkovAutoregression(MarkovAutoregression):
             n_free = len(free_indices)
 
             if n_free == 0:
-                for i, is_free, fv in entries:
+                for i, _is_free, fv in entries:
                     P[i, j] = fv
             elif n_free == 1:
                 for i, is_free, fv in entries:
@@ -272,7 +267,7 @@ class _RestrictedSMMarkovAutoregression(MarkovAutoregression):
         idx = 0
         new_tp = np.zeros(n_tp)
         for j in range(k):
-            new_tp[idx:idx + k - 1] = P[:k - 1, j]
+            new_tp[idx : idx + k - 1] = P[: k - 1, j]
             idx += k - 1
 
         constrained[tp_start:] = new_tp
@@ -485,6 +480,5 @@ class RestrictedMarkovAR(MarkovAR):
                     restrictions[(i, j)] = 0.0
 
         return RestrictedMarkovAR(
-            endog, k_regimes=k_regimes, order=order,
-            restrictions=restrictions, **kwargs
+            endog, k_regimes=k_regimes, order=order, restrictions=restrictions, **kwargs
         )

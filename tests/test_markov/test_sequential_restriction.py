@@ -6,7 +6,6 @@ import warnings
 from typing import Any
 
 import numpy as np
-import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.sequential_restriction import (
@@ -87,13 +86,13 @@ class TestNonRecurringRegimeTest:
     def test_fit_chi_bar_squared(self) -> None:
         """Test with larger, well-separated data for reliable convergence."""
         rng = np.random.default_rng(99)
-        y = np.concatenate([
-            rng.standard_normal(200) + 0.0,
-            rng.standard_normal(200) + 5.0,
-        ])
-        test = NonRecurringRegimeTest(
-            y, k_regimes=2, method="chi_bar_squared"
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
         )
+        test = NonRecurringRegimeTest(y, k_regimes=2, method="chi_bar_squared")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             results = test.fit()
@@ -106,13 +105,13 @@ class TestNonRecurringRegimeTest:
 
     def test_summary(self) -> None:
         rng = np.random.default_rng(99)
-        y = np.concatenate([
-            rng.standard_normal(200) + 0.0,
-            rng.standard_normal(200) + 5.0,
-        ])
-        test = NonRecurringRegimeTest(
-            y, k_regimes=2, method="chi_bar_squared"
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
         )
+        test = NonRecurringRegimeTest(y, k_regimes=2, method="chi_bar_squared")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             results = test.fit()
@@ -127,7 +126,8 @@ class TestSequentialRestrictionTest:
 
     def test_init(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         test = SequentialRestrictionTest(
-            two_regime_data, k_regimes=2,
+            two_regime_data,
+            k_regimes=2,
             critical_value_method="chi_bar_squared",
         )
         assert test.k_regimes == 2
@@ -157,7 +157,9 @@ class TestSequentialRestrictionTest:
         self, two_regime_data: NDArray[np.floating[Any]]
     ) -> None:
         test = SequentialRestrictionTest(
-            two_regime_data, k_regimes=2, significance=0.05,
+            two_regime_data,
+            k_regimes=2,
+            significance=0.05,
             multiple_testing="holm",
         )
         # Step 0, total 2 candidates: alpha / (2 - 0) = 0.025
@@ -172,17 +174,19 @@ class TestSequentialRestrictionTest:
         self, two_regime_data: NDArray[np.floating[Any]]
     ) -> None:
         test = SequentialRestrictionTest(
-            two_regime_data, k_regimes=2, significance=0.05,
+            two_regime_data,
+            k_regimes=2,
+            significance=0.05,
             multiple_testing="bonferroni",
         )
         sig = test._holm_significance(0, 2)
         assert abs(sig - 0.025) < 0.001
 
-    def test_no_correction(
-        self, two_regime_data: NDArray[np.floating[Any]]
-    ) -> None:
+    def test_no_correction(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         test = SequentialRestrictionTest(
-            two_regime_data, k_regimes=2, significance=0.05,
+            two_regime_data,
+            k_regimes=2,
+            significance=0.05,
             multiple_testing="none",
         )
         sig = test._holm_significance(0, 2)
@@ -191,12 +195,15 @@ class TestSequentialRestrictionTest:
     def test_fit(self) -> None:
         """Use larger data for reliable restricted model convergence."""
         rng = np.random.default_rng(77)
-        y = np.concatenate([
-            rng.standard_normal(200) + 0.0,
-            rng.standard_normal(200) + 5.0,
-        ])
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
+        )
         test = SequentialRestrictionTest(
-            y, k_regimes=2,
+            y,
+            k_regimes=2,
             critical_value_method="chi_bar_squared",
         )
         with warnings.catch_warnings():
@@ -212,12 +219,15 @@ class TestSequentialRestrictionTest:
 
     def test_summary(self) -> None:
         rng = np.random.default_rng(77)
-        y = np.concatenate([
-            rng.standard_normal(200) + 0.0,
-            rng.standard_normal(200) + 5.0,
-        ])
+        y = np.concatenate(
+            [
+                rng.standard_normal(200) + 0.0,
+                rng.standard_normal(200) + 5.0,
+            ]
+        )
         test = SequentialRestrictionTest(
-            y, k_regimes=2,
+            y,
+            k_regimes=2,
             critical_value_method="chi_bar_squared",
         )
         with warnings.catch_warnings():
