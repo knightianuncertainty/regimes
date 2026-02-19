@@ -190,6 +190,77 @@ class TestPlotParameterTimeSeries:
         plt.close(fig)
 
 
+class TestPlotTransitionMatrixRestricted:
+    """Test plot_transition_matrix with restricted transitions."""
+
+    def test_with_restricted_transitions(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Transition matrix plot should handle restricted transitions."""
+        from regimes.markov.restricted import RestrictedMarkovRegression
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = RestrictedMarkovRegression(
+                two_regime_data, k_regimes=2, restrictions={(0, 1): 0.0}
+            )
+            results = model.fit(search_reps=5)
+
+        fig, ax = plot_transition_matrix(results)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_with_existing_ax(self, ms_results: Any) -> None:
+        """Passing an existing ax should reuse the figure."""
+        fig, ax = plt.subplots()
+        fig2, ax2 = plot_transition_matrix(ms_results, ax=ax)
+        assert fig2 is fig
+        plt.close(fig)
+
+
+class TestPlotParameterTimeSeriesEdgeCases:
+    """Test edge cases for plot_parameter_time_series."""
+
+    def test_weighted_parameter(self, ms_results: Any) -> None:
+        """Weighted=True should produce probability-weighted time series."""
+        fig, axes = plot_parameter_time_series(ms_results, weighted=True)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_custom_figsize(self, ms_results: Any) -> None:
+        """Custom figsize should be respected."""
+        fig, axes = plot_parameter_time_series(ms_results, figsize=(14, 8))
+        assert fig is not None
+        plt.close(fig)
+
+    def test_with_existing_axes(self, ms_results: Any) -> None:
+        """Providing existing axes should reuse figure."""
+        # Get number of params to create matching axes
+        all_params = set()
+        for params in ms_results.regime_params.values():
+            all_params.update(params.keys())
+        n_params = len(all_params)
+        if n_params > 0:
+            fig, axes = plt.subplots(n_params, 1, squeeze=False)
+            fig2, axes2 = plot_parameter_time_series(ms_results, ax=axes.flatten())
+            assert fig2 is fig
+            plt.close(fig)
+
+
+class TestPlotSmoothedProbabilitiesEdgeCases:
+    """Test edge cases for plot_smoothed_probabilities."""
+
+    def test_custom_figsize(self, ms_results: Any) -> None:
+        fig, axes = plot_smoothed_probabilities(ms_results, figsize=(14, 6))
+        assert fig is not None
+        plt.close(fig)
+
+    def test_custom_alpha(self, ms_results: Any) -> None:
+        fig, axes = plot_smoothed_probabilities(ms_results, alpha=0.5)
+        assert fig is not None
+        plt.close(fig)
+
+
 class TestPlotIC:
     """Test plot_ic."""
 

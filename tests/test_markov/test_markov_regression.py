@@ -197,6 +197,73 @@ class TestMarkovRegressionConvenience:
         assert results.k_regimes == 2
 
 
+class TestMarkovRegressionInterceptOrdering:
+    """Test MarkovRegression with ordering='intercept'."""
+
+    def test_ordering_intercept_fit(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Intercept ordering should produce valid results with two distinct means."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = MarkovRegression(two_regime_data, k_regimes=2, ordering="intercept")
+            results = model.fit(search_reps=5)
+
+        assert isinstance(results, MarkovRegressionResults)
+        # Both regimes should have regime params
+        means = [results.regime_params[j].get("const", 0) for j in range(2)]
+        assert abs(means[0] - means[1]) > 1.0  # regimes should be distinct
+
+    def test_from_model_no_exog(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """from_model() with exog=None should work (mean-only model)."""
+        from regimes.models import OLS
+
+        ols = OLS(two_regime_data, has_constant=True)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ms = MarkovRegression.from_model(ols, k_regimes=2)
+            results = ms.fit()
+
+        assert isinstance(results, MarkovRegressionResults)
+
+
+class TestMarkovRegressionSummaryEdgeCases:
+    """Test summary edge cases for coverage of results.py lines 304-308, 335."""
+
+    def test_summary_with_restricted_transitions(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Summary should include restricted transitions section."""
+        from regimes.markov.restricted import RestrictedMarkovRegression
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = RestrictedMarkovRegression(
+                two_regime_data, k_regimes=2, restrictions={(0, 1): 0.0}
+            )
+            results = model.fit(search_reps=5)
+
+        s = results.summary()
+        assert "Restricted transitions" in s
+        assert "P(0,1)" in s
+
+    def test_plot_regime_shading_no_y(
+        self, ms_regression_results: MarkovRegressionResults
+    ) -> None:
+        """plot_regime_shading() without y should reconstruct from fitted+resid."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = ms_regression_results.plot_regime_shading()
+        assert fig is not None
+        plt.close(fig)
+
+
 class TestMarkovRegressionParameterRecovery:
     """Test that the model recovers true parameters on well-separated data."""
 

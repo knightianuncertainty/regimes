@@ -118,6 +118,55 @@ class TestRegimeNumberSelection:
         assert results.selected_k >= 1
 
 
+class TestRegimeNumberSelectionVerbose:
+    """Test verbose output and edge cases for coverage."""
+
+    def test_fit_verbose(
+        self, two_regime_data: NDArray[np.floating[Any]], capsys: Any
+    ) -> None:
+        """Verbose output should print fitting progress."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            sel = RegimeNumberSelection(two_regime_data, k_max=3, method="bic")
+            sel.fit(verbose=True)
+
+        captured = capsys.readouterr()
+        assert "K=1" in captured.out
+        assert "K=2" in captured.out
+
+    def test_sequential_summary(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Summary with sequential tests should include test results."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            sel = RegimeNumberSelection(two_regime_data, k_max=3, method="sequential")
+            results = sel.fit()
+
+        s = results.summary()
+        assert "Sequential Tests" in s
+        # Should have REJECTED or NOT REJECTED
+        assert "REJECTED" in s
+
+    def test_ar_model_type_bic(
+        self, two_regime_ar_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """AR model type should work with BIC selection."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            sel = RegimeNumberSelection(
+                two_regime_ar_data,
+                k_max=3,
+                method="bic",
+                model_type="ar",
+                order=1,
+            )
+            results = sel.fit()
+
+        assert results.selected_k >= 1
+        assert "K" in results.ic_table.columns
+
+
 class TestRegimeNumberSelectionResults:
     """Test RegimeNumberSelectionResults methods."""
 

@@ -64,9 +64,15 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
   - [x] Regime number selection (`RegimeNumberSelection`) — IC + sequential LRT
   - [x] 5 Markov visualization functions: `plot_smoothed_probabilities`, `plot_regime_shading`, `plot_transition_matrix`, `plot_parameter_time_series`, `plot_ic`
   - [x] `.markov_switching()` convenience methods on OLS, AR, ADL
-  - [x] 98 new tests (816 total)
+  - [x] 98 new tests (816 total), expanded to 877 tests with edge case coverage
+- [x] Example notebooks: split exploration.ipynb into 4 focused notebooks
+  - `01_models_and_visualization.ipynb` — OLS, AR, visualization, diagnostics
+  - `02_structural_break_tests.ipynb` — Bai-Perron, Chow, CUSUM, Andrews-Ploberger
+  - `03_dynamic_estimation.ipynb` — Rolling/recursive estimation, ADL models
+  - `04_markov_switching.ipynb` — Full Markov switching API demonstration
 - [ ] *(Tentative)* Time-varying parameter models
-- [ ] Target: 85%+ test coverage
+- [ ] *(Tentative)* Unit root tests (ADF, KPSS, Phillips-Perron)
+- [x] Target: 85%+ test coverage (achieved: 86% with 877 tests)
 
 ### Phase 4: v0.4.0 - Model Selection & Indicator Saturation
 
@@ -110,7 +116,7 @@ These features are deferred and may be added in future versions based on need:
 |---------|--------|-------------|
 | 0.1.0 | Complete | Foundation: OLS, AR, Bai-Perron, visualization, CI/CD |
 | 0.2.0 | Complete | Estimation tools: rolling/recursive, ADL, diagnostics, style system, 88% coverage |
-| 0.3.0 | In Progress | Structural break tests (Chow ✓, CUSUM ✓, Andrews-Ploberger ✓), Markov-switching ✓, unit root tests, TVP models |
+| 0.3.0 | In Progress | Structural break tests (Chow ✓, CUSUM ✓, Andrews-Ploberger ✓), Markov-switching ✓, 877 tests (86% coverage), 4 example notebooks |
 | 0.4.0 | Planned | Autometrics-inspired model selection, step-indicator saturation |
 | 0.5.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |

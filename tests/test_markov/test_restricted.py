@@ -101,6 +101,40 @@ class TestRestrictedMarkovRegression:
         assert isinstance(results, MarkovRegressionResults)
 
 
+class TestRestrictedMarkovRegressionEdgeCases:
+    """Additional edge case tests for RestrictedMarkovRegression."""
+
+    def test_switching_variance(
+        self, two_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Test restricted model with switching variance."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = RestrictedMarkovRegression(
+                two_regime_data,
+                k_regimes=2,
+                restrictions={(0, 1): 0.0},
+                switching_variance=True,
+            )
+            results = model.fit(search_reps=5)
+
+        assert results.regime_transition[0, 1] == 0.0
+
+    def test_3_regime_non_recurring_fit(
+        self, three_regime_data: NDArray[np.floating[Any]]
+    ) -> None:
+        """Test non-recurring 3-regime model fitting."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = RestrictedMarkovRegression.non_recurring(
+                three_regime_data, k_regimes=3
+            )
+            results = model.fit(search_reps=5)
+
+        assert results.k_regimes == 3
+        assert isinstance(results.restricted_transitions, dict)
+
+
 class TestRestrictedMarkovAR:
     """Test RestrictedMarkovAR."""
 
