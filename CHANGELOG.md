@@ -37,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `AndrewsPlobergerTest.from_model()` class method for OLS, AR, and ADL models
   - `.andrews_ploberger()` convenience method on OLS, AR, and ADL models
   - 56 new tests (718 total)
+- **Markov regime-switching models**
+  - `MarkovRegression` class wrapping `statsmodels.tsa.regime_switching.MarkovRegression` with regime ordering, multi-start optimization, and regimes-style results
+  - `MarkovAR` class wrapping `statsmodels.tsa.regime_switching.MarkovAutoregression` with switching AR coefficients
+  - `MarkovADL` class: Markov switching ADL model (builds ADL design matrix and passes to statsmodels `MarkovRegression`)
+  - `MarkovSwitchingResultsBase`, `MarkovRegressionResults`, `MarkovARResults`, `MarkovADLResults` dataclasses with transition matrix, smoothed/filtered/predicted probabilities, expected durations, regime assignments, and information criteria
+  - `RestrictedMarkovRegression` and `RestrictedMarkovAR` for imposing fixed transition probability entries via softmax redistribution
+  - `RestrictedMarkovRegression.non_recurring()` / `RestrictedMarkovAR.non_recurring()` factory methods for Chib (1998) upper-triangular non-recurring transition structure
+  - `NonRecurringRegimeTest`: LR test of H0 (non-recurring structural break) vs H1 (unrestricted Markov switching) with chi-bar-squared or bootstrap p-values
+  - `SequentialRestrictionTest`: GETS-style algorithm for sequentially restricting transition probabilities with Holm-Bonferroni multiple testing correction
+  - `RegimeNumberSelection`: select number of regimes K by information criteria (AIC/BIC/HQIC) or sequential LRT, with K=1 using standard OLS/AR
+  - 5 Markov visualization functions: `plot_smoothed_probabilities`, `plot_regime_shading`, `plot_transition_matrix`, `plot_parameter_time_series`, `plot_ic`
+  - `.markov_switching(k_regimes)` convenience method on `OLS`, `AR`, and `ADL` for one-step conversion to Markov switching
+  - `MarkovRegression.from_model()`, `MarkovAR.from_model()`, `MarkovADL.from_model()` class methods for explicit construction from existing models
+  - 98 new tests (816 total)
 
 ### Changed
 

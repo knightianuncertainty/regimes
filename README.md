@@ -13,6 +13,7 @@ A Python package for structural break detection and estimation in time-series ec
 - **Chow Test**: Test for structural breaks at known break points with standard and predictive variants
 - **CUSUM Tests**: CUSUM and CUSUM-SQ tests for parameter and variance instability (Brown, Durbin, Evans, 1975)
 - **Andrews-Ploberger Test**: SupF, ExpF, and AveF tests for a structural break at unknown date (Andrews, 1993; Andrews & Ploberger, 1994)
+- **Markov Regime-Switching**: Markov switching regression, AR, and ADL models with regime number selection and restricted transitions
 - **Time-Series Models**: AR, ADL, OLS with HAC standard errors and known break support
 - **ADL Models**: Autoregressive Distributed Lag models with flexible lag specification and distributed lag diagnostics
 - **Rolling & Recursive Estimation**: Track parameter evolution with fixed or expanding windows
@@ -189,6 +190,64 @@ Or use the convenience method on any model:
 model = rg.OLS(y, np.ones((200, 1)), has_constant=False)
 ap_results = model.andrews_ploberger()
 print(ap_results.summary())
+```
+
+### Markov Regime-Switching Models
+
+Markov switching models allow parameters to change across unobserved regimes governed by a Markov chain:
+
+```python
+import numpy as np
+import regimes as rg
+
+# Simulate data with regime-switching mean
+rng = np.random.default_rng(42)
+y = np.concatenate([rng.normal(0, 1, 100), rng.normal(3, 1, 100), rng.normal(0, 1, 100)])
+
+# Fit Markov switching regression
+model = rg.MarkovRegression(y, k_regimes=2)
+results = model.fit()
+print(results.summary())
+
+# Visualize smoothed probabilities and regime shading
+results.plot_smoothed_probabilities()
+results.plot_regime_shading(y=y)
+```
+
+Use the convenience method on any existing model:
+
+```python
+# One-step conversion from OLS to Markov switching
+ols_model = rg.OLS(y, np.ones((300, 1)), has_constant=False)
+ms_results = ols_model.markov_switching(k_regimes=2)
+
+# Also works with AR and ADL models
+ar_model = rg.AR(y, lags=1)
+ms_ar = ar_model.markov_switching(k_regimes=2)
+```
+
+Select the number of regimes using information criteria or sequential likelihood ratio tests:
+
+```python
+# Regime number selection
+selection = rg.RegimeNumberSelection(y, k_max=4, method="bic")
+sel_results = selection.fit()
+print(sel_results.summary())
+sel_results.plot_ic()
+```
+
+Test whether transitions are non-recurring (structural break) or allow recurrence:
+
+```python
+# Non-recurring regime test (Chib 1998 structure)
+nr_test = rg.NonRecurringRegimeTest(y, k_regimes=2)
+nr_results = nr_test.fit()
+print(nr_results.summary())
+
+# Fit with restricted (non-recurring) transitions directly
+restricted = rg.RestrictedMarkovRegression.non_recurring(y, k_regimes=3)
+restricted_results = restricted.fit()
+results.plot_transition_matrix()
 ```
 
 ### OLS with HAC Standard Errors
@@ -394,6 +453,11 @@ fig, axes = rg.plot_residual_acf(results, nlags=15)
 | `OLS` | Ordinary Least Squares with robust standard errors and variable-specific breaks |
 | `AR` | Autoregressive model with break support |
 | `ADL` | Autoregressive Distributed Lag model with flexible lag specification |
+| `MarkovRegression` | Markov regime-switching regression (wraps statsmodels) |
+| `MarkovAR` | Markov regime-switching autoregression |
+| `MarkovADL` | Markov regime-switching ADL model |
+| `RestrictedMarkovRegression` | Markov regression with restricted transition probabilities |
+| `RestrictedMarkovAR` | Markov AR with restricted transition probabilities |
 
 All models (`OLS`, `AR`, `ADL`) have:
 - `.bai_perron()` method for integrated break detection
@@ -401,6 +465,7 @@ All models (`OLS`, `AR`, `ADL`) have:
 - `.cusum_test()` method for CUSUM parameter instability test
 - `.cusum_sq_test()` method for CUSUM-SQ variance instability test
 - `.andrews_ploberger()` method for testing breaks at unknown date
+- `.markov_switching(k_regimes)` method for one-step Markov switching estimation
 - `.rolling(window)` method for rolling window estimation
 - `.recursive(min_nobs)` method for recursive (expanding window) estimation
 
@@ -432,6 +497,9 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `CUSUMTest` | CUSUM test for parameter instability via recursive residuals |
 | `CUSUMSQTest` | CUSUM-of-squares test for variance instability |
 | `AndrewsPlobergerTest` | Andrews-Ploberger SupF/ExpF/AveF test for break at unknown date |
+| `NonRecurringRegimeTest` | LR test: non-recurring (structural break) vs unrestricted Markov transitions |
+| `SequentialRestrictionTest` | GETS-style sequential restriction of transition probabilities |
+| `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential LRT |
 
 **Key methods:**
 - `BaiPerronTest.from_model(model)` - Create test from OLS or AR model
@@ -459,6 +527,11 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `plot_cusum` | CUSUM statistic with critical boundaries |
 | `plot_cusum_sq` | CUSUM-SQ statistic with critical boundaries |
 | `plot_f_sequence` | Andrews-Ploberger F-statistic sequence with critical value line |
+| `plot_smoothed_probabilities` | Smoothed regime probabilities (one subplot per regime) |
+| `plot_regime_shading` | Time series with regime-colored background shading |
+| `plot_transition_matrix` | Heatmap of transition probability matrix |
+| `plot_parameter_time_series` | Regime-dependent parameter as step function over time |
+| `plot_ic` | Information criteria vs number of regimes |
 
 ### Style Utilities
 
@@ -484,7 +557,7 @@ All regression models support multiple covariance estimators:
 
 ## Testing
 
-The package includes a comprehensive test suite with 88% coverage (718 tests):
+The package includes a comprehensive test suite with 816 tests:
 
 ```bash
 # Run all tests
@@ -516,6 +589,9 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 - Chow, G. C. (1960). Tests of equality between sets of coefficients in two linear regressions. *Econometrica*, 28(3), 591-605.
 - Andrews, D. W. K. (1993). Tests for parameter instability and structural change with unknown change point. *Econometrica*, 61(4), 821-856.
 - Andrews, D. W. K. & Ploberger, W. (1994). Optimal tests when a nuisance parameter is present only under the alternative. *Econometrica*, 62(6), 1383-1414.
+- Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary time series and the business cycle. *Econometrica*, 57(2), 357-384.
+- Chib, S. (1998). Estimation and comparison of multiple change-point models. *Journal of Econometrics*, 86(2), 221-241.
+- Andrews, D. W. K. (2001). Testing when a parameter is on the boundary of the maintained hypothesis. *Econometrica*, 69(3), 683-734.
 
 ## License
 

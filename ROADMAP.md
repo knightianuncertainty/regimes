@@ -55,7 +55,16 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 - [x] CUSUM / CUSUM-SQ tests
 - [x] Andrews-Ploberger test
 - [ ] Unit root tests (ADF, KPSS, Phillips-Perron)
-- [ ] Markov-switching models
+- [x] Markov-switching models
+  - [x] `MarkovRegression`, `MarkovAR`, `MarkovADL` wrapping statsmodels
+  - [x] `MarkovSwitchingResultsBase`, `MarkovRegressionResults`, `MarkovARResults`, `MarkovADLResults`
+  - [x] Restricted transition matrices (`RestrictedMarkovRegression`, `RestrictedMarkovAR`)
+  - [x] Non-recurring regime test (`NonRecurringRegimeTest`) — Chib (1998) structure
+  - [x] Sequential restriction testing (`SequentialRestrictionTest`) — GETS-style algorithm
+  - [x] Regime number selection (`RegimeNumberSelection`) — IC + sequential LRT
+  - [x] 5 Markov visualization functions: `plot_smoothed_probabilities`, `plot_regime_shading`, `plot_transition_matrix`, `plot_parameter_time_series`, `plot_ic`
+  - [x] `.markov_switching()` convenience methods on OLS, AR, ADL
+  - [x] 98 new tests (816 total)
 - [ ] *(Tentative)* Time-varying parameter models
 - [ ] Target: 85%+ test coverage
 
@@ -101,7 +110,7 @@ These features are deferred and may be added in future versions based on need:
 |---------|--------|-------------|
 | 0.1.0 | Complete | Foundation: OLS, AR, Bai-Perron, visualization, CI/CD |
 | 0.2.0 | Complete | Estimation tools: rolling/recursive, ADL, diagnostics, style system, 88% coverage |
-| 0.3.0 | In Progress | Structural break tests (Chow ✓, CUSUM ✓, Andrews-Ploberger ✓), Markov-switching |
+| 0.3.0 | In Progress | Structural break tests (Chow ✓, CUSUM ✓, Andrews-Ploberger ✓), Markov-switching ✓, unit root tests, TVP models |
 | 0.4.0 | Planned | Autometrics-inspired model selection, step-indicator saturation |
 | 0.5.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |

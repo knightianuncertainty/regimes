@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.markov.results import MarkovARResults
     from regimes.rolling.ar import RecursiveAR, RollingAR
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
     from regimes.tests.bai_perron import BaiPerronResults
@@ -1161,6 +1162,42 @@ class AR(TimeSeriesModelBase):
         from regimes.rolling.ar import RecursiveAR
 
         return RecursiveAR.from_model(self, min_nobs=min_nobs)
+
+    def markov_switching(
+        self,
+        k_regimes: int = 2,
+        **kwargs: Any,
+    ) -> MarkovARResults:
+        """Fit a Markov regime-switching version of this AR model.
+
+        Creates a MarkovAR from this model's specification and fits it.
+
+        Parameters
+        ----------
+        k_regimes : int
+            Number of regimes. Default is 2.
+        **kwargs
+            Additional keyword arguments. Model-level kwargs (e.g.,
+            switching_ar, switching_trend) forwarded to MarkovAR;
+            fit-level kwargs (method, maxiter, etc.) forwarded to fit().
+
+        Returns
+        -------
+        MarkovARResults
+            Fitted Markov switching AR results.
+
+        See Also
+        --------
+        regimes.markov.MarkovAR : The underlying MS AR model class.
+        """
+        from regimes.markov import MarkovAR
+
+        fit_kwargs_names = {"method", "maxiter", "em_iter", "search_reps"}
+        model_kwargs = {k: v for k, v in kwargs.items() if k not in fit_kwargs_names}
+        fit_kwargs = {k: v for k, v in kwargs.items() if k in fit_kwargs_names}
+
+        ms_model = MarkovAR.from_model(self, k_regimes=k_regimes, **model_kwargs)
+        return ms_model.fit(**fit_kwargs)
 
 
 def ar_summary_by_regime(
