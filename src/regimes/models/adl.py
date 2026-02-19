@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.markov.results import MarkovADLResults
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
     from regimes.tests.bai_perron import BaiPerronResults
@@ -1252,6 +1253,42 @@ class ADL(RegimesModelBase):
         from regimes.rolling.adl import RecursiveADL
 
         return RecursiveADL.from_model(self, min_nobs=min_nobs)
+
+
+    def markov_switching(
+        self,
+        k_regimes: int = 2,
+        **kwargs: Any,
+    ) -> MarkovADLResults:
+        """Fit a Markov regime-switching version of this ADL model.
+
+        Creates a MarkovADL from this model's specification and fits it.
+
+        Parameters
+        ----------
+        k_regimes : int
+            Number of regimes. Default is 2.
+        **kwargs
+            Additional keyword arguments. Model-level kwargs forwarded
+            to MarkovADL; fit-level kwargs forwarded to fit().
+
+        Returns
+        -------
+        MarkovADLResults
+            Fitted Markov switching ADL results.
+
+        See Also
+        --------
+        regimes.markov.MarkovADL : The underlying MS ADL model class.
+        """
+        from regimes.markov import MarkovADL
+
+        fit_kwargs_names = {"method", "maxiter", "em_iter", "search_reps"}
+        model_kwargs = {k: v for k, v in kwargs.items() if k not in fit_kwargs_names}
+        fit_kwargs = {k: v for k, v in kwargs.items() if k in fit_kwargs_names}
+
+        ms_model = MarkovADL.from_model(self, k_regimes=k_regimes, **model_kwargs)
+        return ms_model.fit(**fit_kwargs)
 
 
 def adl_summary_by_regime(

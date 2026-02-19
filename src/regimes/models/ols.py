@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.markov.results import MarkovRegressionResults
     from regimes.rolling.ols import RecursiveOLS, RollingOLS
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
     from regimes.tests.bai_perron import BaiPerronResults
@@ -965,6 +966,61 @@ class OLS(RegimesModelBase):
         from regimes.rolling.ols import RecursiveOLS
 
         return RecursiveOLS.from_model(self, min_nobs=min_nobs)
+
+
+    def markov_switching(
+        self,
+        k_regimes: int = 2,
+        **kwargs: Any,
+    ) -> MarkovRegressionResults:
+        """Fit a Markov regime-switching version of this OLS model.
+
+        Creates a MarkovRegression from this model's specification and
+        fits it. This is a convenience method for one-way mapping from
+        OLS to Markov switching.
+
+        Parameters
+        ----------
+        k_regimes : int
+            Number of regimes. Default is 2.
+        **kwargs
+            Additional keyword arguments passed to MarkovRegression and
+            its fit() method. Model-level kwargs (e.g., switching_trend,
+            switching_exog) are forwarded to MarkovRegression; fit-level
+            kwargs (e.g., method, maxiter, em_iter, search_reps) are
+            forwarded to fit().
+
+        Returns
+        -------
+        MarkovRegressionResults
+            Fitted Markov switching regression results.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from regimes import OLS
+        >>> np.random.seed(42)
+        >>> y = np.concatenate([np.random.randn(100), np.random.randn(100) + 3])
+        >>> X = np.column_stack([np.ones(200), np.random.randn(200)])
+        >>> model = OLS(y, X, has_constant=False)
+        >>> ms_results = model.markov_switching(k_regimes=2)
+        >>> print(ms_results.summary())
+
+        See Also
+        --------
+        regimes.markov.MarkovRegression : The underlying MS model class.
+        """
+        from regimes.markov import MarkovRegression
+
+        # Separate model-level kwargs from fit-level kwargs
+        fit_kwargs_names = {"method", "maxiter", "em_iter", "search_reps"}
+        model_kwargs = {k: v for k, v in kwargs.items() if k not in fit_kwargs_names}
+        fit_kwargs = {k: v for k, v in kwargs.items() if k in fit_kwargs_names}
+
+        ms_model = MarkovRegression.from_model(
+            self, k_regimes=k_regimes, **model_kwargs
+        )
+        return ms_model.fit(**fit_kwargs)
 
 
 def summary_by_regime(

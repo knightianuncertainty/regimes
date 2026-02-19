@@ -1,6 +1,13 @@
 """Visualization utilities for structural break analysis."""
 
 from regimes.visualization.andrews_ploberger import plot_f_sequence
+from regimes.visualization.markov import (
+    plot_ic,
+    plot_parameter_time_series,
+    plot_regime_shading,
+    plot_smoothed_probabilities,
+    plot_transition_matrix,
+)
 from regimes.visualization.breaks import (
     plot_break_confidence,
     plot_breaks,
@@ -32,6 +39,11 @@ from regimes.visualization.style import (
 __all__ = [
     "REGIMES_COLORS",
     "REGIMES_COLOR_CYCLE",
+    "plot_ic",
+    "plot_parameter_time_series",
+    "plot_regime_shading",
+    "plot_smoothed_probabilities",
+    "plot_transition_matrix",
     "add_break_dates",
     "add_confidence_band",
     "add_source",
