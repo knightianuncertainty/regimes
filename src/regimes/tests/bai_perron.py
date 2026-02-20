@@ -387,6 +387,42 @@ class BaiPerronTest(BreakTestBase):
         break_vars: Literal["all", "const"] = "all",
     ) -> BaiPerronTest:
         """Create BaiPerronTest from an OLS, AR, or ADL model.
+        This class method provides a convenient way to create a Bai-Perron
+        test directly from an existing model object, extracting the
+        appropriate data for break testing.
+
+        Parameters
+        ----------
+        model : OLS | AR | ADL
+            Model to test for structural breaks.
+        break_vars : "all" | "const"
+            Which variables can have breaks:
+            - "all": All regressors can break (default)
+            - "const": Only intercept can break (mean-shift model)
+
+        Returns
+        -------
+        BaiPerronTest
+            Test instance ready for .fit()
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from regimes import OLS, BaiPerronTest
+        >>> np.random.seed(42)
+        >>> n = 200
+        >>> X = np.column_stack([np.ones(n), np.random.randn(n)])
+        >>> y = 1 + 0.5 * X[:, 1] + np.random.randn(n)
+        >>> model = OLS(y, X, has_constant=False)
+        >>> bp_results = BaiPerronTest.from_model(model).fit()
+        >>> print(f"Detected breaks: {bp_results.break_indices}")
+
+        Notes
+        -----
+        For AR and ADL models, the test uses the effective sample (after
+        dropping initial observations for lags) and tests for breaks in all
+        coefficients including the constant, AR parameters, and distributed
+        lag parameters.
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR
