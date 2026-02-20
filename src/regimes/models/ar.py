@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.gets.saturation import SaturationResults
     from regimes.markov.results import MarkovARResults
     from regimes.rolling.ar import RecursiveAR, RollingAR
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
@@ -1198,6 +1199,64 @@ class AR(TimeSeriesModelBase):
 
         ms_model = MarkovAR.from_model(self, k_regimes=k_regimes, **model_kwargs)
         return ms_model.fit(**fit_kwargs)
+
+    def isat(
+        self,
+        iis: bool = False,
+        sis: bool = False,
+        mis: bool | list[str] | list[int] = False,
+        tis: bool = False,
+        alpha: float = 0.05,
+        **kwargs: Any,
+    ) -> SaturationResults:
+        """Run indicator saturation analysis on this AR model.
+
+        Convenience method that calls ``isat()`` using this model's
+        endog, exog, AR lag structure, and trend specification.
+
+        Parameters
+        ----------
+        iis : bool
+            Include impulse indicator saturation.
+        sis : bool
+            Include step indicator saturation (level shifts).
+        mis : bool | list[str] | list[int]
+            Include multiplicative indicator saturation.
+        tis : bool
+            Include trend indicator saturation.
+        alpha : float
+            Significance level for GETS selection.
+        **kwargs
+            Additional keyword arguments passed to ``isat()``.
+
+        Returns
+        -------
+        SaturationResults
+
+        See Also
+        --------
+        regimes.gets.saturation.isat : The underlying saturation function.
+        """
+        from regimes.gets.saturation import isat as _isat
+
+        has_constant = self.trend in ("c", "ct")
+
+        exog = self._exog_orig if self._exog_orig is not None else None
+        if exog is not None:
+            exog = np.asarray(exog, dtype=np.float64)
+
+        return _isat(
+            endog=self.endog,
+            exog=exog,
+            ar_lags=list(self.lags),
+            iis=iis,
+            sis=sis,
+            mis=mis,
+            tis=tis,
+            alpha=alpha,
+            has_constant=has_constant,
+            **kwargs,
+        )
 
 
 def ar_summary_by_regime(
