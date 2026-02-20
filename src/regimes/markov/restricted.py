@@ -107,9 +107,7 @@ class _RestrictedFilterMixin:
         log_initial = np.log(initial_probabilities)
         log_transition = self._restricted_log_transition(regime_transition)
 
-        filtered_marginal_probabilities = np.zeros(
-            (k_regimes, nobs), dtype=dtype
-        )
+        filtered_marginal_probabilities = np.zeros((k_regimes, nobs), dtype=dtype)
         predicted_joint_probabilities = np.zeros(
             (k_regimes,) * (order + 1) + (nobs,), dtype=dtype
         )
@@ -125,10 +123,7 @@ class _RestrictedFilterMixin:
         for i in range(order):
             if log_transition.shape[-1] > 1:
                 transition_t = i
-            tmp = (
-                np.reshape(log_transition[..., transition_t], shape + (1,) * i)
-                + tmp
-            )
+            tmp = np.reshape(log_transition[..., transition_t], shape + (1,) * i) + tmp
         filtered_joint_probabilities[..., 0] = tmp
 
         if log_transition.shape[-1] > 1:
@@ -151,12 +146,8 @@ class _RestrictedFilterMixin:
             log_transition,
             conditional_loglikelihoods.reshape(k_regimes ** (order + 1), nobs),
             joint_loglikelihoods,
-            predicted_joint_probabilities.reshape(
-                k_regimes ** (order + 1), nobs
-            ),
-            filtered_joint_probabilities.reshape(
-                k_regimes ** (order + 1), nobs + 1
-            ),
+            predicted_joint_probabilities.reshape(k_regimes ** (order + 1), nobs),
+            filtered_joint_probabilities.reshape(k_regimes ** (order + 1), nobs + 1),
         )
 
         predicted_joint_probabilities_log = predicted_joint_probabilities
@@ -165,9 +156,7 @@ class _RestrictedFilterMixin:
         predicted_joint_probabilities = np.exp(predicted_joint_probabilities)
         filtered_joint_probabilities = np.exp(filtered_joint_probabilities)
 
-        filtered_marginal_probabilities = filtered_joint_probabilities[
-            ..., 1:
-        ]
+        filtered_marginal_probabilities = filtered_joint_probabilities[..., 1:]
         for _i in range(1, filtered_marginal_probabilities.ndim - 1):
             filtered_marginal_probabilities = np.sum(
                 filtered_marginal_probabilities, axis=-2
@@ -232,15 +221,9 @@ class _RestrictedFilterMixin:
             k_regimes,
             order,
             log_transition,
-            predicted_joint_probabilities_log.reshape(
-                k_regimes ** (order + 1), nobs
-            ),
-            filtered_joint_probabilities_log.reshape(
-                k_regimes ** (order + 1), nobs
-            ),
-            smoothed_joint_probabilities.reshape(
-                k_regimes ** (order + 1), nobs
-            ),
+            predicted_joint_probabilities_log.reshape(k_regimes ** (order + 1), nobs),
+            filtered_joint_probabilities_log.reshape(k_regimes ** (order + 1), nobs),
+            smoothed_joint_probabilities.reshape(k_regimes ** (order + 1), nobs),
         )
 
         smoothed_joint_probabilities = np.exp(smoothed_joint_probabilities)
@@ -334,7 +317,7 @@ class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
         # Reconstruct transition matrix from the constrained params
         # statsmodels stores transition params column by column, k-1 per col
         tp_start = 0
-        tp = constrained[tp_start:tp_start + n_tp]
+        tp = constrained[tp_start : tp_start + n_tp]
 
         # Rebuild the full transition matrix
         P = np.zeros((k, k))
@@ -390,7 +373,7 @@ class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
             new_tp[idx : idx + k - 1] = P[: k - 1, j]
             idx += k - 1
 
-        constrained[tp_start:tp_start + n_tp] = new_tp
+        constrained[tp_start : tp_start + n_tp] = new_tp
         return constrained
 
 
@@ -433,7 +416,7 @@ class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregres
         k = self.k_regimes
         n_tp = k * (k - 1)
         tp_start = 0
-        tp = constrained[tp_start:tp_start + n_tp]
+        tp = constrained[tp_start : tp_start + n_tp]
 
         P = np.zeros((k, k))
         idx = 0
@@ -479,7 +462,7 @@ class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregres
             new_tp[idx : idx + k - 1] = P[: k - 1, j]
             idx += k - 1
 
-        constrained[tp_start:tp_start + n_tp] = new_tp
+        constrained[tp_start : tp_start + n_tp] = new_tp
         return constrained
 
 

@@ -84,7 +84,9 @@ class TestRestrictedMarkovRegression:
             )
             r_results = r_model.fit(search_reps=5)
 
-        assert np.isfinite(u_results.llf), "Unrestricted model should produce finite llf"
+        assert np.isfinite(u_results.llf), (
+            "Unrestricted model should produce finite llf"
+        )
         assert np.isfinite(r_results.llf), "Restricted model should produce finite llf"
         # Restricted should be <= unrestricted (with small tolerance)
         assert r_results.llf <= u_results.llf + 1.0
@@ -115,11 +117,13 @@ class TestNonRecurringSmoothedProbabilities:
     @staticmethod
     def _recurring_data(rng: np.random.Generator) -> NDArray[np.floating[Any]]:
         """Data that goes 0→1→0 (recurring pattern)."""
-        return np.concatenate([
-            rng.standard_normal(100) + 0.0,
-            rng.standard_normal(100) + 5.0,
-            rng.standard_normal(100) + 0.0,
-        ])
+        return np.concatenate(
+            [
+                rng.standard_normal(100) + 0.0,
+                rng.standard_normal(100) + 5.0,
+                rng.standard_normal(100) + 0.0,
+            ]
+        )
 
     def test_non_recurring_smoothed_probs_monotonic(
         self, rng: np.random.Generator
@@ -180,9 +184,7 @@ class TestNonRecurringSmoothedProbabilities:
                 f"{p_high[200]:.6f}, expected > 0.99"
             )
 
-    def test_restricted_ar_smoothed_probs(
-        self, rng: np.random.Generator
-    ) -> None:
+    def test_restricted_ar_smoothed_probs(self, rng: np.random.Generator) -> None:
         """Same monotonicity test for RestrictedMarkovAR.non_recurring()."""
         y = self._recurring_data(rng)
 
@@ -275,7 +277,9 @@ class TestRestrictedMarkovAR:
             results = model.fit(search_reps=5)
 
         assert isinstance(results.restricted_transitions, dict)
-        assert np.isfinite(results.llf), "Non-recurring AR model should produce finite llf"
+        assert np.isfinite(results.llf), (
+            "Non-recurring AR model should produce finite llf"
+        )
 
     def test_result_type(self, two_regime_ar_data: NDArray[np.floating[Any]]) -> None:
         from regimes.markov.results import MarkovARResults
