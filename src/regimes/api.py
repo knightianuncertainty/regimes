@@ -4,9 +4,17 @@ This module provides a clean namespace for the most commonly used
 classes and functions in the regimes package.
 """
 
-# Models
 # Diagnostics
 from regimes.diagnostics import DiagnosticsResults, DiagnosticTestResult
+
+# GETS model selection and indicator saturation
+from regimes.gets import (
+    GETSResults,
+    SaturationResults,
+    TerminalModel,
+    gets_search,
+    isat,
+)
 
 # Markov switching models
 from regimes.markov import (
@@ -104,6 +112,11 @@ from regimes.visualization import (
     plot_smoothed_probabilities,
     plot_transition_matrix,
 )
+from regimes.visualization.gets import (
+    plot_mis_coefficients,
+    plot_regime_levels,
+    plot_sis_coefficients,
+)
 
 __all__ = [
     "ADL",
@@ -125,6 +138,7 @@ __all__ = [
     "CovType",
     "DiagnosticTestResult",
     "DiagnosticsResults",
+    "GETSResults",
     "MarkovADL",
     "MarkovADLResults",
     "MarkovAR",
@@ -157,11 +171,15 @@ __all__ = [
     "RollingOLS",
     "RollingOLSResults",
     "RollingResultsBase",
+    "SaturationResults",
     "SequentialRestrictionResults",
     "SequentialRestrictionTest",
+    "TerminalModel",
     "TimeSeriesModelBase",
     "adl_summary_by_regime",
     "ar_summary_by_regime",
+    "gets_search",
+    "isat",
     "plot_actual_fitted",
     "plot_break_confidence",
     "plot_breaks",
@@ -170,14 +188,17 @@ __all__ = [
     "plot_diagnostics",
     "plot_f_sequence",
     "plot_ic",
+    "plot_mis_coefficients",
     "plot_parameter_time_series",
     "plot_params_over_time",
+    "plot_regime_levels",
     "plot_regime_means",
     "plot_regime_shading",
     "plot_residual_acf",
     "plot_residual_distribution",
     "plot_rolling_coefficients",
     "plot_scaled_residuals",
+    "plot_sis_coefficients",
     "plot_smoothed_probabilities",
     "plot_transition_matrix",
     "summary_by_regime",

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GETS indicator saturation** (Autometrics algorithm, Doornik 2009; Castle, Doornik & Hendry 2012)
+  - `gets_search()`: General-to-specific model selection with bounded iterative search, multi-path exploration (up to 5 paths), encompassing tests, and diagnostic checks
+  - `isat()`: Indicator saturation entry point supporting four indicator types:
+    - **SIS** (Step Indicator Saturation) — detect level shifts in the intercept
+    - **IIS** (Impulse Indicator Saturation) — detect one-time outliers
+    - **MIS** (Multiplicative Indicator Saturation) — detect coefficient shifts (interact steps with regressors)
+    - **TIS** (Trend Indicator Saturation) — detect broken linear trends
+  - User-supplied custom indicators via `user_indicators` parameter
+  - Split-half block procedure for large indicator sets exceeding n/2 candidates
+  - **Dual representation**: shifts (initial level + step changes) ↔ regime levels (cumulated per-parameter schedules) with standard error propagation via the delta method
+  - `SaturationResults` dataclass with `.summary()`, `.break_dates`, `.n_regimes`, `.retained_indicators`, `.shifts`, `.regime_levels`
+  - `GETSResults` and `TerminalModel` dataclasses for detailed GETS search inspection
+  - `ShiftsRepresentation`, `RegimeLevelsRepresentation`, `ParameterRegime` dataclasses
+  - `shifts_to_levels()` / `levels_to_shifts()` conversion functions
+  - Indicator generators: `step_indicators()`, `impulse_indicators()`, `multiplicative_indicators()`, `trend_indicators()`
+- **GETS visualization functions**
+  - `plot_sis_coefficients()`: Intercept regime levels as step function with confidence bands
+  - `plot_mis_coefficients()`: Per-parameter coefficient regime levels
+  - `plot_regime_levels()`: Combined SIS + MIS regime levels (multi-panel)
+  - `.plot_sis()`, `.plot_mis()`, `.plot_regime_levels()` convenience methods on `SaturationResults`
+- **`.isat()` convenience methods** on OLS, AR, and ADL models for one-step indicator saturation
+- **Example notebook** `05_gets_indicator_saturation.ipynb` demonstrating all features including AR(1) with dual structural breaks, method comparison (GETS vs Bai-Perron vs Markov switching), and end-to-end workflow
+- 166 new tests (1069 total)
+
 ## [0.3.2] - 2026-02-20
 
 ### Fixed

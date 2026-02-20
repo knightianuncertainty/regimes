@@ -13,11 +13,12 @@ A Python package for structural break detection and estimation in time-series ec
 - **Chow Test**: Test for structural breaks at known break points with standard and predictive variants
 - **CUSUM Tests**: CUSUM and CUSUM-SQ tests for parameter and variance instability (Brown, Durbin, Evans, 1975)
 - **Andrews-Ploberger Test**: SupF, ExpF, and AveF tests for a structural break at unknown date (Andrews, 1993; Andrews & Ploberger, 1994)
+- **GETS Indicator Saturation**: Autometrics algorithm (Doornik 2009) with SIS (level shifts), IIS (outliers), MIS (coefficient shifts), TIS (broken trends), dual representation (shifts ↔ regime levels), and split-half block procedure
 - **Markov Regime-Switching**: Markov switching regression, AR, and ADL models with regime number selection and restricted transitions
 - **Time-Series Models**: AR, ADL, OLS with HAC standard errors and known break support
 - **ADL Models**: Autoregressive Distributed Lag models with flexible lag specification and distributed lag diagnostics
 - **Rolling & Recursive Estimation**: Track parameter evolution with fixed or expanding windows
-- **Model Selection**: BIC, LWZ criteria for selecting the number of breaks; AIC/BIC lag selection for ADL
+- **Model Selection**: GETS general-to-specific search; BIC, LWZ criteria for selecting the number of breaks; AIC/BIC lag selection for ADL
 - **Visualization**: Plot time series with break lines, regime means, rolling coefficients, and confidence intervals
 - **statsmodels Integration**: Familiar `Model.fit() -> Results` API pattern
 
@@ -250,6 +251,47 @@ restricted_results = restricted.fit()
 results.plot_transition_matrix()
 ```
 
+### Indicator Saturation (GETS)
+
+Detect structural breaks automatically using the Autometrics algorithm with indicator saturation:
+
+```python
+import numpy as np
+import regimes as rg
+
+# Simulate data with two level shifts
+rng = np.random.default_rng(42)
+y = np.concatenate([
+    rng.normal(0, 1, 100),
+    rng.normal(3, 1, 100),
+    rng.normal(1, 1, 100),
+])
+
+# Step indicator saturation: detect level shifts
+result = rg.isat(y, sis=True, alpha=0.01)
+print(result.summary())
+print(f"Break dates: {result.break_dates}")
+result.plot_sis()
+
+# Inspect regime levels
+for param, regimes in result.regime_levels.param_regimes.items():
+    for r in regimes:
+        print(f"  {param} [{r.start}-{r.end}]: level={r.level:.3f}")
+```
+
+Use `.isat()` convenience methods on any model:
+
+```python
+# AR(1) with SIS + MIS: detect intercept and coefficient shifts
+ar_model = rg.AR(y, lags=1)
+result = ar_model.isat(sis=True, mis=True, alpha=0.01)
+result.plot_regime_levels()
+
+# ADL with indicator saturation
+adl_model = rg.ADL(y, x, lags=1, exog_lags=0)
+result = adl_model.isat(sis=True, alpha=0.01)
+```
+
 ### OLS with HAC Standard Errors
 
 ```python
@@ -460,6 +502,7 @@ fig, axes = rg.plot_residual_acf(results, nlags=15)
 | `RestrictedMarkovAR` | Markov AR with restricted transition probabilities |
 
 All models (`OLS`, `AR`, `ADL`) have:
+- `.isat(sis, iis, mis, tis, alpha)` method for indicator saturation (GETS)
 - `.bai_perron()` method for integrated break detection
 - `.chow_test(break_points)` method for testing breaks at known dates
 - `.cusum_test()` method for CUSUM parameter instability test
@@ -501,6 +544,18 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `SequentialRestrictionTest` | GETS-style sequential restriction of transition probabilities |
 | `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential LRT |
 
+### GETS / Indicator Saturation
+
+| Class / Function | Description |
+|------------------|-------------|
+| `isat` | Main entry point for indicator saturation (SIS, IIS, MIS, TIS) |
+| `gets_search` | Low-level general-to-specific model selection algorithm |
+| `SaturationResults` | Results from `isat()` with dual representation, break dates, regime levels |
+| `GETSResults` | Detailed GETS search results with terminal models |
+| `ShiftsRepresentation` | Shifts form: initial level + step changes |
+| `RegimeLevelsRepresentation` | Regime levels form: per-parameter level schedules |
+| `shifts_to_levels` / `levels_to_shifts` | Convert between representations |
+
 **Key methods:**
 - `BaiPerronTest.from_model(model)` - Create test from OLS or AR model
 - `BaiPerronResults.to_ols()` - Convert results to OLS with detected breaks
@@ -532,6 +587,9 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `plot_transition_matrix` | Heatmap of transition probability matrix |
 | `plot_parameter_time_series` | Regime-dependent parameter as step function over time |
 | `plot_ic` | Information criteria vs number of regimes |
+| `plot_sis_coefficients` | Intercept regime levels as step function with confidence bands |
+| `plot_mis_coefficients` | Per-parameter coefficient regime levels |
+| `plot_regime_levels` | Combined SIS + MIS regime levels (multi-panel) |
 
 ### Style Utilities
 
@@ -557,7 +615,7 @@ All regression models support multiple covariance estimators:
 
 ## Testing
 
-The package includes a comprehensive test suite with 903 tests:
+The package includes a comprehensive test suite with 1069 tests:
 
 ```bash
 # Run all tests
@@ -592,6 +650,8 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 - Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary time series and the business cycle. *Econometrica*, 57(2), 357-384.
 - Chib, S. (1998). Estimation and comparison of multiple change-point models. *Journal of Econometrics*, 86(2), 221-241.
 - Andrews, D. W. K. (2001). Testing when a parameter is on the boundary of the maintained hypothesis. *Econometrica*, 69(3), 683-734.
+- Doornik, J. A. (2009). Autometrics. In J. L. Castle & N. Shephard (Eds.), *The Methodology and Practice of Econometrics*. Oxford University Press.
+- Castle, J. L., Doornik, J. A., & Hendry, D. F. (2012). Model selection when there are multiple breaks. *Journal of Econometrics*, 169(2), 239-246.
 
 ## License
 
