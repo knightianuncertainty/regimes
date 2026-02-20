@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 5: v0.5.0 - Documentation & Release** In progress; Phase 4 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 5: v0.5.0 - Documentation & Release** In progress — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -76,10 +76,23 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 
 ### Phase 4: v0.4.0 - Model Selection & Indicator Saturation
 
-- [ ] Autometrics-inspired general-to-specific model-selection algorithm
-- [ ] Step-indicator saturation (SIS)
-- [ ] Multiplicative step-indicator saturation
-- [ ] Target: 88%+ test coverage
+- [x] Autometrics-inspired general-to-specific model-selection algorithm (`gets_search()`)
+  - [x] Bounded iterative search with multi-path exploration (up to 5 paths)
+  - [x] Encompassing tests and diagnostic checks
+  - [x] `GETSResults` and `TerminalModel` dataclasses
+- [x] Indicator saturation (`isat()`) with split-half block procedure
+  - [x] Step indicator saturation (SIS) — level shifts in the intercept
+  - [x] Impulse indicator saturation (IIS) — one-time outliers
+  - [x] Multiplicative indicator saturation (MIS) — coefficient shifts
+  - [x] Trend indicator saturation (TIS) — broken linear trends
+  - [x] User-supplied custom indicators
+- [x] Dual representation: shifts ↔ regime levels with SE propagation via delta method
+  - [x] `ShiftsRepresentation`, `RegimeLevelsRepresentation`, `ParameterRegime` dataclasses
+  - [x] `shifts_to_levels()` / `levels_to_shifts()` conversion functions
+- [x] GETS visualization: `plot_sis_coefficients()`, `plot_mis_coefficients()`, `plot_regime_levels()`
+- [x] `.isat()` convenience methods on OLS, AR, and ADL models
+- [x] Example notebook: `05_gets_indicator_saturation.ipynb`
+- [x] 166 new tests (1069 total, 86% coverage)
 
 ### Phase 5: v0.5.0 - Documentation & Release
 
@@ -125,7 +138,7 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.0 | Complete | Structural break tests (Chow, CUSUM, Andrews-Ploberger), Markov-switching, 880 tests (86% coverage), 4 example notebooks |
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
-| 0.4.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
+| 0.4.0 | In progress | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics model selection, dual representation, 1069 tests |
 | 0.5.0 | In progress | Date-aware summaries, Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
 | 0.7.0+ | Future | End-to-end forecasting workflow with structural change |
