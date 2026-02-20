@@ -40,7 +40,7 @@ def _load_csv(name: str) -> dict[str, np.ndarray]:
         pytest.skip(f"Reference dataset not found: {path}")
     import csv
 
-    with open(path) as f:
+    with path.open() as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     result: dict[str, np.ndarray] = {}
@@ -99,9 +99,7 @@ class TestBaiPerronAgainstStrucchange:
         test = BaiPerronTest(y)
         result = test.fit(max_breaks=3, trimming=0.15, selection="bic")
 
-        assert result.n_breaks == 1, (
-            f"Expected 1 break (as R), got {result.n_breaks}"
-        )
+        assert result.n_breaks == 1, f"Expected 1 break (as R), got {result.n_breaks}"
         assert list(result.break_indices) == _DGP1_R_BREAKS
 
     def test_dgp1_ssr_values(self) -> None:
@@ -141,9 +139,7 @@ class TestBaiPerronAgainstStrucchange:
         test = BaiPerronTest(y, exog_break=exog_break)
         result = test.fit(max_breaks=3, trimming=0.15, selection="bic")
 
-        assert result.n_breaks == 1, (
-            f"Expected 1 break (as R), got {result.n_breaks}"
-        )
+        assert result.n_breaks == 1, f"Expected 1 break (as R), got {result.n_breaks}"
         assert list(result.break_indices) == _DGP2_R_BREAKS
 
     def test_dgp2_ssr_values(self) -> None:
@@ -184,9 +180,7 @@ class TestBaiPerronAgainstStrucchange:
         test = BaiPerronTest(y)
         result = test.fit(max_breaks=4, trimming=0.15, selection="bic")
 
-        assert result.n_breaks == 2, (
-            f"Expected 2 breaks (as R), got {result.n_breaks}"
-        )
+        assert result.n_breaks == 2, f"Expected 2 breaks (as R), got {result.n_breaks}"
         assert list(result.break_indices) == _DGP3_R_BREAKS
 
     def test_dgp3_ssr_values(self) -> None:

@@ -457,18 +457,18 @@ class BaiPerronTest(BreakTestBase):
             # Only constant breaks (mean-shift model)
             # exog contains all regressors (non-breaking)
             # exog_break defaults to constant
-            
+
             # We need to separate the constant from other regressors
             # Check if constant exists in exog_all
             # Find ALL constant columns (there may be duplicates)
             const_indices: list[int] = []
-            
+
             for i in range(exog_all.shape[1]):
                 # Check for constant column (all ones)
                 # We use a loose tolerance because of potential floating point issues
                 if np.allclose(exog_all[:, i], 1.0, atol=1e-5):
                     const_indices.append(i)
-            
+
             if const_indices:
                 # Remove all constant columns from exog (non-breaking)
                 non_breaking_indices = [
@@ -478,10 +478,10 @@ class BaiPerronTest(BreakTestBase):
                     exog_non_break = exog_all[:, non_breaking_indices]
                 else:
                     exog_non_break = None
-                
+
                 # exog_break will be a single constant column
                 exog_break = np.ones((len(endog), 1))
-                
+
                 return cls(endog, exog=exog_non_break, exog_break=exog_break)
             else:
                 # No constant found, so we just use exog_all as non-breaking
@@ -542,7 +542,7 @@ class BaiPerronTest(BreakTestBase):
                 X_list.append(self.exog_break[start:end])
             if self.exog is not None:
                 X_list.append(self.exog[start:end])
-            
+
             if not X_list:
                 X_seg = None
             else:
@@ -855,93 +855,97 @@ class BaiPerronTest(BreakTestBase):
         #
         # When p = 0 (pure structural change), no iteration is needed and the
         # standard Bai-Perron dynamic programming algorithm is used directly.
-        
+
         if self.p > 0:
             # Partial structural change model
             # Iterative procedure per Bai & Perron (2003), Section 3.
-            
+
             # Initial estimate of fixed coefficients (assuming no breaks)
             X_full = []
             if self.exog_break is not None:
                 X_full.append(self.exog_break)
             if self.exog is not None:
                 X_full.append(self.exog)
-            
+
             X_mat = np.column_stack(X_full)
             # Use OLS to get initial beta
             beta_full = np.linalg.lstsq(X_mat, self.endog, rcond=None)[0]
-            
+
             # Extract fixed coefficients (last p)
-            beta_fixed = beta_full[-self.p:]
-            
+            beta_fixed = beta_full[-self.p :]
+
             ssr_vals = {}
             breaks_by_m = {}
-            
+
             # m=0 case: No breaks
             # SSR is just the SSR from the full model with no breaks
             resid_0 = self.endog - X_mat @ beta_full
             ssr_vals[0] = float(np.sum(resid_0**2))
             breaks_by_m[0] = []
-            
+
             for m in range(1, max_breaks + 1):
                 # Initialize beta_fixed from m=0 (or could use previous m's result)
                 # We restart from the no-break estimate to avoid getting stuck in local optima
                 curr_beta_fixed = beta_fixed.copy()
-                
+
                 # Iterative procedure for specific m
-                # We need to define Full_Design and full_beta outside the loop 
+                # We need to define Full_Design and full_beta outside the loop
                 # in case the loop doesn't run (though it always runs at least once)
                 Full_Design = None
                 full_beta = None
                 max_iter = 50
                 converged = False
-                
+
                 for _iter in range(max_iter):
                     # 1. Partial out fixed regressors
                     if self.exog is not None:
                         y_star = self.endog - self.exog @ curr_beta_fixed
                     else:
                         y_star = self.endog
-                    
+
                     # 2. Find optimal breaks for y_star on exog_break
                     # We pass x=self.exog_break to override default behavior
-                    ssr_matrix_m = self._build_ssr_matrix(h, y=y_star, x=self.exog_break)
+                    ssr_matrix_m = self._build_ssr_matrix(
+                        h, y=y_star, x=self.exog_break
+                    )
                     ssr_m, breaks_m = self._dynamic_programming(m, h, ssr_matrix_m)
-                    
+
                     # 3. Re-estimate beta_fixed given these breaks
                     # Construct full design matrix with breaks
-                    
+
                     # Z_bar columns (breaking regressors)
                     boundaries = [0] + breaks_m + [T]
                     Z_cols = []
                     for i in range(len(boundaries) - 1):
-                        start, end = boundaries[i], boundaries[i+1]
+                        start, end = boundaries[i], boundaries[i + 1]
                         for col in range(self.q):
                             z_col = np.zeros(T)
                             z_col[start:end] = self.exog_break[start:end, col]
                             Z_cols.append(z_col)
-                    
+
                     if not Z_cols:
-                         # Should not happen if q > 0
-                         Z_bar = np.zeros((T, 0))
+                        # Should not happen if q > 0
+                        Z_bar = np.zeros((T, 0))
                     else:
                         Z_bar = np.column_stack(Z_cols)
-                        
+
                     Full_Design = np.column_stack([Z_bar, self.exog])
-                    
+
                     # Estimate
                     full_beta = np.linalg.lstsq(Full_Design, self.endog, rcond=None)[0]
-                    
+
                     # Update beta_fixed (last p coeffs)
-                    new_beta_fixed = full_beta[-self.p:]
-                    
+                    new_beta_fixed = full_beta[-self.p :]
+
                     # Check convergence
-                    if np.allclose(curr_beta_fixed, new_beta_fixed, rtol=1e-4, atol=1e-6):
+                    if np.allclose(
+                        curr_beta_fixed, new_beta_fixed, rtol=1e-4, atol=1e-6
+                    ):
                         curr_beta_fixed = new_beta_fixed
                         converged = True
                         break
                     curr_beta_fixed = new_beta_fixed
-                
+
                 if not converged:
                     warnings.warn(
                         f"Partial structural change iterative procedure did not "
@@ -949,7 +953,7 @@ class BaiPerronTest(BreakTestBase):
                         f"Results may be unreliable.",
                         stacklevel=2,
                     )
-                
+
                 # Store results for this m
                 # Re-calculate SSR with final beta
                 if Full_Design is not None and full_beta is not None:
@@ -961,19 +965,18 @@ class BaiPerronTest(BreakTestBase):
                     ssr_vals[m] = np.inf
                     breaks_by_m[m] = []
 
-            
         else:
             # Pure structural change (original code)
             ssr_matrix = self._build_ssr_matrix(h)
-            
+
             ssr_vals = {}
             breaks_by_m = {}
-            
+
             # No breaks case
             ssr_0 = float(ssr_matrix[0, T - 1])
             ssr_vals[0] = ssr_0
             breaks_by_m[0] = []
-            
+
             for m in range(1, max_breaks + 1):
                 ssr_m, breaks_m = self._dynamic_programming(m, h, ssr_matrix)
                 ssr_vals[m] = ssr_m
@@ -987,27 +990,29 @@ class BaiPerronTest(BreakTestBase):
         seqf_critical: dict[int, float] = {}
         bic_vals: dict[int, float] = {}
         lwz_vals: dict[int, float] = {}
-        
+
         # Compute Information Criteria and SupF stats
         for m in range(max_breaks + 1):
             if m == 0:
-                bic_vals[0], lwz_vals[0] = self._compute_information_criteria(ssr_vals[0], 0)
+                bic_vals[0], lwz_vals[0] = self._compute_information_criteria(
+                    ssr_vals[0], 0
+                )
                 continue
-                
+
             # Sup-F test
             # F = ((SSR_0 - SSR_m) / (m * q)) / (SSR_m / (T - (m + 1) * q - p))
             df1 = m * q
             df2 = T - (m + 1) * q - self.p
-            
+
             ssr_m = ssr_vals[m]
             ssr_0 = ssr_vals[0]
-            
+
             if df2 <= 0 or ssr_m <= 0:
                 supf = 0.0
             else:
                 supf = ((ssr_0 - ssr_m) / df1) / (ssr_m / df2)
                 supf = max(0.0, supf)
-            
+
             supf_stats[m] = supf
 
             # Critical value (use approximation)

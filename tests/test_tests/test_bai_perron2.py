@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from regimes import BaiPerronTest, OLS
+
+from regimes import OLS, BaiPerronTest
 
 
 class TestBaiPerronCorrectness:
@@ -160,7 +161,6 @@ class TestBaiPerronCorrectness:
         creates a valid mean-shift model and fit() does not crash.
         """
         np.random.seed(77)
-        n = 100
         y = np.concatenate([np.random.randn(50), np.random.randn(50) + 4.0])
 
         bp = BaiPerronTest(y)
