@@ -275,6 +275,7 @@ def _build_core_regressors(
 
     # Exog columns
     if exog is not None:
+        assert exog_names is not None  # initialized above when exog is not None
         for j in range(exog.shape[1]):
             columns.append(exog[maxlag:, j])
             names_final.append(exog_names[j])
@@ -548,7 +549,7 @@ def isat(
             X_nc = np.column_stack(non_const_cols)
             mis_vars: Sequence[int | str] | None = None
             if isinstance(mis, list):
-                mis_vars = mis  # type: ignore[assignment]
+                mis_vars = mis
 
             M, m_names = multiplicative_indicators(
                 X_nc,

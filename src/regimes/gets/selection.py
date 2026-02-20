@@ -568,7 +568,7 @@ def gets_search(
     def _get_ic(tm: TerminalModel) -> float:
         r = tm.results
         ic_map = {"bic": r.bic, "aic": r.aic, "hq": r.hq}
-        return ic_map.get(selection, r.bic)  # type: ignore[return-value]
+        return ic_map.get(selection, r.bic)
 
     selected = min(surviving, key=_get_ic)
 

@@ -1241,9 +1241,13 @@ class AR(TimeSeriesModelBase):
 
         has_constant = self.trend in ("c", "ct")
 
+        exog = self._exog_orig if self._exog_orig is not None else None
+        if exog is not None:
+            exog = np.asarray(exog, dtype=np.float64)
+
         return _isat(
             endog=self.endog,
-            exog=self._exog_orig if self._exog_orig is not None else None,
+            exog=exog,
             ar_lags=list(self.lags),
             iis=iis,
             sis=sis,

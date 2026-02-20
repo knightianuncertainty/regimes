@@ -1337,13 +1337,17 @@ class ADL(RegimesModelBase):
             exog_lags_param = self._exog_lags_raw
         elif isinstance(self._exog_lags_raw, dict):
             exog_lags_param = {
-                str(k): (max(v) if isinstance(v, (list, tuple)) else int(v))
+                str(k): (v if isinstance(v, int) else max(v))
                 for k, v in self._exog_lags_raw.items()
             }
 
+        exog = self._exog_orig if self._exog_orig is not None else None
+        if exog is not None:
+            exog = np.asarray(exog, dtype=np.float64)
+
         return _isat(
             endog=self.endog,
-            exog=self._exog_orig,
+            exog=exog,
             ar_lags=list(self.lags),
             exog_lags=exog_lags_param,
             iis=iis,
