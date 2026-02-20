@@ -134,7 +134,7 @@ class _RestrictedFilterMixin:
         if log_transition.shape[-1] > 1:
             log_transition = log_transition[..., self.order :]  # type: ignore[attr-defined]
 
-        prefix, dtype_blas, _ = find_best_blas_type(
+        prefix, _dtype_blas, _ = find_best_blas_type(
             (
                 log_transition,
                 conditional_loglikelihoods,
@@ -168,7 +168,7 @@ class _RestrictedFilterMixin:
         filtered_marginal_probabilities = filtered_joint_probabilities[
             ..., 1:
         ]
-        for i in range(1, filtered_marginal_probabilities.ndim - 1):
+        for _i in range(1, filtered_marginal_probabilities.ndim - 1):
             filtered_marginal_probabilities = np.sum(
                 filtered_marginal_probabilities, axis=-2
             )
@@ -219,7 +219,7 @@ class _RestrictedFilterMixin:
 
         log_transition = self._restricted_log_transition(regime_transition)
 
-        prefix, dtype_blas, _ = find_best_blas_type(
+        prefix, _dtype_blas, _ = find_best_blas_type(
             (
                 log_transition,
                 predicted_joint_probabilities_log,
@@ -246,7 +246,7 @@ class _RestrictedFilterMixin:
         smoothed_joint_probabilities = np.exp(smoothed_joint_probabilities)
 
         smoothed_marginal_probabilities = smoothed_joint_probabilities
-        for i in range(1, smoothed_marginal_probabilities.ndim - 1):
+        for _i in range(1, smoothed_marginal_probabilities.ndim - 1):
             smoothed_marginal_probabilities = np.sum(
                 smoothed_marginal_probabilities, axis=-2
             )
