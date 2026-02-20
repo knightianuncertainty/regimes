@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-02-20
+
+### Fixed
+
+- **Bai-Perron partial structural change model failing when `exog_break` is a subset of `exog`**: Duplicate columns caused multicollinearity in the regime design matrix. PR #4.
+- **CI lint errors** from PR #4 code (ruff format/check, issue #7)
+
+### Added
+
+- **R cross-validation reference tests** for Bai-Perron (903 tests total, 86% coverage)
+
+### Changed
+
+- Test PyPI publish step made non-blocking (`continue-on-error`) in release workflow
+
+## [0.3.1] - 2026-02-19
+
 ### Fixed
 
 - **Smoothed probability leakage in restricted Markov models**: statsmodels' Hamilton filter and Kim smoother convert zero transition probabilities to `log(max(0, 1e-20)) ≈ -46`, which leaks ~1e-20 probability per step. Over many time steps with strong data, this accumulates and overwhelms transition restrictions, causing non-recurring models to show impossible regime reversals. Added `_RestrictedFilterMixin` that overrides `_filter`/`_smooth` in both restricted statsmodels subclasses with `_LOG_ZERO = -1000` to eliminate leakage. 3 new tests verify smoothed probability monotonicity (880 tests total).
