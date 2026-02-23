@@ -19,6 +19,7 @@ A Python package for structural break detection and estimation in time-series ec
 - **Rolling & Recursive Estimation**: Track parameter evolution with fixed or expanding windows
 - **Model Selection**: BIC, LWZ criteria for selecting the number of breaks; AIC/BIC lag selection for ADL
 - **Visualization**: Plot time series with break lines, regime means, rolling coefficients, and confidence intervals
+- **Date-Aware Summaries**: Pass a pandas DatetimeIndex or PeriodIndex to any summary method to display dates instead of integer observation numbers
 - **statsmodels Integration**: Familiar `Model.fit() -> Results` API pattern
 
 ## Installation
@@ -248,6 +249,30 @@ print(nr_results.summary())
 restricted = rg.RestrictedMarkovRegression.non_recurring(y, k_regimes=3)
 restricted_results = restricted.fit()
 results.plot_transition_matrix()
+```
+
+### Date-Aware Summaries
+
+Pass a pandas index to any summary method to display dates instead of integer observation numbers:
+
+```python
+import numpy as np
+import pandas as pd
+import regimes as rg
+
+# Simulate quarterly data with a break
+rng = np.random.default_rng(42)
+dates = pd.period_range("2000Q1", periods=200, freq="Q")
+y = np.concatenate([rng.normal(0, 1, 100), rng.normal(2, 1, 100)])
+
+# Fit model and get date-aware summary
+model = rg.OLS(y, np.ones((200, 1)), has_constant=False, breaks=[100])
+results = model.fit()
+print(results.summary(index=dates))
+
+# Also works with Bai-Perron
+bp = model.bai_perron()
+print(bp.summary(index=dates))
 ```
 
 ### OLS with HAC Standard Errors
@@ -557,7 +582,7 @@ All regression models support multiple covariance estimators:
 
 ## Testing
 
-The package includes a comprehensive test suite with 903 tests:
+The package includes a comprehensive test suite with 924 tests:
 
 ```bash
 # Run all tests

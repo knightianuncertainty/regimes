@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Date-aware summaries**: Optional `index` parameter on all summary methods
+  - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
+  - `BaiPerronResults.summary(index=)` with date-labeled break points and confidence intervals
+  - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
+  - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
+  - Shared helpers `_obs_label()` and `_obs_range_label()` in `results/base.py`
+  - 21 new tests in `test_date_aware_summary.py` (924 total)
+
 ## [0.3.2] - 2026-02-20
 
 ### Fixed

@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 3: v0.3.0 - Structural Break Tests & Markov-Switching** Complete — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 5: v0.5.0 - Documentation & Release** In progress; Phase 4 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -125,7 +125,7 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.0 | Complete | Structural break tests (Chow, CUSUM, Andrews-Ploberger), Markov-switching, 880 tests (86% coverage), 4 example notebooks |
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
-| 0.4.0 | Planned | Autometrics-inspired model selection, step-indicator saturation |
-| 0.5.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
+| 0.4.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
+| 0.5.0 | In progress | Date-aware summaries, real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
 | 0.7.0+ | Future | End-to-end forecasting workflow with structural change |
