@@ -367,7 +367,7 @@ class TestARSummaryBreaks:
         summary = results.summary(diagnostics=False)
 
         assert "Structural Breaks" in summary
-        assert f"Break at observation {break_point}" in summary
+        assert f"Break at {break_point}" in summary
         assert "Regime 1" in summary
         assert "Regime 2" in summary
 
@@ -384,7 +384,7 @@ class TestARSummaryBreaks:
 
         assert "Variable-Specific Structural Breaks" in summary
         assert "const:" in summary
-        assert f"break at observation {break_point}" in summary
+        assert f"break at {break_point}" in summary
 
     def test_ar_summary_by_regime(
         self, ar1_data_with_break: tuple[NDArray[np.floating[Any]], int]
@@ -400,7 +400,7 @@ class TestARSummaryBreaks:
         )
 
         assert "AR Model Results by Regime" in summary
-        assert f"Breaks at observations: {break_point}" in summary
+        assert f"Breaks at: {break_point}" in summary
         assert "Regime 1" in summary
         assert "Regime 2" in summary
         assert "y.L1" in summary

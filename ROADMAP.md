@@ -96,6 +96,12 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 
 ### Phase 5: v0.5.0 - Documentation & Release
 
+- [x] Date-aware summaries: optional `index` parameter on all summary methods
+  - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
+  - `BaiPerronResults.summary(index=)`
+  - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
+  - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
+  - Replaces integer observation numbers with date labels throughout
 - [ ] Real data examples (US interest rates, inflation)
 - [ ] Comprehensive example notebooks
 - [ ] Full Sphinx documentation on Read the Docs

@@ -18,6 +18,51 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+    IndexLike = pd.PeriodIndex | pd.DatetimeIndex | Sequence[str]
+
+
+def _obs_label(idx: int, index: IndexLike | None = None) -> str:
+    """Map an integer observation index to a display label.
+
+    Parameters
+    ----------
+    idx : int
+        Integer observation index.
+    index : IndexLike or None
+        Optional time index. When provided, returns ``str(index[idx])``.
+        When ``None``, returns ``str(idx)``.
+
+    Returns
+    -------
+    str
+        Human-readable label for the observation.
+    """
+    if index is not None:
+        return str(index[idx])
+    return str(idx)
+
+
+def _obs_range_label(start: int, end: int, index: IndexLike | None = None) -> str:
+    """Format an observation range as a display string.
+
+    Parameters
+    ----------
+    start : int
+        First observation index (inclusive).
+    end : int
+        Last observation index (inclusive).
+    index : IndexLike or None
+        Optional time index for date labels.
+
+    Returns
+    -------
+    str
+        Range string, e.g. ``"0-39"`` or ``"1970Q2\u201380Q2"``.
+    """
+    if index is not None:
+        return f"{index[start]}\u2013{index[end]}"
+    return f"{start}-{end}"
+
 
 @dataclass(kw_only=True)
 class RegimesResultsBase(ABC):
