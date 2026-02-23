@@ -23,7 +23,7 @@ import statsmodels.api as sm
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
 from regimes.models.base import CovType, RegimesModelBase, _ensure_array
-from regimes.results.base import RegressionResultsBase
+from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from regimes.gets.saturation import SaturationResults
     from regimes.markov.results import MarkovADLResults
+    from regimes.results.base import IndexLike
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
     from regimes.tests.bai_perron import BaiPerronResults
@@ -218,8 +219,14 @@ class ADLResults(RegressionResultsBase):
         )
         return self._diagnostics_cache
 
-    def _format_break_section(self) -> list[str]:
-        """Format the structural breaks section for summary output."""
+    def _format_break_section(self, index: IndexLike | None = None) -> list[str]:
+        """Format the structural breaks section for summary output.
+
+        Parameters
+        ----------
+        index : IndexLike or None
+            Optional time index for date labels.
+        """
         lines = []
         nobs = self._nobs_original if self._nobs_original is not None else self.nobs
 
@@ -229,16 +236,15 @@ class ADLResults(RegressionResultsBase):
             lines.append("-" * 81)
 
             for bp in self._breaks:
-                lines.append(f"Break at observation {bp}")
+                lines.append(f"Break at {_obs_label(bp, index)}")
 
             boundaries = [0] + list(self._breaks) + [nobs]
             for i in range(len(boundaries) - 1):
                 start = boundaries[i]
                 end = boundaries[i + 1] - 1
                 n_regime = boundaries[i + 1] - boundaries[i]
-                lines.append(
-                    f"  Regime {i + 1}: observations {start}-{end} (n={n_regime})"
-                )
+                range_str = _obs_range_label(start, end, index)
+                lines.append(f"  Regime {i + 1}: {range_str} (n={n_regime})")
 
         elif self._variable_breaks:
             lines.append("-" * 81)
@@ -246,29 +252,38 @@ class ADLResults(RegressionResultsBase):
             lines.append("-" * 81)
 
             for var_name, breaks in self._variable_breaks.items():
-                break_str = ", ".join(str(bp) for bp in breaks)
+                break_str = ", ".join(_obs_label(bp, index) for bp in breaks)
                 if len(breaks) == 1:
-                    lines.append(f"{var_name}: break at observation {break_str}")
+                    lines.append(f"{var_name}: break at {break_str}")
                 else:
-                    lines.append(f"{var_name}: breaks at observations {break_str}")
+                    lines.append(f"{var_name}: breaks at {break_str}")
 
                 boundaries = [0] + list(breaks) + [nobs]
                 regime_parts = []
                 for i in range(len(boundaries) - 1):
                     start = boundaries[i]
                     end = boundaries[i + 1] - 1
-                    regime_parts.append(f"Regime {i + 1}: obs {start}-{end}")
+                    range_str = _obs_range_label(start, end, index)
+                    regime_parts.append(f"Regime {i + 1}: {range_str}")
                 lines.append(f"  {', '.join(regime_parts)}")
 
         return lines
 
-    def summary(self, diagnostics: bool = True) -> str:
+    def summary(
+        self,
+        diagnostics: bool = True,
+        index: IndexLike | None = None,
+    ) -> str:
         """Generate a text summary of ADL results.
 
         Parameters
         ----------
         diagnostics : bool, default True
             If True, include misspecification tests.
+        index : IndexLike or None
+            Optional time index (e.g. ``pd.PeriodIndex``). When provided,
+            observation numbers in the break section are replaced with
+            date labels.
 
         Returns
         -------
@@ -318,7 +333,7 @@ class ADLResults(RegressionResultsBase):
         # Add break timing section if breaks are present
         if self._breaks or self._variable_breaks:
             lines.append("")
-            lines.extend(self._format_break_section())
+            lines.extend(self._format_break_section(index=index))
             lines.append("")
             lines.append("=" * 81)
 
@@ -1365,6 +1380,7 @@ def adl_summary_by_regime(
     breaks: Sequence[int] | None = None,
     nobs_total: int | None = None,
     diagnostics: bool = True,
+    index: IndexLike | None = None,
 ) -> str:
     """Generate combined summary for regime-specific ADL results.
 
@@ -1381,6 +1397,9 @@ def adl_summary_by_regime(
         Total observations across all regimes.
     diagnostics : bool
         If True (default), include misspecification tests.
+    index : IndexLike or None
+        Optional time index (e.g. ``pd.PeriodIndex``). When provided,
+        observation numbers are replaced with date labels throughout.
 
     Returns
     -------
@@ -1396,8 +1415,8 @@ def adl_summary_by_regime(
     lines.append("=" * 81)
 
     if breaks:
-        break_str = ", ".join(str(bp) for bp in breaks)
-        lines.append(f"Breaks at observations: {break_str}")
+        break_str = ", ".join(_obs_label(bp, index) for bp in breaks)
+        lines.append(f"Breaks at: {break_str}")
         lines.append("")
 
     # Compute nobs_total if not provided
@@ -1417,9 +1436,10 @@ def adl_summary_by_regime(
     for i, result in enumerate(results_list):
         start = boundaries[i]
         end = boundaries[i + 1] - 1
+        range_str = _obs_range_label(start, end, index)
 
         lines.append("-" * 81)
-        lines.append(f"{'Regime ' + str(i + 1) + f' (obs {start}-{end})':^81}")
+        lines.append(f"{'Regime ' + str(i + 1) + f' ({range_str})':^81}")
         lines.append("-" * 81)
 
         p = max(result.lags) if result.lags else 0

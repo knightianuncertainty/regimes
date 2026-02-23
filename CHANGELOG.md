@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.isat()` convenience methods** on OLS, AR, and ADL models for one-step indicator saturation
 - **Example notebook** `05_gets_indicator_saturation.ipynb` demonstrating all features including AR(1) with dual structural breaks, method comparison (GETS vs Bai-Perron vs Markov switching), and end-to-end workflow
 - 166 new tests (1069 total)
+- **Date-aware summaries**: Optional `index` parameter on all summary methods
+  - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
+  - `BaiPerronResults.summary(index=)` with date-labeled break points and confidence intervals
+  - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
+  - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
+  - Shared helpers `_obs_label()` and `_obs_range_label()` in `results/base.py`
+  - 21 new tests in `test_date_aware_summary.py` (1090 total)
 
 ## [0.3.2] - 2026-02-20
 
