@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.gets.saturation import SaturationResults
     from regimes.markov.results import MarkovADLResults
     from regimes.rolling.adl import RecursiveADL, RollingADL
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
@@ -1288,6 +1289,75 @@ class ADL(RegimesModelBase):
 
         ms_model = MarkovADL.from_model(self, k_regimes=k_regimes, **model_kwargs)
         return ms_model.fit(**fit_kwargs)
+
+    def isat(
+        self,
+        iis: bool = False,
+        sis: bool = False,
+        mis: bool | list[str] | list[int] = False,
+        tis: bool = False,
+        alpha: float = 0.05,
+        **kwargs: Any,
+    ) -> SaturationResults:
+        """Run indicator saturation analysis on this ADL model.
+
+        Convenience method that calls ``isat()`` using this model's
+        endog, exog, lag structure, and trend specification.
+
+        Parameters
+        ----------
+        iis : bool
+            Include impulse indicator saturation.
+        sis : bool
+            Include step indicator saturation (level shifts).
+        mis : bool | list[str] | list[int]
+            Include multiplicative indicator saturation.
+        tis : bool
+            Include trend indicator saturation.
+        alpha : float
+            Significance level for GETS selection.
+        **kwargs
+            Additional keyword arguments passed to ``isat()``.
+
+        Returns
+        -------
+        SaturationResults
+
+        See Also
+        --------
+        regimes.gets.saturation.isat : The underlying saturation function.
+        """
+        from regimes.gets.saturation import isat as _isat
+
+        has_constant = self.trend in ("c", "ct")
+
+        # Convert exog_lags to format isat expects
+        exog_lags_param: int | dict[str, int] | None = None
+        if isinstance(self._exog_lags_raw, int) and self._exog_lags_raw > 0:
+            exog_lags_param = self._exog_lags_raw
+        elif isinstance(self._exog_lags_raw, dict):
+            exog_lags_param = {
+                str(k): (v if isinstance(v, int) else max(v))
+                for k, v in self._exog_lags_raw.items()
+            }
+
+        exog = self._exog_orig if self._exog_orig is not None else None
+        if exog is not None:
+            exog = np.asarray(exog, dtype=np.float64)
+
+        return _isat(
+            endog=self.endog,
+            exog=exog,
+            ar_lags=list(self.lags),
+            exog_lags=exog_lags_param,
+            iis=iis,
+            sis=sis,
+            mis=mis,
+            tis=tis,
+            alpha=alpha,
+            has_constant=has_constant,
+            **kwargs,
+        )
 
 
 def adl_summary_by_regime(

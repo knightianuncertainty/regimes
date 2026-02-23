@@ -14,6 +14,11 @@ from regimes.visualization.diagnostics import (
     plot_residual_distribution,
     plot_scaled_residuals,
 )
+from regimes.visualization.gets import (
+    plot_mis_coefficients,
+    plot_regime_levels,
+    plot_sis_coefficients,
+)
 from regimes.visualization.markov import (
     plot_ic,
     plot_parameter_time_series,
@@ -52,14 +57,17 @@ __all__ = [
     "plot_diagnostics",
     "plot_f_sequence",
     "plot_ic",
+    "plot_mis_coefficients",
     "plot_parameter_time_series",
     "plot_params_over_time",
+    "plot_regime_levels",
     "plot_regime_means",
     "plot_regime_shading",
     "plot_residual_acf",
     "plot_residual_distribution",
     "plot_rolling_coefficients",
     "plot_scaled_residuals",
+    "plot_sis_coefficients",
     "plot_smoothed_probabilities",
     "plot_transition_matrix",
     "set_style",

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from numpy.typing import ArrayLike, NDArray
 
+    from regimes.gets.saturation import SaturationResults
     from regimes.markov.results import MarkovRegressionResults
     from regimes.rolling.ols import RecursiveOLS, RollingOLS
     from regimes.tests.andrews_ploberger import AndrewsPlobergerResults
@@ -90,6 +91,13 @@ class OLSResults(RegressionResultsBase):
         if self.llf is None:
             return np.nan
         return -2 * self.llf + np.log(self.nobs) * self.df_model
+
+    @property
+    def hq(self) -> float:
+        """Hannan-Quinn Information Criterion."""
+        if self.llf is None:
+            return np.nan
+        return -2 * self.llf + 2 * self.df_model * np.log(np.log(self.nobs))
 
     @property
     def fvalue(self) -> float:
@@ -1020,6 +1028,63 @@ class OLS(RegimesModelBase):
             self, k_regimes=k_regimes, **model_kwargs
         )
         return ms_model.fit(**fit_kwargs)
+
+    def isat(
+        self,
+        iis: bool = False,
+        sis: bool = False,
+        mis: bool | list[str] | list[int] = False,
+        tis: bool = False,
+        alpha: float = 0.05,
+        **kwargs: Any,
+    ) -> SaturationResults:
+        """Run indicator saturation analysis on this OLS model.
+
+        Convenience method that calls ``isat()`` using this model's
+        endog, exog, and constant specification.
+
+        Parameters
+        ----------
+        iis : bool
+            Include impulse indicator saturation.
+        sis : bool
+            Include step indicator saturation (level shifts).
+        mis : bool | list[str] | list[int]
+            Include multiplicative indicator saturation.
+        tis : bool
+            Include trend indicator saturation.
+        alpha : float
+            Significance level for GETS selection.
+        **kwargs
+            Additional keyword arguments passed to ``isat()``.
+
+        Returns
+        -------
+        SaturationResults
+
+        See Also
+        --------
+        regimes.gets.saturation.isat : The underlying saturation function.
+        """
+        from regimes.gets.saturation import isat as _isat
+
+        # Pass original exog (without prepended constant) when has_constant
+        exog = self._exog_orig if self._has_constant else self.exog
+        # _exog_orig may be the original user input; ensure ndarray or None
+        if exog is not None:
+            exog = np.asarray(exog, dtype=np.float64)
+
+        return _isat(
+            endog=self.endog,
+            exog=exog,
+            iis=iis,
+            sis=sis,
+            mis=mis,
+            tis=tis,
+            alpha=alpha,
+            has_constant=self._has_constant,
+            **kwargs,
+        )
 
 
 def summary_by_regime(
