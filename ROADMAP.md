@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 4: v0.4.0 - Model Selection & Indicator Saturation** In progress — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 5: v0.5.0 - Documentation & Release** In progress — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -139,6 +139,6 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
 | 0.4.0 | In progress | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics model selection, dual representation, 1069 tests |
-| 0.5.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
+| 0.5.0 | In progress | Date-aware summaries, real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
 | 0.7.0+ | Future | End-to-end forecasting workflow with structural change |
