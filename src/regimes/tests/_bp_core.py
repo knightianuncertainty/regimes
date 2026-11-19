@@ -10,7 +10,8 @@ absent). This module is a function-for-function port of the ``RgBP`` class of
 the OxRegimes package (``src/bpcore.ox``), which was written against, and
 cross-validated with, Pierre Perron's Bai-Perron program (GAUSS, October 2004,
 distributed in the Journal of Applied Econometrics data archive with Bai and
-Perron 2003). Where this module departs from that program it says so.
+Perron 2003). Where this module departs from that program it says so. The
+two packages give the same numbers; a change here has to be made there too.
 
 Conventions
 -----------
@@ -35,7 +36,25 @@ Conventions
   largest reduction in the overall sum of squared residuals, whereas the
   program (and this module) takes the regime with the largest F statistic.
 * The minimum regime length is ``h = floor(trimming * T)``, as in the
-  program (``h=int(eps1*bigt)``) and in Bai and Perron (2003, Table I).
+  program (``h=int(eps1*bigt)``) and in Bai and Perron (2003, Table I), and
+  at least ``q + 1``.
+
+Departures from Perron's program
+--------------------------------
+* HAC prewhitening recolors with ``(I - A)^{-1}``, row i of ``A`` holding
+  equation i of the VAR(1); the program uses the transpose (:func:`long_run`).
+* Partial structural change: one break is found by direct search, and for
+  two or more breaks the iteration is run from two starting values, the
+  program's and the no-break regression, keeping the lower SSR
+  (:func:`partial_partition_all`).
+* Fixed regressors without variation inside a sub-sample (an impulse or step
+  dummy) are left out of the tests in that sub-sample, where the program
+  stops with a singular matrix (:func:`independent_columns`).
+* The segment SSRs are computed from an orthonormal basis of the regressors,
+  so that they do not depend on the units or the level of the regressors
+  (:func:`ssr_triangle`).
+* The search for the quantiles of the break-date distribution is widened
+  when a quantile lies outside [-2000, 2000] (:func:`quantiles_argmax`).
 
 References
 ----------
@@ -81,6 +100,15 @@ IntArray = NDArray[np.integer[Any]]
 # Constants of the LWZ criterion (Liu, Wu and Zidek 1997)
 LWZ_C0 = 0.299
 LWZ_DELTA0 = 0.1
+# smallest relative singular value for which the regressors are replaced by an
+# orthonormal basis of their column space in the SSR computations
+ORTHO_TOL = 1e-12
+# relative length of the projection residual below which a fixed regressor is
+# treated as a linear combination of the other regressors in a sub-sample
+REDUNDANT_TOL = 1e-8
+# the search interval for the quantiles of the break-date distribution starts
+# at [-2000, 2000] (Perron's cvg) and is widened up to this bound
+QUANTILE_BOUND = 1e9
 
 
 @dataclass(frozen=True)
@@ -141,6 +169,78 @@ def _has_x(x: FloatArray | None) -> bool:
     return x is not None and x.size > 0
 
 
+def _unit_columns(a: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Columns of ``a`` scaled to unit length, and the lengths (1 for a zero column)."""
+    norms = np.sqrt(np.einsum("ij,ij->j", a, a))
+    norms[norms == 0] = 1.0
+    return a / norms, norms
+
+
+def _orthonormal(z: FloatArray) -> FloatArray:
+    """An orthonormal basis of the column space of ``z``.
+
+    The SSR of a regression on ``z`` over any set of rows is unchanged when
+    ``z`` is replaced by ``z A`` with ``A`` invertible, so the segment SSRs
+    can be computed from this basis. With regressors of very different scale,
+    or a regressor that varies little around a large mean, that keeps the
+    moment matrices of the segments well conditioned. ``z`` is returned
+    unchanged when it does not have full column rank.
+    """
+    if z.shape[0] < z.shape[1]:
+        return z
+    # columns scaled to unit length first, so that the rank decision does not
+    # depend on the units of the regressors
+    u, sv, _ = np.linalg.svd(_unit_columns(z)[0], full_matrices=False)
+    if sv[-1] <= ORTHO_TOL * sv[0]:
+        return z
+    basis: FloatArray = u
+    return basis
+
+
+def independent_columns(
+    z: FloatArray, x: FloatArray | None, tol: float = REDUNDANT_TOL
+) -> list[int]:
+    """Indices of the columns of ``x`` that are not linear combinations of
+    ``z`` and of the columns of ``x`` before them, in the sample given.
+
+    Inside a sub-sample a fixed regressor can be redundant although it is not
+    in the full sample: an impulse dummy is zero in every regime but one, and
+    a step dummy is constant on each side of its date. Its coefficient is then
+    not identified in that sub-sample, and leaving it out changes neither the
+    fitted values nor the test of a break in the coefficients of ``z``. A
+    column is redundant when the residual of its projection on the others is
+    less than ``tol`` times its own length.
+
+    The decision does not depend on the units of the regressors.
+    """
+    if not _has_x(x):
+        return []
+    assert x is not None
+    base, _ = _unit_columns(z)
+    keep: list[int] = []
+    for j in range(x.shape[1]):
+        length = float(np.sqrt(x[:, j] @ x[:, j]))
+        if length == 0.0:
+            continue
+        col = x[:, j] / length
+        resid = col - base @ np.linalg.lstsq(base, col, rcond=None)[0]
+        if float(np.sqrt(resid @ resid)) > tol:
+            base = np.column_stack([base, col])
+            keep.append(j)
+    return keep
+
+
+def independent_fixed(z: FloatArray, x: FloatArray | None) -> FloatArray | None:
+    """The columns of ``x`` selected by :func:`independent_columns`, or None
+    when none is left."""
+    keep = independent_columns(z, x)
+    if not keep:
+        return None
+    assert x is not None
+    kept: FloatArray = x[:, keep]
+    return kept
+
+
 def _initial_fits(
     y: FloatArray, z: FloatArray, h: int
 ) -> tuple[FloatArray, FloatArray, FloatArray, IntArray]:
@@ -197,12 +297,15 @@ def ssr_triangle(y: FloatArray, z: FloatArray, h: int) -> FloatArray:
     ``f = 1 + z'(Z'Z)^{-1} z``.
 
     A segment whose first ``h`` rows give a singular design is extended until
-    the design has full column rank.
+    the design has full column rank. The regressors are first replaced by an
+    orthonormal basis of their column space (see :func:`_orthonormal`), which
+    leaves every SSR unchanged.
     """
     nobs = z.shape[0]
     s = np.full((nobs, nobs), np.nan)
     if nobs - h + 1 <= 0:
         return s
+    z = _orthonormal(z)
     p_mat, beta, cur, first_end = _initial_fits(y, z, h)
     ok = np.flatnonzero(first_end < nobs)
     s[ok, first_end[ok]] = cur[ok]
@@ -232,6 +335,7 @@ def ssr_expanding(y: FloatArray, z: FloatArray, h: int) -> FloatArray:
     out = np.full(nobs, np.nan)
     if nobs < h:
         return out
+    z = _orthonormal(z)
     stop = h - 1
     while stop < nobs and np.linalg.matrix_rank(z[: stop + 1]) < q:
         stop += 1
@@ -334,12 +438,16 @@ def estimate(
     """
     zb = zbar(z, vb)
     w = np.column_stack([zb, x]) if x is not None and x.size > 0 else zb
-    if np.linalg.matrix_rank(w) < w.shape[1]:
+    # unit-length columns: the rank decision does not depend on the units
+    wn, norms = _unit_columns(w)
+    par_n, _, rank, _ = np.linalg.lstsq(wn, y, rcond=None)
+    if rank < w.shape[1]:
         raise np.linalg.LinAlgError(
-            "singular design in a regime: a regressor with breaking "
-            "coefficients has no variation within one of the regimes"
+            "singular design: a regressor with breaking coefficients has no "
+            "variation within one of the regimes, or a fixed regressor is a "
+            "linear combination of the regime-specific ones"
         )
-    par = np.linalg.lstsq(w, y, rcond=None)[0]
+    par = par_n / norms
     resid = y - w @ par
     n_delta = zb.shape[1]
     return par[:n_delta], par[n_delta:], resid, float(resid @ resid), zb
@@ -362,56 +470,128 @@ def partial_partition_all(
     ``beta`` have converged. Convergence to the global minimum is not
     guaranteed (their footnote 3).
 
-    The iteration starts from ``beta`` of the joint regression without
-    breaks, as in OxRegimes. Bai and Perron (2003, Section 3.5) suggest
-    starting instead from the pure structural change model in which all
-    coefficients are allowed to change.
+    One break is found by direct search over the admissible dates
+    (:func:`one_break_date`), which is exact. For two or more breaks the
+    iteration is run from two starting values of ``beta`` and the result with
+    the lower SSR is kept:
+
+    - the joint regression without breaks;
+    - the pure structural change model in which all coefficients are allowed
+      to change, as suggested by Bai and Perron (2003, Section 3.5) and done
+      in Perron's ``nldat``.
+
+    A model whose estimated partition makes a fixed regressor a linear
+    combination of the regime-specific ones (a step dummy in ``x`` at one of
+    the break dates) is not identified; it is reported as not admissible
+    (empty break vector, NaN SSR) with a warning.
 
     Returns the same triple as :func:`partition_all`.
     """
     q = z.shape[1]
     w0 = np.column_stack([z, x])
-    par0 = np.linalg.lstsq(w0, y, rcond=None)[0]
+    w0n, w0norms = _unit_columns(w0)
+    par0 = np.linalg.lstsq(w0n, y, rcond=None)[0] / w0norms
     resid0 = y - w0 @ par0
     ssr0 = float(resid0 @ resid0)
+    empty: IntArray = np.empty(0, dtype=np.int64)
+
+    # break dates of the pure structural change model (second starting value)
+    pure_parts: list[IntArray] = []
+    if max_breaks >= 2:
+        pure_parts = partition_all(ssr_triangle(y, w0, h), max_breaks, h)[0]
 
     breaks: list[IntArray] = []
     ssr = np.full(max_breaks, np.nan)
     for m in range(1, max_breaks + 1):
-        beta = par0[q:].copy()
-        vb: IntArray = np.empty(0, dtype=np.int64)
-        last = np.nan
-        converged = False
-        for _ in range(max_iter):
-            ystar = y - x @ beta
-            part = partition_all(ssr_triangle(ystar, z, h), m, h)
-            vb = part[0][m - 1]
-            if vb.size == 0:
-                break
-            _, beta_new, _, ssr_m, _ = estimate(y, z, x, vb)
-            converged = bool(
-                not np.isnan(last)
-                and abs(ssr_m - last) <= tol * (1 + abs(ssr_m))
-                and np.max(np.abs(beta_new - beta))
-                <= math.sqrt(tol) * (1 + np.max(np.abs(beta)))
-            )
-            beta = beta_new
-            last = ssr_m
-            if converged:
-                break
-        if vb.size == 0:
-            breaks.append(vb)
+        if m == 1:
+            b1, ssr1 = one_break_date(y, z, x, h)
+            if b1 < 0:
+                breaks.append(empty)
+            else:
+                breaks.append(np.array([b1], dtype=np.int64))
+                ssr[0] = ssr1
             continue
-        if not converged:
+        starts = [par0[q:].copy()]
+        vb0 = pure_parts[m - 1]
+        if vb0.size == m:
+            # Perron's nldat: all coefficients regime-specific at the pure-change
+            # dates, then beta from the regression of y - zbar delta on x
+            zb0, xb0 = zbar(z, vb0), zbar(x, vb0)
+            wn, norms = _unit_columns(np.column_stack([zb0, xb0]))
+            teta = np.linalg.lstsq(wn, y, rcond=None)[0] / norms
+            xn, xnorms = _unit_columns(x)
+            starts.append(
+                np.linalg.lstsq(xn, y - zb0 @ teta[: zb0.shape[1]], rcond=None)[0]
+                / xnorms
+            )
+        best_vb, best_ssr, best_conv = empty, np.nan, False
+        for beta0 in starts:
+            vb, ssr_m, conv = _partial_iterate(y, z, x, m, h, beta0, tol, max_iter)
+            if vb.size == m and (np.isnan(best_ssr) or ssr_m < best_ssr):
+                best_vb, best_ssr, best_conv = vb, ssr_m, conv
+        if best_vb.size == 0:
+            warnings.warn(
+                f"No identified partial structural change model with m={m} "
+                f"breaks: no admissible partition, or a fixed regressor is a "
+                f"linear combination of the regime-specific ones at the "
+                f"estimated break dates.",
+                stacklevel=3,
+            )
+            breaks.append(empty)
+            continue
+        if not best_conv:
             warnings.warn(
                 f"Partial structural change iterative procedure did not "
                 f"converge for m={m} after {max_iter} iterations. "
                 f"Results may be unreliable.",
                 stacklevel=3,
             )
-        breaks.append(vb)
-        ssr[m - 1] = last
+        breaks.append(best_vb)
+        ssr[m - 1] = best_ssr
     return breaks, ssr, ssr0
+
+
+def _partial_iterate(
+    y: FloatArray,
+    z: FloatArray,
+    x: FloatArray,
+    m: int,
+    h: int,
+    beta0: FloatArray,
+    tol: float,
+    max_iter: int,
+) -> tuple[IntArray, float, bool]:
+    """Iterate between the break dates and ``beta`` from the start ``beta0``.
+
+    Returns the break vector, the SSR and whether the iteration converged;
+    an empty vector and NaN when no admissible partition exists or the design
+    is singular at the dates reached.
+    """
+    empty: IntArray = np.empty(0, dtype=np.int64)
+    beta = np.asarray(beta0, dtype=np.float64).copy()
+    vb = empty
+    last = np.nan
+    converged = False
+    for _ in range(max_iter):
+        ystar = y - x @ beta
+        vb = partition_all(ssr_triangle(ystar, z, h), m, h)[0][m - 1]
+        if vb.size == 0:
+            return empty, np.nan, False
+        try:
+            _, beta_new, _, ssr_m, _ = estimate(y, z, x, vb)
+        except np.linalg.LinAlgError:
+            return empty, np.nan, False
+        converged = bool(
+            not np.isnan(last)
+            and abs(ssr_m - last) <= tol * (1 + abs(ssr_m))
+            and np.max(np.abs(beta_new - beta))
+            <= math.sqrt(tol) * (1 + np.max(np.abs(beta)))
+        )
+        beta = beta_new
+        last = ssr_m
+        if converged:
+            break
+    return vb, float(last), converged
 
 
 def one_break_date(
@@ -438,15 +618,22 @@ def one_break_date(
         best = int(np.nanargmin(total))
         return h - 1 + best, float(total[best])
     assert x is not None
-    best_b, best_ssr = -1, np.inf
+    # unit-length columns: the SSR is unchanged and the rank decision does not
+    # depend on the units of the regressors
+    zn, xn = _unit_columns(z)[0], _unit_columns(x)[0]
+    best_b, best_ssr = -1, np.nan
     for b in range(h - 1, n - h):
-        w = np.column_stack([zbar(z, [b]), x])
-        par = np.linalg.lstsq(w, y, rcond=None)[0]
+        w = np.column_stack([zbar(zn, [b]), xn])
+        par, _, rank, _ = np.linalg.lstsq(w, y, rcond=None)
+        if rank < w.shape[1]:
+            # a regressor has no variation in one of the two regimes, or a
+            # fixed regressor is a step at this date: not an admissible date
+            continue
         resid = y - w @ par
         ssr_b = float(resid @ resid)
-        if ssr_b < best_ssr:
+        if np.isnan(best_ssr) or ssr_b < best_ssr:
             best_b, best_ssr = b, ssr_b
-    return best_b, best_ssr
+    return best_b, float(best_ssr)
 
 
 # ---------------------------------------------------------------------------
@@ -664,10 +851,13 @@ def one_break_sup_f(
     The break date is the SSR minimizer within the segment and the F statistic
     is evaluated there, with the segment's data only. Returns the statistic
     and the last index (in full-sample units) of the first sub-regime, or
-    ``(nan, -1)`` if the segment is shorter than ``2h``.
+    ``(nan, -1)`` if the segment is shorter than ``2h`` or has no admissible
+    break date. Fixed regressors that are redundant within the segment are
+    left out (:func:`independent_fixed`).
     """
     ys, zs = y[start : end + 1], z[start : end + 1]
     xs = x[start : end + 1] if _has_x(x) and x is not None else None
+    xs = independent_fixed(zs, xs)
     b, _ = one_break_date(ys, zs, xs, h)
     if b < 0:
         return np.nan, -1
@@ -717,6 +907,7 @@ def repartition(
     for i in range(len(b)):
         start, end = int(bd[i]), int(bd[i + 2]) - 1
         xs = x[start : end + 1] if _has_x(x) and x is not None else None
+        xs = independent_fixed(z[start : end + 1], xs)
         nb, _ = one_break_date(y[start : end + 1], z[start : end + 1], xs, h)
         if nb >= 0:
             new[i] = start + nb
@@ -858,7 +1049,10 @@ def cdf_argmax(
 def quantiles_argmax(eta: float, phi1: float, phi2: float) -> FloatArray:
     """Quantiles (2.5%, 5%, 95%, 97.5%) of the Bai (1997) distribution.
 
-    Port of Perron's ``cvg`` (bisection on :func:`cdf_argmax`).
+    Port of Perron's ``cvg`` (bisection on :func:`cdf_argmax`). The program
+    searches in [-2000, 2000] and gives up with a warning when a quantile
+    lies outside; here the interval is widened until it brackets the
+    quantile, which changes nothing when it already does.
     """
     a = phi1 / phi2
     gam = ((phi2 / phi1) + 1) * eta / 2
@@ -869,6 +1063,10 @@ def quantiles_argmax(eta: float, phi1: float, phi2: float) -> FloatArray:
     out = np.zeros(4)
     for i, prob in enumerate((0.025, 0.05, 0.95, 0.975)):
         lo, hi, xx = -2000.0, 2000.0, 0.0
+        while lo > -QUANTILE_BOUND and cdf_argmax(lo, bet, alph, b, deld, gam) > prob:
+            lo *= 4
+        while hi < QUANTILE_BOUND and cdf_argmax(hi, bet, alph, b, deld, gam) < prob:
+            hi *= 4
         for _ in range(200):
             xx = lo + (hi - lo) / 2
             crit = cdf_argmax(xx, bet, alph, b, deld, gam) - prob
@@ -937,8 +1135,10 @@ def break_ci(
                 om2 = long_run(zu[r1:r2], opt.prewhiten)
             else:
                 om1 = om2 = long_run(zu, opt.prewhiten)
+            # phi_1^2 = d'Omega_i d / d'Q_i d, phi_2^2 = d'Omega_{i+1} d / d'Q_{i+1} d
+            # (Bai and Perron 2003, Section 4.2; Perron's interval)
             phi1 = float(d @ om1 @ d) / dqd
-            phi2 = float(d @ om2 @ d) / dqd
+            phi2 = float(d @ om2 @ d) / float(d @ q2 @ d)
             scale = dqd**2 / float(d @ om1 @ d)
         quant = quantiles_argmax(eta, phi1, phi2)
         out[i - 1, 0] = math.floor(b[i - 1] - quant[3] / scale)

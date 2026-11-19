@@ -36,10 +36,19 @@ def _data(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Return (y, z, x) for a reference case."""
     if name.startswith("exdata"):
         d = _load("bp_exdata.csv")
+        if name.startswith("exdata_const_partial"):
+            return d["Y"], d["Constant"], d["X1"]
         x = d["Constant"] if name == "exdata_partial" else None
         return d["Y"], d["X1"], x
     d = _load("bp_simulated_consumption.csv")
     one = np.ones(len(d["dc"]))
+    # impulse dummy at the outlier of the simulated data (observation 31)
+    impulse = np.zeros(len(one))
+    impulse[31] = 1.0
+    if name.startswith("consumption_outlier_dummy"):
+        return d["dc"], one, np.column_stack([d["dy"], impulse])
+    if name == "consumption_slope_outlier_dummy":
+        return d["dc"], d["dy"], np.column_stack([one, impulse])
     if name == "consumption_slope_partial":
         return d["dc"], d["dy"], one
     if name.startswith("consumption_partial"):

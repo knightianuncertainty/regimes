@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **WDmax** used inverted weights and had no critical value.
   - **sup F p-values** had no basis and are removed (`supf_pvalues`).
   - **Break-date confidence intervals** did not follow Bai (1997). They now invert the asymmetric limit distribution, with regime-specific moment matrices and variances, and treat fixed regressors correctly.
-- `get_regime_estimates()` keeps the coefficients on fixed regressors (`exog`) common to all regimes.
+- `get_regime_estimates()` keeps the coefficients on fixed regressors (`exog`) common to all regimes, and returns the `q` coefficients on the breaking regressors for each regime (it returned `q + p` values when `exog` was given).
+- `BaiPerronResults.to_ols()` uses the same fixed regressors as `fit()`; with a collinear column in `exog` its design was rank deficient.
 
 ### Changed
 
@@ -29,11 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BaiPerronResults`: `seqf_stats[l]` is sup F(l+1|l) on the global `l`-break partition (`seqf_stats[0]` is sup F(1|0)); `bic` and `lwz` are per-observation values; new fields `level`, `h`, `p`, `wdmax_critical`, `wdmax_stats`, `seqf_break`, `sequential_n_breaks`, `sequential_breaks`, `break_ci_90`, `critical_values`, `options`.
 - `OLS.bai_perron()`, `AR.bai_perron()` and `ADL.bai_perron()` pass further keyword options to `BaiPerronTest.fit()`.
 - A column of `exog` that is collinear with the breaking regressors (for example a constant, when the constant breaks) is dropped from the fixed regressors, so the degrees of freedom and the information criteria count it once; `BaiPerronResults.p` reports the number of fixed regressors used.
-- The segment sums of squared residuals are computed with recursive residuals, which is faster.
+- The segment sums of squared residuals are computed with recursive residuals, which is faster, from an orthonormal basis of the regressors, so the break dates do not depend on the units or the level of the regressors. `fit()` warns when the regressors are nearly collinear.
+- **Partial structural change** (`exog` given): one break is found by direct search over the dates; for two or more breaks the iteration of Bai and Perron (2003, Section 3.4) is run from two starting values (the no-break regression and the pure structural change model) and the lower sum of squared residuals is kept.
+- A fixed regressor without variation inside a regime (an impulse or step dummy in `exog`) is left out of the sup F(l+1|l) test within that regime. A model whose break dates make a fixed regressor a linear combination of the regime-specific ones is not identified; `max_breaks` is then reduced with a warning.
+- `fit()` raises a `ValueError` for missing or infinite values, for `max_breaks < 1`, for an untabulated `level`, for `selection="sequential"` with an untabulated trimming, and when a model fits the data exactly. It no longer accepts arbitrary keyword arguments.
+- `summary()` has a new layout: critical values at the four levels instead of reject and p-value columns, both 90% and 95% intervals.
 
 ### Added
 
-- Tests against Perron's program on its example data, against OxRegimes on 16 option sets (`tests/reference_data/bp_oxregimes_reference.json`), and a replication of Bai and Perron (2003), Table I.
+- Tests against Perron's program on its example data, against OxRegimes on 21 option sets (`tests/reference_data/bp_oxregimes_reference.json`), and a replication of Bai and Perron (2003), Table I.
 - **Date-aware summaries**: Optional `index` parameter on all summary methods
   - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
   - `BaiPerronResults.summary(index=)` with date-labeled break points and confidence intervals

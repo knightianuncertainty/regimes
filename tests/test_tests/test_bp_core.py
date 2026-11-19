@@ -376,3 +376,229 @@ class TestBreakCI:
             ci = bp.break_ci(y, z, None, [99], bp.BPOptions())
             widths.append(ci[0, 1] - ci[0, 0])
         assert widths[1] < widths[0]
+
+
+def _partial_sample(seed: int, nobs: int = 120) -> tuple[np.ndarray, ...]:
+    """Two mean shifts next to a persistent fixed regressor."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(nobs)
+    walk = np.cumsum(rng.standard_normal(nobs)) * 0.4
+    b1, b2 = rng.integers(25, 50), rng.integers(70, 95)
+    y = (
+        0.5 * walk
+        + rng.uniform(0.5, 1.5) * (t >= b1)
+        - rng.uniform(0.5, 1.5) * (t >= b2)
+        + rng.standard_normal(nobs)
+    )
+    return y, np.ones((nobs, 1)), walk[:, None]
+
+
+def _joint_ssr(y: np.ndarray, z: np.ndarray, x: np.ndarray, vb: list[int]) -> float:
+    w = np.column_stack([bp.zbar(z, vb), x])
+    resid = y - w @ np.linalg.lstsq(w, y, rcond=None)[0]
+    return float(resid @ resid)
+
+
+class TestPartialModelSearch:
+    """Break dates of partial structural change models."""
+
+    H = 18
+
+    @pytest.mark.parametrize("seed", [7, 43, 56, 60])
+    def test_one_break_is_the_exact_minimizer(self, seed: int) -> None:
+        y, z, x = _partial_sample(seed)
+        breaks, ssr, _ = bp.partial_partition_all(y, z, x, 1, self.H)
+        every = [_joint_ssr(y, z, x, [b]) for b in range(self.H - 1, len(y) - self.H)]
+        assert breaks[0][0] == self.H - 1 + int(np.argmin(every))
+        assert ssr[0] == pytest.approx(min(every))
+
+    @pytest.mark.parametrize("seed", [7, 43, 60])
+    def test_supf_one_break_has_one_value(self, seed: int) -> None:
+        """sup F(1|0) is the same number wherever the results report it."""
+        y, z, x = _partial_sample(seed)
+        res = BaiPerronTest(y, exog=x, exog_break=z).fit(max_breaks=3)
+        assert res.supf_stats[1] == pytest.approx(res.seqf_stats[0])
+        assert res.breaks_by_m[1] == [res.seqf_break[0]]
+
+    @pytest.mark.parametrize("seed", range(12))
+    def test_two_starts_are_never_worse_than_one(self, seed: int) -> None:
+        y, z, x = _partial_sample(seed, nobs=90)
+        h = 13
+        breaks, ssr, _ = bp.partial_partition_all(y, z, x, 2, h)
+        w0 = np.column_stack([z, x])
+        beta0 = np.linalg.lstsq(w0, y, rcond=None)[0][1:]
+        _, single, _ = bp._partial_iterate(y, z, x, 2, h, beta0, 1e-8, 100)
+        assert ssr[1] <= single + 1e-9
+        assert ssr[1] == pytest.approx(_joint_ssr(y, z, x, breaks[1].tolist()))
+
+    def test_repartition_uses_the_joint_search(self) -> None:
+        y, z, x = _partial_sample(60)
+        vb = [22, 80]
+        new = bp.repartition(y, z, x, vb, self.H)
+        for i, (lo, hi) in enumerate([(0, 80), (23, len(y) - 1)]):
+            seg = slice(lo, hi + 1)
+            n = hi - lo + 1
+            every = [
+                _joint_ssr(y[seg], z[seg], x[seg], [b])
+                for b in range(self.H - 1, n - self.H)
+            ]
+            assert new[i] == lo + self.H - 1 + int(np.argmin(every))
+
+
+class TestRedundantFixedRegressors:
+    """Fixed regressors without variation inside a regime."""
+
+    @staticmethod
+    def _data(rng: np.random.Generator) -> tuple[np.ndarray, ...]:
+        nobs = 200
+        y = np.concatenate([rng.normal(0, 1, 100), rng.normal(2, 1, 100)])
+        impulse = np.zeros((nobs, 1))
+        impulse[150] = 1.0
+        return y, np.ones((nobs, 1)), impulse
+
+    def test_independent_columns(self, rng: np.random.Generator) -> None:
+        nobs = 60
+        z = np.column_stack([np.ones(nobs), rng.standard_normal(nobs)])
+        x = np.column_stack(
+            [
+                np.zeros(nobs),  # no variation
+                2e9 * z[:, 0],  # multiple of a breaking regressor
+                1e-9 * rng.standard_normal(nobs),  # tiny but informative
+                z @ np.array([3.0, -1.0]),  # linear combination
+                rng.standard_normal(nobs),
+            ]
+        )
+        assert bp.independent_columns(z, x) == [2, 4]
+        assert bp.independent_fixed(z, x[:, :2]) is None
+
+    def test_impulse_is_left_out_where_it_is_zero(
+        self, rng: np.random.Generator
+    ) -> None:
+        y, z, x = self._data(rng)
+        opt = bp.BPOptions()
+        # first regime: the impulse (at 150) is zero, the test is the pure one
+        with_x = bp.one_break_sup_f(y, z, x, 0, 99, 30, opt)
+        without = bp.one_break_sup_f(y, z, None, 0, 99, 30, opt)
+        assert with_x == pytest.approx(without)
+        # second regime: the impulse enters
+        assert bp.one_break_sup_f(y, z, x, 100, 199, 30, opt)[0] != pytest.approx(
+            bp.one_break_sup_f(y, z, None, 100, 199, 30, opt)[0]
+        )
+
+    def test_fit_with_impulse_and_step_dummies(self, rng: np.random.Generator) -> None:
+        y, _, impulse = self._data(rng)
+        res = BaiPerronTest(y, exog=impulse).fit()
+        assert res.break_indices == [100]
+        assert res.sequential_n_breaks == 1
+        assert all(np.isfinite(v) for v in res.seqf_stats.values())
+        # a step dummy as a fixed regressor: models with a break at its date
+        # are not identified and are not used
+        step = (np.arange(200) >= 140).astype(float)
+        with pytest.warns(UserWarning):
+            res = BaiPerronTest(y, exog=step).fit()
+        assert res.break_indices == [100]
+        for dates in res.breaks_by_m.values():
+            assert 140 not in dates
+
+    def test_search_skips_dates_with_a_singular_design(
+        self, rng: np.random.Generator
+    ) -> None:
+        nobs = 120
+        t = np.arange(nobs)
+        z = np.column_stack([np.ones(nobs), rng.standard_normal(nobs) * (t >= 30)])
+        x = rng.standard_normal((nobs, 1))
+        y = 1.0 * (t >= 60) + 0.5 * x[:, 0] + rng.standard_normal(nobs)
+        b, ssr = bp.one_break_date(y, z, x, 18)
+        assert b >= 30  # the second regressor is zero before observation 30
+        assert np.isfinite(ssr)
+        stat, _ = bp.one_break_sup_f(y, z, x, 0, nobs - 1, 18, bp.BPOptions())
+        assert np.isfinite(stat)
+
+
+class TestScaling:
+    """Results do not depend on the units or the level of the regressors."""
+
+    def test_regressor_with_a_large_mean(self, rng: np.random.Generator) -> None:
+        nobs, h = 120, 18
+        t = np.arange(nobs)
+        v = rng.standard_normal(nobs)
+        y = 1.0 + 0.8 * v + 2.0 * (t >= 40) - 1.5 * (t >= 80)
+        y = y + rng.standard_normal(nobs)
+        ref = bp.partition_all(
+            bp.ssr_triangle(y, np.column_stack([np.ones(nobs), v]), h), 3, h
+        )
+        for level in (1e4, 1e6):
+            z = np.column_stack([np.ones(nobs), level + v])
+            s = bp.ssr_triangle(y, z, h)
+            assert not np.isnan(s[0, h - 1])
+            got = bp.partition_all(s, 3, h)
+            for m in range(3):
+                assert got[0][m].tolist() == ref[0][m].tolist()
+            np.testing.assert_allclose(got[1], ref[1], rtol=1e-6)
+
+    def test_units(self, rng: np.random.Generator) -> None:
+        nobs = 150
+        t = np.arange(nobs)
+        gdp = np.exp(0.005 * t) * (1 + 0.01 * rng.standard_normal(nobs))
+        rate = 0.03 + 0.01 * rng.standard_normal(nobs)
+        y = 1.0 + 2.0 * (t >= 100) + 2.0 * rate + rng.standard_normal(nobs) * 0.5
+        base = BaiPerronTest(y, exog=np.column_stack([rate, gdp])).fit(max_breaks=3)
+        big = BaiPerronTest(y, exog=np.column_stack([rate, 2e13 * gdp])).fit(
+            max_breaks=3
+        )
+        assert base.p == big.p == 2
+        assert base.breaks_by_m == big.breaks_by_m
+        np.testing.assert_allclose(
+            list(big.ssr.values()), list(base.ssr.values()), rtol=1e-6
+        )
+        np.testing.assert_allclose(
+            list(big.supf_stats.values()), list(base.supf_stats.values()), rtol=1e-5
+        )
+        # the same with the badly scaled regressor among the breaking ones
+        zb = BaiPerronTest(y, exog_break=np.column_stack([np.ones(nobs), gdp])).fit(
+            max_breaks=2
+        )
+        zb_big = BaiPerronTest(
+            y, exog_break=np.column_stack([np.ones(nobs), 2e13 * gdp])
+        ).fit(max_breaks=2)
+        assert zb.breaks_by_m == zb_big.breaks_by_m
+        np.testing.assert_allclose(
+            list(zb_big.ssr.values()), list(zb.ssr.values()), rtol=1e-6
+        )
+
+
+class TestRobustBreakCI:
+    """Robust intervals: phi_2 is scaled by the moment matrix of regime i + 1."""
+
+    def test_agrees_with_the_non_robust_interval_for_iid_errors(self) -> None:
+        rng = np.random.default_rng(123)
+        nobs = 4000
+        t = np.arange(nobs)
+        # the regressor has a larger variance in the second regime (eta != 1)
+        v = rng.standard_normal(nobs) * np.where(t < 2000, 1.0, 1.7)
+        z = np.column_stack([np.ones(nobs), v])
+        y = 1.0 + 0.5 * v + 0.1 * v * (t >= 2000) + rng.standard_normal(nobs)
+        vb = [1999]
+        plain = bp.break_ci(y, z, None, vb, bp.BPOptions())[0]
+        robust = bp.break_ci(y, z, None, vb, bp.BPOptions(robust=True))[0]
+        width = plain[1] - plain[0]
+        assert width > 20
+        assert abs(robust[0] - plain[0]) < 0.25 * width
+        assert abs(robust[1] - plain[1]) < 0.25 * width
+
+    def test_quantile_outside_the_starting_interval(self) -> None:
+        # a wide, very asymmetric distribution: the 97.5% quantile is above 2000
+        eta, phi1, phi2 = 0.021, 1.0, 4.8
+        q = bp.quantiles_argmax(eta, phi1, phi2)
+        assert q[3] > 2000
+        a = phi1 / phi2
+        b = math.sqrt(phi1 * eta / phi2)
+        pars = (
+            (1 + 2 * a) / 2,
+            a * (1 + a) / 2,
+            b,
+            math.sqrt(phi2 * eta / phi1) + b / 2,
+            ((phi2 / phi1) + 1) * eta / 2,
+        )
+        assert bp.cdf_argmax(q[3], *pars) == pytest.approx(0.975, abs=1e-5)
+        assert bp.cdf_argmax(q[0], *pars) == pytest.approx(0.025, abs=1e-5)

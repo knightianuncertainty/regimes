@@ -41,6 +41,12 @@ from regimes.tests import _bp_critical_values as _cv
 from regimes.tests._bp_core import BPOptions
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase
 
+# condition number of the regressors (columns scaled to unit length) above
+# which fit() warns that tests and intervals may be inaccurate
+_COND_WARN = 1e6
+# an SSR below this fraction of y'y is treated as an exact fit
+_EXACT_FIT = 1e-22
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -220,10 +226,12 @@ class BaiPerronResults(BreakTestResultsBase):
         variable_breaks = {}
         col_idx = 0
 
-        # Non-breaking regressors
-        if self._test.exog is not None:
-            exog_list.append(self._test.exog)
-            col_idx += self._test.exog.shape[1]
+        # Non-breaking regressors: the columns fit() used (columns of exog that
+        # are linear combinations of the breaking regressors are left out)
+        _, _, fixed = self._test._data()
+        if fixed is not None:
+            exog_list.append(fixed)
+            col_idx += fixed.shape[1]
 
         # Breaking regressors
         if self._test.exog_break is not None:
@@ -369,7 +377,11 @@ class BaiPerronResults(BreakTestResultsBase):
             lines.append(
                 f"\nSequential procedure at {100 * self.level:g}%: "
                 f"{self.sequential_n_breaks} break(s){where}"
-                + (" (repartition applied)" if self.repartition else "")
+                + (
+                    " (repartition applied)"
+                    if self.repartition and (self.sequential_n_breaks or 0) > 1
+                    else ""
+                )
             )
 
         lines.append("-" * width)
@@ -462,7 +474,19 @@ class BaiPerronTest(BreakTestBase):
     statistics are reported here.
 
     The minimum regime length is ``h = floor(trimming * T)``, as in Bai and
-    Perron (2003) and Perron's program.
+    Perron (2003) and Perron's program, and at least ``q + 1`` (one more than
+    the number of breaking regressors).
+
+    The UDmax and WDmax critical values are tabulated for an upper bound of
+    M = 5 breaks (trimming 0.05, 0.10, 0.15), M = 3 (0.20) and M = 2 (0.25).
+    Bai and Perron (2003, Section 5.2) note that they vary little for larger
+    M; with ``max_breaks`` below M the tests are conservative.
+
+    A fixed regressor without variation inside a regime (an impulse or step
+    dummy in ``exog``) is left out of the sup F(l+1|l) test within that
+    regime. A model whose break dates make a fixed regressor a linear
+    combination of the regime-specific ones (a step dummy in ``exog`` at an
+    estimated break date) is not identified and is not used.
     """
 
     def __init__(
@@ -597,10 +621,19 @@ class BaiPerronTest(BreakTestBase):
 
     @property
     def p(self) -> int:
-        """Number of non-breaking regressors."""
-        if self.exog is None:
-            return 0
-        return self.exog.shape[1]
+        """Number of non-breaking regressors used.
+
+        Columns of ``exog`` that are linear combinations of the breaking
+        regressors are not counted (see :meth:`fit`).
+        """
+        return len(self._fixed_columns())
+
+    def _fixed_columns(self) -> list[int]:
+        """Indices of the columns of ``exog`` that enter as fixed regressors."""
+        assert self.exog_break is not None
+        if self.exog is None or self.exog.shape[1] == 0:
+            return []
+        return _bp.independent_columns(self.exog_break, self.exog)
 
     def _data(
         self,
@@ -615,20 +648,23 @@ class BaiPerronTest(BreakTestBase):
         regressors (and of the fixed regressors kept so far) are left out of
         ``x``: such a regressor cannot have a fixed coefficient next to a
         breaking one. The usual case is a constant included in ``exog`` while
-        the constant is also the breaking regressor.
+        the constant is also the breaking regressor. The decision does not
+        depend on the units of the regressors.
         """
         assert self.exog_break is not None
         z = self.exog_break
-        if self.exog is None or self.exog.shape[1] == 0:
-            return self.endog, z, None
-        kept = z
-        cols: list[int] = []
-        for j in range(self.exog.shape[1]):
-            trial = np.column_stack([kept, self.exog[:, j]])
-            if np.linalg.matrix_rank(trial) == trial.shape[1]:
-                kept = trial
-                cols.append(j)
-        x = self.exog[:, cols] if cols else None
+        for label, arr in (
+            ("endog", self.endog),
+            ("exog_break", z),
+            ("exog", self.exog),
+        ):
+            if arr is not None and not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    f"{label} contains missing or infinite values; the "
+                    f"Bai-Perron procedure needs a sample without gaps"
+                )
+        cols = self._fixed_columns()
+        x = self.exog[:, cols] if cols and self.exog is not None else None
         return self.endog, z, x
 
     def fit(  # type: ignore[override]  # explicit options instead of **kwargs
@@ -658,7 +694,7 @@ class BaiPerronTest(BreakTestBase):
             0.05, 0.10, 0.15, 0.20, 0.25).
         trimming : float
             Trimming parameter: the minimum regime length is
-            ``h = floor(trimming * T)``. Default is 0.15. Critical values are
+            ``h = max(floor(trimming * T), q + 1)``. Default is 0.15. Critical values are
             tabulated for 0.05, 0.10, 0.15, 0.20 and 0.25; with any other
             value the break dates and information criteria are still computed
             but critical values are NaN.
@@ -695,7 +731,8 @@ class BaiPerronTest(BreakTestBase):
             Apply the repartition step of Bai (1997) to the sequentially
             estimated break dates. Default False.
         h : int | None
-            Minimum regime length. Overrides ``floor(trimming * T)``;
+            Minimum regime length (more than ``q``). Overrides the value
+            implied by ``trimming``;
             ``trimming`` still selects the critical-value table.
 
         Returns
@@ -714,9 +751,27 @@ class BaiPerronTest(BreakTestBase):
         """
         nobs = self.nobs
         q = self.q
+        if max_breaks < 1:
+            raise ValueError(f"max_breaks must be at least 1, got {max_breaks}")
         y, z, x = self._data()
         # fixed regressors actually used (collinear columns of exog are dropped)
         p = 0 if x is None else x.shape[1]
+
+        # Near-collinear regressors (after scaling each to unit length): the
+        # break dates and SSRs are computed from an orthonormal basis, but the
+        # covariance matrices behind the tests and intervals are not
+        w_all = z if x is None else np.column_stack([z, x])
+        norms = np.sqrt(np.einsum("ij,ij->j", w_all, w_all))
+        norms[norms == 0] = 1.0
+        cond = float(np.linalg.cond(w_all / norms))
+        if cond > _COND_WARN:
+            warnings.warn(
+                f"The regressors are nearly collinear (condition number "
+                f"{cond:.1e} after scaling): test statistics and confidence "
+                f"intervals may be inaccurate. A regressor that varies little "
+                f"around a large mean is the usual cause; centering it helps.",
+                stacklevel=2,
+            )
 
         if selection not in ("bic", "lwz", "sequential"):
             raise ValueError(f"Unknown selection method: {selection}")
@@ -801,7 +856,27 @@ class BaiPerronTest(BreakTestBase):
                 "No admissible partition: the breaking regressors have no "
                 "variation within regimes of the minimum length."
             )
+        if n_ok < max_breaks:
+            warnings.warn(
+                f"No admissible partition with more than {n_ok} break(s); "
+                f"max_breaks reduced from {max_breaks}.",
+                stacklevel=2,
+            )
         max_breaks = n_ok
+
+        # An exact fit leaves nothing to test (and the statistics are 0/0)
+        yy = float(y @ y)
+        if not ssr0 > _EXACT_FIT * yy:
+            raise ValueError(
+                "The model without breaks fits the data exactly; there is "
+                "nothing to test."
+            )
+        for m in range(1, max_breaks + 1):
+            if not float(ssr_m[m - 1]) > _EXACT_FIT * yy:
+                raise ValueError(
+                    f"The model with {m} break(s) fits the data exactly (zero "
+                    f"residual variance); the tests are not defined."
+                )
 
         ssr_vals: dict[int, float] = {0: ssr0}
         breaks_by_m: dict[int, Sequence[int]] = {0: []}

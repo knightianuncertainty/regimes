@@ -833,3 +833,73 @@ class TestBaiPerronOptions:
         pure = rg.BaiPerronTest(y, exog=np.ones((n, 1))).fit(max_breaks=2)
         assert pure.p == 0
         assert pure.ssr == pytest.approx(rg.BaiPerronTest(y).fit(max_breaks=2).ssr)
+
+    def test_to_ols_uses_the_columns_fit_used(self, rng: np.random.Generator) -> None:
+        """``to_ols`` leaves out the fixed regressors that ``fit`` left out."""
+        n = 200
+        x = rng.standard_normal(n)
+        y = 0.5 * x + rng.standard_normal(n) * 0.3
+        y[n // 2 :] += 3.0
+        test = rg.BaiPerronTest(y, exog=np.column_stack([np.ones(n), x]))
+        results = test.fit(max_breaks=2)
+        assert test.p == results.p == 1
+        ols = results.to_ols()
+        assert len(ols.params) == 1 + (results.n_breaks + 1)
+        estimates = test.get_regime_estimates(results.break_indices)
+        np.testing.assert_allclose(
+            np.asarray(ols.params)[1:], [float(e[0][0]) for e in estimates], rtol=1e-8
+        )
+        assert float(np.sum(np.asarray(ols.resid) ** 2)) == pytest.approx(
+            results.ssr[results.n_breaks]
+        )
+
+    def test_missing_values_are_rejected(self, rng: np.random.Generator) -> None:
+        y = rng.standard_normal(100)
+        x = rng.standard_normal(100)
+        y_gap = y.copy()
+        y_gap[0] = np.nan
+        with pytest.raises(ValueError, match="endog contains missing"):
+            rg.BaiPerronTest(y_gap).fit()
+        x_gap = x.copy()
+        x_gap[5] = np.inf
+        with pytest.raises(ValueError, match="exog contains missing"):
+            rg.BaiPerronTest(y, exog=x_gap).fit()
+
+    def test_degenerate_inputs_raise(self, rng: np.random.Generator) -> None:
+        with pytest.raises(ValueError, match="max_breaks must be at least 1"):
+            rg.BaiPerronTest(rng.standard_normal(100)).fit(max_breaks=0)
+        with pytest.raises(ValueError, match="without breaks fits the data exactly"):
+            rg.BaiPerronTest(np.ones(60)).fit()
+        step = np.r_[np.zeros(50), np.ones(50)]
+        with pytest.raises(ValueError, match="fits the data exactly"):
+            rg.BaiPerronTest(step).fit()
+
+    def test_near_collinear_regressors_warn(self, rng: np.random.Generator) -> None:
+        n = 150
+        v = rng.standard_normal(n)
+        y = 1.0 + v + rng.standard_normal(n)
+        y[100:] += 2.0
+        z = np.column_stack([np.ones(n), 1e7 + v])
+        with pytest.warns(UserWarning, match="nearly collinear"):
+            shifted = rg.BaiPerronTest(y, exog_break=z).fit(max_breaks=2)
+        centered = rg.BaiPerronTest(y, exog_break=np.column_stack([np.ones(n), v])).fit(
+            max_breaks=2
+        )
+        # the break dates and SSRs do not depend on the level of the regressor
+        assert shifted.breaks_by_m == centered.breaks_by_m
+        np.testing.assert_allclose(
+            list(shifted.ssr.values()), list(centered.ssr.values()), rtol=1e-5
+        )
+
+    def test_summary_mentions_repartition_only_when_applied(
+        self, rng: np.random.Generator
+    ) -> None:
+        y = rng.standard_normal(150)
+        y[75:] += 4.0
+        one = rg.BaiPerronTest(y).fit(selection="sequential", repartition=True)
+        assert one.sequential_n_breaks == 1
+        assert "repartition applied" not in one.summary()
+        y[110:] -= 4.0
+        two = rg.BaiPerronTest(y).fit(selection="sequential", repartition=True)
+        assert two.sequential_n_breaks == 2
+        assert "repartition applied" in two.summary()

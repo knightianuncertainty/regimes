@@ -87,6 +87,15 @@ main()
     Case("consumption_partial_hv0",    yc, one, dy, hc, 5, 0.15, {0, 0, 1, 0, 1, 1}, FALSE);
     Case("consumption_partial_robust", yc, one, dy, hc, 5, 0.15, {1, 1, 1, 1, 1, 1}, FALSE);
     Case("consumption_slope_partial",  yc, dy, one, hc, 5, 0.15, {0, 0, 1, 1, 1, 1}, FALSE);
+    // an impulse dummy among the fixed regressors (zero in every regime but one), here at the outlier of the
+    // simulated data (observation 31): the sup F(l+1|l) tests leave it out in the regimes where it is redundant
+    decl imp = zeros(rows(mC), 1);
+    imp[31] = 1;
+    Case("consumption_outlier_dummy",        yc, one, dy ~ imp, hc, 5, 0.15, {0, 0, 1, 1, 1, 1}, FALSE);
+    Case("consumption_outlier_dummy_robust", yc, one, dy ~ imp, hc, 5, 0.15, {1, 0, 1, 1, 1, 1}, FALSE);
+    Case("consumption_slope_outlier_dummy",  yc, dy, one ~ imp, hc, 5, 0.15, {0, 0, 1, 1, 1, 1}, FALSE);
+    Case("exdata_const_partial",       ye, xe, ze, he, 5, 0.15, {0, 0, 1, 1, 1, 1}, FALSE);
+    Case("exdata_const_partial_robust", ye, xe, ze, he, 5, 0.15, {1, 0, 1, 1, 1, 1}, FALSE);
     Case("exdata_pure",                ye, ze, <>, he, 5, 0.15, {0, 0, 1, 1, 1, 1}, FALSE);
     Case("exdata_pure_robust_pw",      ye, ze, <>, he, 5, 0.15, {1, 1, 1, 1, 1, 1}, FALSE);
     Case("exdata_partial",             ye, ze, xe, he, 5, 0.15, {0, 0, 1, 1, 1, 1}, TRUE);
