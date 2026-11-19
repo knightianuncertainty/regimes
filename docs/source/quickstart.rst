@@ -39,10 +39,13 @@ using the Bai-Perron test:
 
 The results include:
 
-- **Sup-F statistics**: Test m breaks vs 0 breaks
-- **UDmax**: Test for presence of any breaks
-- **BIC/LWZ**: Information criteria for model selection
-- **Break locations**: Optimal break points for each number of breaks
+- **Sup-F statistics**: Test k breaks vs 0 breaks (reported "scaled by q",
+  the scaling of the published critical values)
+- **UDmax/WDmax**: Tests for the presence of any breaks
+- **Sup-F(l+1|l)** and the sequential procedure for the number of breaks
+- **BIC/LWZ**: Information criteria (the break dates count as parameters)
+- **Break locations**: Optimal break points for each number of breaks, with
+  confidence intervals for the selected ones
 
 Regression with HAC Standard Errors
 -----------------------------------

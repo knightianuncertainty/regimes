@@ -126,6 +126,6 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
 | 0.4.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
-| 0.5.0 | In progress | Date-aware summaries, real data examples, example notebooks, Sphinx docs, PyPI stable release |
+| 0.5.0 | In progress | Date-aware summaries, Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), real data examples, example notebooks, Sphinx docs, PyPI stable release |
 | 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
 | 0.7.0+ | Future | End-to-end forecasting workflow with structural change |

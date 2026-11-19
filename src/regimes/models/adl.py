@@ -1073,6 +1073,7 @@ class ADL(RegimesModelBase):
         max_breaks: int = 5,
         trimming: float = 0.15,
         selection: Literal["bic", "lwz", "sequential"] = "bic",
+        **kwargs: Any,
     ) -> BaiPerronResults:
         """Test for structural breaks using Bai-Perron procedure.
 
@@ -1089,9 +1090,17 @@ class ADL(RegimesModelBase):
         max_breaks : int
             Maximum number of breaks to test. Default is 5.
         trimming : float
-            Minimum segment length as fraction of sample. Default is 0.15.
+            Minimum regime length as a fraction of the sample
+            (``h = floor(trimming * T)``). Default is 0.15.
         selection : str
             Break selection criterion: "bic", "lwz", or "sequential".
+
+        **kwargs
+            Further options passed to :meth:`BaiPerronTest.fit`: ``level``
+            (significance level of the tests and the sequential procedure),
+            ``robust``, ``prewhiten``, ``hetdat``, ``hetvar`` (assumptions on
+            the errors in the tests), ``hetomega``, ``hetq`` (in the
+            break-date confidence intervals), ``repartition`` and ``h``.
 
         Returns
         -------
@@ -1101,7 +1110,9 @@ class ADL(RegimesModelBase):
         from regimes.tests.bai_perron import BaiPerronTest
 
         test = BaiPerronTest.from_model(self, break_vars=break_vars)
-        return test.fit(max_breaks=max_breaks, trimming=trimming, selection=selection)
+        return test.fit(
+            max_breaks=max_breaks, trimming=trimming, selection=selection, **kwargs
+        )
 
     def chow_test(
         self,

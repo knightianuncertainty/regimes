@@ -9,7 +9,7 @@ A Python package for structural break detection and estimation in time-series ec
 
 ## Features
 
-- **Structural Break Tests**: Bai-Perron test for multiple structural breaks with Sup-F, UDmax, and sequential testing procedures
+- **Structural Break Tests**: Bai-Perron procedure for multiple structural breaks (sup F, UDmax/WDmax, sup F(l+1|l) and the sequential procedure, BIC/LWZ, break-date confidence intervals), validated against Perron's program and the published results
 - **Chow Test**: Test for structural breaks at known break points with standard and predictive variants
 - **CUSUM Tests**: CUSUM and CUSUM-SQ tests for parameter and variance instability (Brown, Durbin, Evans, 1975)
 - **Andrews-Ploberger Test**: SupF, ExpF, and AveF tests for a structural break at unknown date (Andrews, 1993; Andrews & Ploberger, 1994)
@@ -98,6 +98,36 @@ You can also use the explicit class method approach:
 # Equivalent to model.bai_perron()
 bp_results = rg.BaiPerronTest.from_model(model).fit()
 ```
+
+#### Bai-Perron: what is computed, and the conventions
+
+`BaiPerronTest.fit()` implements the procedure of Bai and Perron (1998, 2003). It is a port of the Bai-Perron core of the [OxRegimes](https://github.com/knightianuncertainty/OxRegimes) package and gives the same numbers; both are checked against Pierre Perron's own program and reproduce Table I of Bai and Perron (2003).
+
+| Output | Meaning |
+|--------|---------|
+| `breaks_by_m`, `ssr` | Global minimizers of the sum of squared residuals for `m = 0..max_breaks` breaks (dynamic programming) |
+| `supf_stats`, `udmax`, `wdmax` | sup F(k\|0) tests of no break against `k` breaks, and the double maximum tests |
+| `seqf_stats` | sup F(l+1\|l) tests of `l` against `l + 1` breaks |
+| `sequential_n_breaks`, `sequential_breaks` | The sequential procedure at `level` |
+| `bic`, `lwz` | Information criteria; the `m` break dates count as estimated parameters |
+| `break_ci`, `break_ci_90` | Confidence intervals for the break dates (Bai 1997) |
+
+```python
+results = rg.BaiPerronTest(y, exog=x_fixed, exog_break=z_breaking).fit(
+    max_breaks=5,
+    trimming=0.15,           # minimum regime length h = floor(trimming * T)
+    selection="sequential",  # or "bic" (default), "lwz"
+    level=0.05,              # 0.10, 0.05, 0.025 or 0.01
+    robust=True,             # allow serial correlation (HAC)
+    prewhiten=True,          # VAR(1) prewhitening of the HAC estimator
+)
+```
+
+- **F statistics are "scaled by q"**: they are not divided by the number of breaking regressors `q`, because that is the scaling of the published critical values. With a common error variance (`hetvar=False`) the statistic is `q` times the classical F.
+- **Critical values** are the published tables for trimming 0.05, 0.10, 0.15, 0.20 and 0.25, levels 10%, 5%, 2.5% and 1%, and `q` up to 10. With another trimming the break dates and information criteria are still computed, but critical values are not available.
+- **Break dates** are the index of the first observation of the new regime.
+- **Error assumptions**: by default the tests allow the error variance to differ across regimes (`hetvar=True`) and assume no serial correlation (`robust=False`). Bai and Perron (2003) recommend a trimming of at least 0.15 when heterogeneity is allowed, and more when serial correlation is allowed, unless the sample is large.
+- With `selection="sequential"` the break dates are estimated one at a time (optionally with `repartition=True`); with `"bic"` or `"lwz"` they are the global minimizers.
 
 ### Testing Known Break Points (Chow Test)
 
