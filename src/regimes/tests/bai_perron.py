@@ -1,15 +1,30 @@
 """Bai-Perron test for multiple structural breaks.
 
 This module implements the Bai-Perron (1998, 2003) procedure for testing
-and estimating multiple structural breaks in linear regression models.
+and estimating multiple structural breaks in linear regression models. The
+algorithms live in :mod:`regimes.tests._bp_core`, a port of the OxRegimes
+implementation that was cross-validated against Pierre Perron's program; the
+critical values are the published tables (:mod:`regimes.tests._bp_critical_values`).
 
 References
 ----------
+Bai, J. (1997). Estimation of a change point in multiple regression models.
+    Review of Economics and Statistics, 79(4), 551-563.
+
 Bai, J., & Perron, P. (1998). Estimating and testing linear models with
     multiple structural changes. Econometrica, 66(1), 47-78.
 
 Bai, J., & Perron, P. (2003). Computation and analysis of multiple
     structural change models. Journal of Applied Econometrics, 18(1), 1-22.
+
+Bai, J., & Perron, P. (2003b). Critical values for multiple structural change
+    tests. Econometrics Journal, 6(1), 72-78.
+
+Liu, J., Wu, S., & Zidek, J. V. (1997). On segmented multivariate
+    regression. Statistica Sinica, 7(2), 497-525.
+
+Yao, Y.-C. (1988). Estimating the number of change-points via Schwarz'
+    criterion. Statistics & Probability Letters, 6(3), 181-189.
 """
 
 from __future__ import annotations
@@ -19,10 +34,18 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from scipy import stats
 
 from regimes.results.base import _obs_label
+from regimes.tests import _bp_core as _bp
+from regimes.tests import _bp_critical_values as _cv
+from regimes.tests._bp_core import BPOptions
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase
+
+# condition number of the regressors (columns scaled to unit length) above
+# which fit() warns that tests and intervals may be inaccurate
+_COND_WARN = 1e6
+# an SSR below this fraction of y'y is treated as an exact fit
+_EXACT_FIT = 1e-22
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -36,55 +59,20 @@ if TYPE_CHECKING:
     from regimes.results.base import IndexLike
 
 
-# Critical values for Bai-Perron tests (approximations from tables)
-# These are for 5% significance level, trimming = 0.15
-# Keys are (q, m) where q = number of breaking regressors, m = number of breaks
-_SUPF_CRITICAL_VALUES: dict[tuple[int, int], float] = {
-    # q=1
-    (1, 1): 8.58,
-    (1, 2): 7.22,
-    (1, 3): 5.96,
-    (1, 4): 4.99,
-    (1, 5): 4.09,
-    # q=2
-    (2, 1): 10.13,
-    (2, 2): 8.51,
-    (2, 3): 7.42,
-    (2, 4): 6.38,
-    (2, 5): 5.60,
-    # q=3
-    (3, 1): 11.47,
-    (3, 2): 9.75,
-    (3, 3): 8.36,
-    (3, 4): 7.42,
-    (3, 5): 6.57,
-    # q=4
-    (4, 1): 12.77,
-    (4, 2): 10.58,
-    (4, 3): 9.35,
-    (4, 4): 8.19,
-    (4, 5): 7.45,
-    # q=5
-    (5, 1): 13.96,
-    (5, 2): 11.65,
-    (5, 3): 10.18,
-    (5, 4): 9.12,
-    (5, 5): 8.26,
-}
-
-# UDmax critical values at 5% (from Bai-Perron tables)
-_UDMAX_CRITICAL_VALUES: dict[int, float] = {
-    1: 8.88,
-    2: 10.55,
-    3: 11.70,
-    4: 12.81,
-    5: 13.83,
-}
+def _fmt(value: float, spec: str) -> str:
+    """Format a number, showing a dash for NaN."""
+    width = int(spec.split(".")[0])
+    if value is None or np.isnan(value):
+        return f"{'-':>{width}}"
+    return f"{value:>{spec}}"
 
 
 @dataclass
 class BaiPerronResults(BreakTestResultsBase):
-    """Results from Bai-Perron structural break test.
+    """Results from the Bai-Perron multiple structural break procedure.
+
+    All F statistics are "scaled by q" (not divided by the number of breaking
+    regressors), which is the scaling of the published critical values.
 
     Attributes
     ----------
@@ -93,52 +81,92 @@ class BaiPerronResults(BreakTestResultsBase):
     nobs : int
         Number of observations.
     n_breaks : int
-        Number of breaks selected (by specified criterion).
+        Number of breaks selected by ``selection_method``.
     break_indices : Sequence[int]
-        Estimated break point indices.
+        Selected break dates: index of the first observation of each new
+        regime.
     supf_stats : dict[int, float]
-        Sup-F statistics for testing m breaks vs 0 breaks.
-    supf_pvalues : dict[int, float]
-        P-values for Sup-F tests.
-    udmax : float
-        UDmax statistic (unweighted double maximum).
-    wdmax : float
-        WDmax statistic (weighted double maximum).
+        sup F(k|0) for k = 1..max_breaks, at the global SSR minimizers.
+    supf_critical : dict[int, float]
+        Critical values of sup F(k|0) at ``level``.
+    udmax, udmax_critical : float
+        Unweighted double maximum statistic and its critical value at
+        ``level``.
+    wdmax, wdmax_critical : float
+        Weighted double maximum statistic (weights c(1)/c(k) at ``level``)
+        and its critical value.
+    wdmax_stats : dict[float, float]
+        WDmax at each tabulated significance level.
     seqf_stats : dict[int, float]
-        Sequential Sup-F statistics for testing m+1 vs m breaks.
-    bic : dict[int, float]
-        BIC values for models with different numbers of breaks.
-    lwz : dict[int, float]
-        LWZ (modified Schwarz) values for different numbers of breaks.
+        ``seqf_stats[l]`` is sup F(l+1|l), computed on the global l-break
+        partition; ``seqf_stats[0]`` is sup F(1|0). NaN when no regime is long
+        enough to be split.
+    seqf_critical : dict[int, float]
+        Critical values of sup F(l+1|l) at ``level``.
+    seqf_break : dict[int, int]
+        Break date the (l+1)-th break would have (-1 if none).
+    bic, lwz : dict[int, float]
+        Information criteria for m = 0..max_breaks, per observation; the
+        penalty counts the m break dates as estimated parameters.
     ssr : dict[int, float]
-        Sum of squared residuals for different numbers of breaks.
+        Sum of squared residuals for m = 0..max_breaks.
     breaks_by_m : dict[int, Sequence[int]]
-        Optimal break locations for each number of breaks m.
+        Global SSR minimizers for each number of breaks.
+    sequential_n_breaks : int | None
+        Number of breaks found by the sequential procedure at ``level`` (None
+        if critical values are not tabulated for the trimming).
+    sequential_breaks : Sequence[int]
+        Break dates estimated by the sequential procedure.
+    break_ci, break_ci_90 : dict[int, tuple[int, int]]
+        95% and 90% confidence intervals for the selected break dates
+        (Bai 1997), keyed by break date.
+    critical_values : dict[str, dict[float, Any]]
+        Critical values at all tabulated levels, under the keys ``"supf"``,
+        ``"seqf"``, ``"udmax"`` and ``"wdmax"``.
     trimming : float
-        Trimming parameter used.
+        Trimming parameter.
+    h : int
+        Minimum regime length used.
     max_breaks : int
         Maximum number of breaks considered.
     selection_method : str
-        Method used to select number of breaks.
+        Method used to select the number of breaks.
+    level : float
+        Significance level of the tests and the sequential procedure.
+    q, p : int
+        Number of regressors with breaking and with fixed coefficients.
+    options : BPOptions
+        Assumptions on errors and regressors used by tests and intervals.
     """
 
     supf_stats: dict[int, float] = field(default_factory=dict)
-    supf_pvalues: dict[int, float] = field(default_factory=dict)
     supf_critical: dict[int, float] = field(default_factory=dict)
     udmax: float = np.nan
     udmax_critical: float = np.nan
     wdmax: float = np.nan
+    wdmax_critical: float = np.nan
+    wdmax_stats: dict[float, float] = field(default_factory=dict)
     seqf_stats: dict[int, float] = field(default_factory=dict)
     seqf_critical: dict[int, float] = field(default_factory=dict)
+    seqf_break: dict[int, int] = field(default_factory=dict)
     bic: dict[int, float] = field(default_factory=dict)
     lwz: dict[int, float] = field(default_factory=dict)
     ssr: dict[int, float] = field(default_factory=dict)
     breaks_by_m: dict[int, Sequence[int]] = field(default_factory=dict)
+    sequential_n_breaks: int | None = None
+    sequential_breaks: Sequence[int] = field(default_factory=list)
     trimming: float = 0.15
+    h: int = 0
     max_breaks: int = 5
     selection_method: str = "bic"
+    level: float = 0.05
     q: int = 1  # Number of breaking regressors
+    p: int = 0  # Number of fixed regressors
     break_ci: dict[int, tuple[int, int]] = field(default_factory=dict)
+    break_ci_90: dict[int, tuple[int, int]] = field(default_factory=dict)
+    critical_values: dict[str, dict[float, Any]] = field(default_factory=dict)
+    options: BPOptions = field(default_factory=BPOptions)
+    repartition: bool = False
 
     # Private field to store reference back to the test for to_ols()
     _test: BaiPerronTest | None = field(default=None, repr=False)
@@ -198,10 +226,12 @@ class BaiPerronResults(BreakTestResultsBase):
         variable_breaks = {}
         col_idx = 0
 
-        # Non-breaking regressors
-        if self._test.exog is not None:
-            exog_list.append(self._test.exog)
-            col_idx += self._test.exog.shape[1]
+        # Non-breaking regressors: the columns fit() used (columns of exog that
+        # are linear combinations of the breaking regressors are left out)
+        _, _, fixed = self._test._data()
+        if fixed is not None:
+            exog_list.append(fixed)
+            col_idx += fixed.shape[1]
 
         # Breaking regressors
         if self._test.exog_break is not None:
@@ -229,7 +259,7 @@ class BaiPerronResults(BreakTestResultsBase):
         return ols_model.fit(cov_type=cov_type)
 
     def summary(self, index: IndexLike | None = None) -> str:
-        """Generate a text summary of Bai-Perron test results.
+        """Generate a text summary of the Bai-Perron results.
 
         Parameters
         ----------
@@ -243,70 +273,121 @@ class BaiPerronResults(BreakTestResultsBase):
         str
             Formatted summary including test statistics and break dates.
         """
+        levels = _cv.LEVELS
+        cv = self.critical_values
+        opt = self.options
+        width = 78
+
+        def dates(breaks: Sequence[int]) -> str:
+            return ", ".join(_obs_label(int(b), index) for b in breaks)
+
         lines = []
-        lines.append("=" * 78)
-        lines.append(f"{'Bai-Perron Multiple Structural Break Test':^78}")
-        lines.append("=" * 78)
+        lines.append("=" * width)
+        lines.append(f"{'Bai-Perron Multiple Structural Break Test':^{width}}")
+        lines.append("=" * width)
         lines.append(f"Number of observations:   {self.nobs:>10}")
-        lines.append(f"Trimming parameter:       {self.trimming:>10.2f}")
+        lines.append(
+            f"Trimming parameter:       {self.trimming:>10.2f}  (h = {self.h})"
+        )
         lines.append(f"Maximum breaks tested:    {self.max_breaks:>10}")
         lines.append(f"Breaking regressors (q):  {self.q:>10}")
-        lines.append("-" * 78)
-
-        # Sup-F tests
-        lines.append("\nSup-F Tests (H0: 0 breaks vs H1: m breaks):")
-        lines.append(
-            f"{'m':>5} {'Sup-F':>12} {'Critical':>12} {'p-value':>12} {'Reject':>10}"
+        if self.p > 0:
+            lines.append(f"Fixed regressors (p):     {self.p:>10}")
+        errors = "serial correlation allowed (HAC" + (
+            ", prewhitened)" if opt.prewhiten else ")"
         )
-        lines.append("-" * 51)
-        for m in sorted(self.supf_stats.keys()):
-            stat = self.supf_stats[m]
-            crit = self.supf_critical.get(m, np.nan)
-            pval = self.supf_pvalues.get(m, np.nan)
-            reject = "Yes" if stat > crit else "No"
-            pval_str = f"{pval:.4f}" if not np.isnan(pval) else "N/A"
+        lines.append(
+            "Errors: "
+            + (errors if opt.robust else "serially uncorrelated")
+            + (
+                ", variances differ across regimes"
+                if opt.hetvar
+                else ", common variance"
+            )
+        )
+        lines.append("-" * width)
+
+        lines.append("\nGlobal minimizers (break date = first obs. of new regime):")
+        lines.append(f"{'m':>5} {'SSR':>15}   Break dates")
+        for m in sorted(self.ssr):
             lines.append(
-                f"{m:>5} {stat:>12.3f} {crit:>12.3f} {pval_str:>12} {reject:>10}"
+                f"{m:>5} {self.ssr[m]:>15.6g}   {dates(self.breaks_by_m.get(m, []))}"
             )
 
-        # UDmax test
-        lines.append(
-            f"\nUDmax statistic: {self.udmax:.3f} (5% critical: {self.udmax_critical:.3f})"
-        )
-        if self.udmax > self.udmax_critical:
-            lines.append("  => Reject null of no breaks")
-        else:
-            lines.append("  => Cannot reject null of no breaks")
-
-        # Sequential tests
-        if self.seqf_stats:
-            lines.append("\nSequential Sup-F Tests (H0: m breaks vs H1: m+1 breaks):")
-            lines.append(
-                f"{'m':>5} {'m+1':>5} {'Seq-F':>12} {'Critical':>12} {'Reject':>10}"
+        head = "".join(f"{f'{100 * lev:g}%':>10}" for lev in levels)
+        lines.append("\nSup-F Tests (H0: 0 breaks vs H1: k breaks), scaled by q:")
+        lines.append(f"{'k':>5} {'Sup-F':>12}{head}")
+        for k in sorted(self.supf_stats):
+            row = "".join(
+                _fmt(cv.get("supf", {}).get(lev, {}).get(k, np.nan), "10.2f")
+                for lev in levels
             )
-            lines.append("-" * 46)
-            for m in sorted(self.seqf_stats.keys()):
-                stat = self.seqf_stats[m]
-                crit = self.seqf_critical.get(m, np.nan)
-                reject = "Yes" if stat > crit else "No"
+            lines.append(f"{k:>5} {self.supf_stats[k]:>12.4f}{row}")
+        row = "".join(
+            _fmt(cv.get("udmax", {}).get(lev, np.nan), "10.2f") for lev in levels
+        )
+        lines.append(f"{'UDmax':>5} {self.udmax:>12.4f}{row}")
+        row = "".join(
+            _fmt(cv.get("wdmax", {}).get(lev, np.nan), "10.2f") for lev in levels
+        )
+        stats_w = " / ".join(
+            _fmt(self.wdmax_stats.get(lev, np.nan), "1.4f").strip() for lev in levels
+        )
+        lines.append(f"{'WDmax':>5} {'':>12}{row}")
+        lines.append(f"      WDmax statistic at each level: {stats_w}")
+
+        if len(self.seqf_stats) > 1:
+            lines.append(
+                "\nSup-F(l+1|l) Tests (H0: l breaks vs H1: l+1 breaks), "
+                "global partitions:"
+            )
+            lines.append(f"{'l+1|l':>7} {'Sup-F':>12} {'New break':>12}{head}")
+            for ell in sorted(self.seqf_stats):
+                if ell == 0:
+                    continue
+                row = "".join(
+                    _fmt(cv.get("seqf", {}).get(lev, {}).get(ell, np.nan), "10.2f")
+                    for lev in levels
+                )
+                new = self.seqf_break.get(ell, -1)
+                label = _obs_label(new, index) if new >= 0 else "-"
                 lines.append(
-                    f"{m:>5} {m + 1:>5} {stat:>12.3f} {crit:>12.3f} {reject:>10}"
+                    f"{f'{ell + 1}|{ell}':>7} "
+                    f"{_fmt(self.seqf_stats[ell], '12.4f')} {label:>12}{row}"
                 )
 
-        # Information criteria
-        lines.append("\nInformation Criteria:")
-        lines.append(f"{'m':>5} {'SSR':>15} {'BIC':>15} {'LWZ':>15}")
-        lines.append("-" * 52)
-        for m in sorted(self.bic.keys()):
-            ssr_val = self.ssr.get(m, np.nan)
-            bic_val = self.bic[m]
-            lwz_val = self.lwz.get(m, np.nan)
-            lines.append(f"{m:>5} {ssr_val:>15.4f} {bic_val:>15.4f} {lwz_val:>15.4f}")
+        lines.append("\nInformation Criteria (break dates counted as parameters):")
+        lines.append(f"{'m':>5} {'BIC':>15} {'LWZ':>15}")
+        best_bic = min(self.bic, key=lambda m: self.bic[m]) if self.bic else -1
+        best_lwz = min(self.lwz, key=lambda m: self.lwz[m]) if self.lwz else -1
+        for m in sorted(self.bic):
+            mark = ("   <- BIC" if m == best_bic else "") + (
+                "   <- LWZ" if m == best_lwz else ""
+            )
+            lines.append(
+                f"{m:>5} {self.bic[m]:>15.4f} {self.lwz.get(m, np.nan):>15.4f}{mark}"
+            )
 
-        # Selected breaks
-        lines.append("-" * 78)
+        if self.sequential_n_breaks is not None:
+            where = (
+                f" at {dates(self.sequential_breaks)}"
+                if self.sequential_n_breaks > 0
+                else ""
+            )
+            lines.append(
+                f"\nSequential procedure at {100 * self.level:g}%: "
+                f"{self.sequential_n_breaks} break(s){where}"
+                + (
+                    " (repartition applied)"
+                    if self.repartition and (self.sequential_n_breaks or 0) > 1
+                    else ""
+                )
+            )
+
+        lines.append("-" * width)
         lines.append(
-            f"\nSelected number of breaks ({self.selection_method.upper()}): {self.n_breaks}"
+            f"\nSelected number of breaks ({self.selection_method.upper()}): "
+            f"{self.n_breaks}"
         )
 
         if self.n_breaks > 0:
@@ -314,44 +395,57 @@ class BaiPerronResults(BreakTestResultsBase):
             lines.append(f"Break dates: {break_labels}")
 
             if self.break_ci:
-                lines.append("\n95% Confidence Intervals for Break Dates:")
+                lines.append("\n95% [90%] Confidence Intervals for Break Dates:")
                 for break_idx in self.break_indices:
                     if break_idx in self.break_ci:
                         lower, upper = self.break_ci[break_idx]
                         bl = _obs_label(break_idx, index)
                         lo = _obs_label(lower, index)
                         hi = _obs_label(upper, index)
-                        lines.append(f"  Break at {bl}: [{lo}, {hi}]")
+                        line = f"  Break at {bl}: [{lo}, {hi}]"
+                        if break_idx in self.break_ci_90:
+                            lo90, hi90 = self.break_ci_90[break_idx]
+                            line += (
+                                f"   [{_obs_label(lo90, index)}, "
+                                f"{_obs_label(hi90, index)}]"
+                            )
+                        lines.append(line)
 
-            lines.append("\nBreak locations by number of breaks:")
-            for m, breaks in sorted(self.breaks_by_m.items()):
-                if m > 0:
-                    m_labels = [_obs_label(b, index) for b in breaks]
-                    lines.append(f"  m={m}: {m_labels}")
-
-        lines.append("=" * 78)
+        lines.append("=" * width)
         return "\n".join(lines)
 
 
 class BaiPerronTest(BreakTestBase):
-    """Bai-Perron test for multiple structural breaks.
+    """Bai-Perron procedure for multiple structural breaks.
 
     Implements the Bai-Perron (1998, 2003) procedure for testing and
-    estimating multiple structural breaks in linear regression models.
+    estimating multiple structural breaks in the linear regression
 
-    The test provides:
-    1. Sup-F tests for m breaks vs 0 breaks
-    2. UDmax and WDmax tests for presence of any breaks
-    3. Sequential Sup-F tests for determining the number of breaks
-    4. Information criteria (BIC, LWZ) for model selection
-    5. Optimal break locations via dynamic programming
+        y_t = z_t' delta_j + x_t' beta + u_t,    t in regime j,
+
+    where the coefficients on ``z`` (``exog_break``) change across regimes
+    and those on ``x`` (``exog``) do not.
+
+    The procedure provides:
+
+    1. Global minimizers of the sum of squared residuals for each number of
+       breaks (dynamic programming)
+    2. sup F(k|0) tests of no break against k breaks
+    3. UDmax and WDmax tests of no break against an unknown number of breaks
+    4. sup F(l+1|l) tests and the sequential procedure for the number of
+       breaks
+    5. Information criteria (BIC, LWZ) for the number of breaks
+    6. Confidence intervals for the break dates (Bai 1997)
 
     Parameters
     ----------
     endog : ArrayLike
         Dependent variable (n_obs,).
     exog : ArrayLike | None
-        Exogenous regressors whose coefficients do NOT break.
+        Exogenous regressors whose coefficients do NOT break. A column that
+        is collinear with the breaking regressors (for example a constant,
+        when the constant is the breaking regressor) is dropped from the
+        fixed regressors; ``BaiPerronResults.p`` reports the number used.
     exog_break : ArrayLike | None
         Regressors whose coefficients may break. If None, defaults to
         a constant (mean shift model).
@@ -373,12 +467,26 @@ class BaiPerronTest(BreakTestBase):
 
     Notes
     -----
-    The implementation uses dynamic programming (Bai-Perron algorithm)
-    to efficiently compute optimal break locations. The complexity is
-    O(T^2) for a given number of breaks.
+    Critical values are the published tables of Bai and Perron (1998, 2003b),
+    available for trimming 0.05, 0.10, 0.15, 0.20 and 0.25 and significance
+    levels 10%, 5%, 2.5% and 1%. They apply to the F statistics "scaled by q"
+    (not divided by the number of breaking regressors), which is how the
+    statistics are reported here.
 
-    Critical values are approximations from the original Bai-Perron
-    tables. For more precise inference, bootstrap methods can be used.
+    The minimum regime length is ``h = floor(trimming * T)``, as in Bai and
+    Perron (2003) and Perron's program, and at least ``q + 1`` (one more than
+    the number of breaking regressors).
+
+    The UDmax and WDmax critical values are tabulated for an upper bound of
+    M = 5 breaks (trimming 0.05, 0.10, 0.15), M = 3 (0.20) and M = 2 (0.25).
+    Bai and Perron (2003, Section 5.2) note that they vary little for larger
+    M; with ``max_breaks`` below M the tests are conservative.
+
+    A fixed regressor without variation inside a regime (an impulse or step
+    dummy in ``exog``) is left out of the sup F(l+1|l) test within that
+    regime. A model whose break dates make a fixed regressor a linear
+    combination of the regime-specific ones (a step dummy in ``exog`` at an
+    estimated break date) is not identified and is not used.
     """
 
     def __init__(
@@ -513,613 +621,399 @@ class BaiPerronTest(BreakTestBase):
 
     @property
     def p(self) -> int:
-        """Number of non-breaking regressors."""
-        if self.exog is None:
-            return 0
-        return self.exog.shape[1]
+        """Number of non-breaking regressors used.
 
-    def _compute_ssr_segment(
+        Columns of ``exog`` that are linear combinations of the breaking
+        regressors are not counted (see :meth:`fit`).
+        """
+        return len(self._fixed_columns())
+
+    def _fixed_columns(self) -> list[int]:
+        """Indices of the columns of ``exog`` that enter as fixed regressors."""
+        assert self.exog_break is not None
+        if self.exog is None or self.exog.shape[1] == 0:
+            return []
+        return _bp.independent_columns(self.exog_break, self.exog)
+
+    def _data(
         self,
-        start: int,
-        end: int,
-        y: NDArray[np.floating[Any]] | None = None,
-        x: NDArray[np.floating[Any]] | None = None,
-    ) -> tuple[float, NDArray[np.floating[Any]]]:
-        """Compute SSR for a segment [start, end).
+    ) -> tuple[
+        NDArray[np.floating[Any]],
+        NDArray[np.floating[Any]],
+        NDArray[np.floating[Any]] | None,
+    ]:
+        """Return ``(y, z, x)``: dependent variable, breaking and fixed regressors.
 
-        Parameters
-        ----------
-        start : int
-            Start index (inclusive).
-        end : int
-            End index (exclusive).
-        y : NDArray | None
-            Dependent variable override. If None, uses self.endog.
-        x : NDArray | None
-            Regressor matrix override. If None, uses self.exog_break
-            and self.exog combined.
-
-        Returns
-        -------
-        tuple[float, NDArray[np.floating]]
-            Sum of squared residuals and OLS coefficients.
+        Columns of ``exog`` that are linear combinations of the breaking
+        regressors (and of the fixed regressors kept so far) are left out of
+        ``x``: such a regressor cannot have a fixed coefficient next to a
+        breaking one. The usual case is a constant included in ``exog`` while
+        the constant is also the breaking regressor. The decision does not
+        depend on the units of the regressors.
         """
-        if y is None:
-            y_seg = self.endog[start:end]
-        else:
-            y_seg = y[start:end]
+        assert self.exog_break is not None
+        z = self.exog_break
+        for label, arr in (
+            ("endog", self.endog),
+            ("exog_break", z),
+            ("exog", self.exog),
+        ):
+            if arr is not None and not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    f"{label} contains missing or infinite values; the "
+                    f"Bai-Perron procedure needs a sample without gaps"
+                )
+        cols = self._fixed_columns()
+        x = self.exog[:, cols] if cols and self.exog is not None else None
+        return self.endog, z, x
 
-        if x is None:
-            # Build regressor matrix from self.exog_break and self.exog
-            X_list = []
-            if self.exog_break is not None:
-                X_list.append(self.exog_break[start:end])
-            if self.exog is not None:
-                X_list.append(self.exog[start:end])
-
-            if not X_list:
-                X_seg = None
-            else:
-                X_seg = np.column_stack(X_list)
-        else:
-            X_seg = x[start:end]
-
-        if X_seg is None or X_seg.shape[1] == 0:
-            # No regressors - SSR is total sum of squares
-            ssr = float(np.sum((y_seg - np.mean(y_seg)) ** 2))
-            return ssr, np.array([np.mean(y_seg)])
-
-        # OLS estimation
-        try:
-            beta, residuals, _rank, _s = np.linalg.lstsq(X_seg, y_seg, rcond=None)
-            if len(residuals) > 0:
-                ssr = float(residuals[0])
-            else:
-                ssr = float(np.sum((y_seg - X_seg @ beta) ** 2))
-        except np.linalg.LinAlgError:
-            ssr = np.inf
-            beta = np.zeros(X_seg.shape[1])
-
-        return ssr, beta
-
-    def _build_ssr_matrix(
-        self,
-        h: int,
-        y: NDArray[np.floating[Any]] | None = None,
-        x: NDArray[np.floating[Any]] | None = None,
-    ) -> NDArray[np.floating[Any]]:
-        """Build matrix of segment SSRs.
-
-        Computes SSR[i,j] = SSR for segment from observation i to j.
-        Only computes for valid segments (length >= h).
-
-        Parameters
-        ----------
-        h : int
-            Minimum segment length.
-        y : NDArray | None
-            Dependent variable override.
-        x : NDArray | None
-            Regressor matrix override.
-
-        Returns
-        -------
-        NDArray[np.floating]
-            Matrix of shape (T, T) with SSR values.
-        """
-        T = self.nobs
-        ssr_matrix = np.full((T, T), np.inf)
-
-        for i in range(T):
-            for j in range(i + h, T + 1):  # j is exclusive end
-                ssr, _ = self._compute_ssr_segment(i, j, y=y, x=x)
-                ssr_matrix[i, j - 1] = ssr  # Store at [i, j-1] for segment [i, j)
-
-        return ssr_matrix
-
-    def _dynamic_programming(
-        self, m: int, h: int, ssr_matrix: NDArray[np.floating[Any]]
-    ) -> tuple[float, list[int]]:
-        """Find optimal m breaks using dynamic programming.
-
-        This implements the Bai-Perron (2003) algorithm for computing
-        optimal break locations that minimize total SSR.
-
-        Parameters
-        ----------
-        m : int
-            Number of breaks to find.
-        h : int
-            Minimum segment length.
-        ssr_matrix : NDArray[np.floating]
-            Pre-computed matrix of segment SSRs.
-
-        Returns
-        -------
-        tuple[float, list[int]]
-            Total SSR and list of break indices.
-        """
-        T = self.nobs
-
-        if m == 0:
-            return float(ssr_matrix[0, T - 1]), []
-
-        # U[i, k] = minimum SSR using first i observations with k breaks
-        # Break indices stored separately
-        U = np.full((T + 1, m + 1), np.inf)
-        break_storage: dict[tuple[int, int], list[int]] = {}
-
-        # Base case: no breaks
-        for i in range(h, T + 1):
-            U[i, 0] = ssr_matrix[0, i - 1]
-            break_storage[(i, 0)] = []
-
-        # Fill DP table
-        for k in range(1, m + 1):
-            # Need at least (k+1)*h observations for k breaks
-            for i in range((k + 1) * h, T + 1):
-                best_ssr = np.inf
-                best_break = -1
-
-                # Try each possible location for the k-th break
-                for j in range(k * h, i - h + 1):
-                    candidate_ssr = U[j, k - 1] + ssr_matrix[j, i - 1]
-                    if candidate_ssr < best_ssr:
-                        best_ssr = candidate_ssr
-                        best_break = j
-
-                U[i, k] = best_ssr
-                if best_break >= 0:
-                    prev_breaks = break_storage.get((best_break, k - 1), [])
-                    break_storage[(i, k)] = prev_breaks + [best_break]
-
-        optimal_ssr = U[T, m]
-        optimal_breaks = break_storage.get((T, m), [])
-
-        return float(optimal_ssr), optimal_breaks
-
-    def _compute_supf(
-        self, m: int, h: int, ssr_matrix: NDArray[np.floating[Any]]
-    ) -> float:
-        """Compute Sup-F statistic for m breaks vs 0 breaks.
-
-        Parameters
-        ----------
-        m : int
-            Number of breaks under alternative.
-        h : int
-            Minimum segment length.
-        ssr_matrix : NDArray[np.floating]
-            Pre-computed matrix of segment SSRs.
-
-        Returns
-        -------
-        float
-            Sup-F statistic.
-        """
-        T = self.nobs
-        q = self.q  # Number of breaking regressors
-        p = self.p  # Number of non-breaking regressors
-
-        # SSR under null (no breaks)
-        ssr_0 = ssr_matrix[0, T - 1]
-
-        # SSR under alternative (m breaks)
-        ssr_m, _ = self._dynamic_programming(m, h, ssr_matrix)
-
-        # F-statistic
-        # F = ((SSR_0 - SSR_m) / (m * q)) / (SSR_m / (T - (m + 1) * q - p))
-        df1 = m * q
-        df2 = T - (m + 1) * q - p
-
-        if df2 <= 0 or ssr_m <= 0:
-            return 0.0
-
-        f_stat = ((ssr_0 - ssr_m) / df1) / (ssr_m / df2)
-        return max(0.0, f_stat)
-
-    def _compute_seqf(
-        self,
-        m: int,
-        h: int,
-        ssr_matrix: NDArray[np.floating[Any]],
-        breaks_m: list[int],
-    ) -> float:
-        """Compute sequential Sup-F statistic for m+1 vs m breaks.
-
-        Parameters
-        ----------
-        m : int
-            Number of breaks under null.
-        h : int
-            Minimum segment length.
-        ssr_matrix : NDArray[np.floating]
-            Pre-computed matrix of segment SSRs.
-        breaks_m : list[int]
-            Break locations under null (m breaks).
-
-        Returns
-        -------
-        float
-            Sequential Sup-F statistic.
-        """
-        T = self.nobs
-        q = self.q
-
-        if m == 0:
-            # Test 1 vs 0 breaks - same as SupF(1)
-            return self._compute_supf(1, h, ssr_matrix)
-
-        # SSR with m breaks
-        ssr_m, _ = self._dynamic_programming(m, h, ssr_matrix)
-
-        # SSR with m+1 breaks
-        ssr_m1, _ = self._dynamic_programming(m + 1, h, ssr_matrix)
-
-        # F-statistic
-        df2 = T - (m + 2) * q - self.p
-        if df2 <= 0 or ssr_m1 <= 0:
-            return 0.0
-
-        f_stat = ((ssr_m - ssr_m1) / q) / (ssr_m1 / df2)
-        return max(0.0, f_stat)
-
-    def _compute_information_criteria(self, ssr: float, m: int) -> tuple[float, float]:
-        """Compute BIC and LWZ for model with m breaks.
-
-        Parameters
-        ----------
-        ssr : float
-            Sum of squared residuals.
-        m : int
-            Number of breaks.
-
-        Returns
-        -------
-        tuple[float, float]
-            BIC and LWZ values.
-        """
-        T = self.nobs
-        q = self.q
-        p = self.p
-
-        # Number of parameters: (m+1)*q + p + m (break locations) + 1 (variance)
-        k = (m + 1) * q + p
-
-        # Log-likelihood (Gaussian)
-        if ssr <= 0:
-            return np.inf, np.inf
-
-        sigma2 = ssr / T
-        llf = -T / 2 * (np.log(2 * np.pi) + np.log(sigma2) + 1)
-
-        # BIC
-        bic = -2 * llf + k * np.log(T)
-
-        # LWZ (Liu-Wu-Zidek modified Schwarz criterion)
-        lwz = -2 * llf + k * np.log(T) * (np.log(np.log(T)))
-
-        return bic, lwz
-
-    def fit(
+    def fit(  # type: ignore[override]  # explicit options instead of **kwargs
         self,
         max_breaks: int = 5,
         trimming: float = 0.15,
         selection: Literal["bic", "lwz", "sequential"] = "bic",
-        **kwargs: Any,
+        *,
+        level: float = 0.05,
+        robust: bool = False,
+        prewhiten: bool = False,
+        hetdat: bool = True,
+        hetvar: bool = True,
+        hetomega: bool = True,
+        hetq: bool = True,
+        repartition: bool = False,
+        h: int | None = None,
     ) -> BaiPerronResults:
-        """Perform the Bai-Perron structural break test.
+        """Run the Bai-Perron procedure.
 
         Parameters
         ----------
         max_breaks : int
-            Maximum number of breaks to consider. Default is 5.
+            Maximum number of breaks to consider. Default is 5. Reduced, with
+            a warning, to the largest number for which critical values are
+            tabulated at the chosen trimming (9, 8, 5, 3, 2 for trimming
+            0.05, 0.10, 0.15, 0.20, 0.25).
         trimming : float
-            Trimming parameter (minimum segment length as fraction of T).
-            Default is 0.15 (15%).
+            Trimming parameter: the minimum regime length is
+            ``h = max(floor(trimming * T), q + 1)``. Default is 0.15. Critical values are
+            tabulated for 0.05, 0.10, 0.15, 0.20 and 0.25; with any other
+            value the break dates and information criteria are still computed
+            but critical values are NaN.
         selection : str
-            Method for selecting number of breaks:
+            Method for selecting the number of breaks:
+
             - "bic": Bayesian Information Criterion (default)
             - "lwz": Liu-Wu-Zidek modified Schwarz criterion
-            - "sequential": Sequential testing procedure
-        **kwargs
-            Additional arguments (reserved for future use).
+            - "sequential": sequential application of sup F(l+1|l) at
+              ``level``. The break dates are then the sequentially estimated
+              ones, not the global minimizers.
+        level : float
+            Significance level of the reported critical values and of the
+            sequential procedure: 0.10, 0.05 (default), 0.025 or 0.01.
+        robust : bool
+            Allow serial correlation in the errors (HAC covariance:
+            quadratic spectral kernel, Andrews (1991) bandwidth).
+        prewhiten : bool
+            VAR(1) prewhitening of the HAC estimator. Only used when
+            ``robust`` is True.
+        hetdat : bool
+            Allow the regressors to have different distributions across
+            regimes in the tests. Default True.
+        hetvar : bool
+            Allow the error variance to differ across regimes in the tests.
+            Default True.
+        hetomega : bool
+            Allow the error variance to differ across regimes in the
+            break-date confidence intervals. Default True.
+        hetq : bool
+            Allow the regressor moments to differ across regimes in the
+            break-date confidence intervals. Default True.
+        repartition : bool
+            Apply the repartition step of Bai (1997) to the sequentially
+            estimated break dates. Default False.
+        h : int | None
+            Minimum regime length (more than ``q``). Overrides the value
+            implied by ``trimming``;
+            ``trimming`` still selects the critical-value table.
 
         Returns
         -------
         BaiPerronResults
             Results object containing test statistics, break dates, and
             information criteria.
-        """
-        T = self.nobs
-        q = self.q
 
-        # Minimum segment length
-        h = max(int(np.ceil(trimming * T)), q + 1)
+        Notes
+        -----
+        The defaults for the error assumptions (regime-specific variances, no
+        serial correlation) are those of the OxRegimes package. Bai and
+        Perron (2003, Section 5.5) recommend a trimming of at least 0.15 when
+        heterogeneity is allowed and 0.20 when serial correlation is allowed,
+        unless the sample is large.
+        """
+        nobs = self.nobs
+        q = self.q
+        if max_breaks < 1:
+            raise ValueError(f"max_breaks must be at least 1, got {max_breaks}")
+        y, z, x = self._data()
+        # fixed regressors actually used (collinear columns of exog are dropped)
+        p = 0 if x is None else x.shape[1]
+
+        # Near-collinear regressors (after scaling each to unit length): the
+        # break dates and SSRs are computed from an orthonormal basis, but the
+        # covariance matrices behind the tests and intervals are not
+        w_all = z if x is None else np.column_stack([z, x])
+        norms = np.sqrt(np.einsum("ij,ij->j", w_all, w_all))
+        norms[norms == 0] = 1.0
+        cond = float(np.linalg.cond(w_all / norms))
+        if cond > _COND_WARN:
+            warnings.warn(
+                f"The regressors are nearly collinear (condition number "
+                f"{cond:.1e} after scaling): test statistics and confidence "
+                f"intervals may be inaccurate. A regressor that varies little "
+                f"around a large mean is the usual cause; centering it helps.",
+                stacklevel=2,
+            )
+
+        if selection not in ("bic", "lwz", "sequential"):
+            raise ValueError(f"Unknown selection method: {selection}")
+        level_tab = _cv.match_level(level)
+        if level_tab is None:
+            raise ValueError(
+                f"level must be one of {_cv.LEVELS} (tabulated significance "
+                f"levels), got {level}"
+            )
+        opt = BPOptions(
+            robust=robust,
+            prewhiten=prewhiten,
+            hetdat=hetdat,
+            hetvar=hetvar,
+            hetomega=hetomega,
+            hetq=hetq,
+        )
+        if not hetdat and (robust or p > 0):
+            raise ValueError(
+                "hetdat=False is only available without serial correlation "
+                "(robust=False) and without fixed regressors (exog)"
+            )
+
+        # Minimum regime length
+        if h is None:
+            h = _bp.segment_length(trimming, nobs, q)
+        elif h <= q:
+            raise ValueError(f"h must exceed the number of breaking regressors ({q})")
 
         # Maximum feasible breaks
-        max_feasible = T // h - 1
+        max_feasible = nobs // h - 1
         max_breaks = min(max_breaks, max_feasible)
 
         if max_breaks < 1:
             raise ValueError(
                 f"Cannot test for breaks: trimming too large or T too small. "
-                f"Need at least {2 * h} observations, have {T}."
+                f"Need at least {2 * h} observations, have {nobs}."
             )
 
-        # Pre-compute SSR matrix
-        # If we have non-breaking regressors (partial structural change),
-        # we need to use the iterative procedure from Bai & Perron (2003).
-        #
-        # Partial structural change model — Bai & Perron (2003), Section 3
-        # ----------------------------------------------------------------
-        # The model is:
-        #     y_t = x_t' * beta + z_t' * delta_j + e_t,  t in regime j
-        #
-        # where beta are fixed (non-breaking) coefficients on x_t (self.exog),
-        # and delta_j are regime-specific coefficients on z_t (self.exog_break).
-        #
-        # Estimation follows a concentrating / iterative scheme:
-        #   1. Given current beta_hat, compute y* = y - X * beta_hat.
-        #   2. Apply dynamic programming to y* on Z to find optimal breaks
-        #      and regime-specific delta_j estimates.
-        #   3. Construct the full design matrix (Z_bar | X) and re-estimate
-        #      all coefficients jointly.
-        #   4. Update beta_hat from step 3 and repeat until convergence.
-        #
-        # When p = 0 (pure structural change), no iteration is needed and the
-        # standard Bai-Perron dynamic programming algorithm is used directly.
-
-        if self.p > 0:
-            # Partial structural change model
-            # Iterative procedure per Bai & Perron (2003), Section 3.
-
-            # Initial estimate of fixed coefficients (assuming no breaks)
-            X_full = []
-            if self.exog_break is not None:
-                X_full.append(self.exog_break)
-            if self.exog is not None:
-                X_full.append(self.exog)
-
-            X_mat = np.column_stack(X_full)
-            # Use OLS to get initial beta
-            beta_full = np.linalg.lstsq(X_mat, self.endog, rcond=None)[0]
-
-            # Extract fixed coefficients (last p)
-            beta_fixed = beta_full[-self.p :]
-
-            ssr_vals = {}
-            breaks_by_m = {}
-
-            # m=0 case: No breaks
-            # SSR is just the SSR from the full model with no breaks
-            resid_0 = self.endog - X_mat @ beta_full
-            ssr_vals[0] = float(np.sum(resid_0**2))
-            breaks_by_m[0] = []
-
-            for m in range(1, max_breaks + 1):
-                # Initialize beta_fixed from m=0 (or could use previous m's result)
-                # We restart from the no-break estimate to avoid getting stuck in local optima
-                curr_beta_fixed = beta_fixed.copy()
-
-                # Iterative procedure for specific m
-                # We need to define Full_Design and full_beta outside the loop
-                # in case the loop doesn't run (though it always runs at least once)
-                Full_Design = None
-                full_beta = None
-                max_iter = 50
-                converged = False
-
-                for _iter in range(max_iter):
-                    # 1. Partial out fixed regressors
-                    if self.exog is not None:
-                        y_star = self.endog - self.exog @ curr_beta_fixed
-                    else:
-                        y_star = self.endog
-
-                    # 2. Find optimal breaks for y_star on exog_break
-                    # We pass x=self.exog_break to override default behavior
-                    ssr_matrix_m = self._build_ssr_matrix(
-                        h, y=y_star, x=self.exog_break
-                    )
-                    ssr_m, breaks_m = self._dynamic_programming(m, h, ssr_matrix_m)
-
-                    # 3. Re-estimate beta_fixed given these breaks
-                    # Construct full design matrix with breaks
-
-                    # Z_bar columns (breaking regressors)
-                    boundaries = [0] + breaks_m + [T]
-                    Z_cols = []
-                    for i in range(len(boundaries) - 1):
-                        start, end = boundaries[i], boundaries[i + 1]
-                        for col in range(self.q):
-                            z_col = np.zeros(T)
-                            z_col[start:end] = self.exog_break[start:end, col]
-                            Z_cols.append(z_col)
-
-                    if not Z_cols:
-                        # Should not happen if q > 0
-                        Z_bar = np.zeros((T, 0))
-                    else:
-                        Z_bar = np.column_stack(Z_cols)
-
-                    Full_Design = np.column_stack([Z_bar, self.exog])
-
-                    # Estimate
-                    full_beta = np.linalg.lstsq(Full_Design, self.endog, rcond=None)[0]
-
-                    # Update beta_fixed (last p coeffs)
-                    new_beta_fixed = full_beta[-self.p :]
-
-                    # Check convergence
-                    if np.allclose(
-                        curr_beta_fixed, new_beta_fixed, rtol=1e-4, atol=1e-6
-                    ):
-                        curr_beta_fixed = new_beta_fixed
-                        converged = True
-                        break
-                    curr_beta_fixed = new_beta_fixed
-
-                if not converged:
-                    warnings.warn(
-                        f"Partial structural change iterative procedure did not "
-                        f"converge for m={m} after {max_iter} iterations. "
-                        f"Results may be unreliable.",
-                        stacklevel=2,
-                    )
-
-                # Store results for this m
-                # Re-calculate SSR with final beta
-                if Full_Design is not None and full_beta is not None:
-                    resid = self.endog - Full_Design @ full_beta
-                    ssr_vals[m] = float(np.sum(resid**2))
-                    breaks_by_m[m] = breaks_m
-                else:
-                    # Fallback if something went wrong
-                    ssr_vals[m] = np.inf
-                    breaks_by_m[m] = []
-
-        else:
-            # Pure structural change (original code)
-            ssr_matrix = self._build_ssr_matrix(h)
-
-            ssr_vals = {}
-            breaks_by_m = {}
-
-            # No breaks case
-            ssr_0 = float(ssr_matrix[0, T - 1])
-            ssr_vals[0] = ssr_0
-            breaks_by_m[0] = []
-
-            for m in range(1, max_breaks + 1):
-                ssr_m, breaks_m = self._dynamic_programming(m, h, ssr_matrix)
-                ssr_vals[m] = ssr_m
-                breaks_by_m[m] = breaks_m
-
-        # Compute statistics for each number of breaks
-        supf_stats: dict[int, float] = {}
-        supf_pvalues: dict[int, float] = {}
-        supf_critical: dict[int, float] = {}
-        seqf_stats: dict[int, float] = {}
-        seqf_critical: dict[int, float] = {}
-        bic_vals: dict[int, float] = {}
-        lwz_vals: dict[int, float] = {}
-
-        # Compute Information Criteria and SupF stats
-        for m in range(max_breaks + 1):
-            if m == 0:
-                bic_vals[0], lwz_vals[0] = self._compute_information_criteria(
-                    ssr_vals[0], 0
+        trim_tab = _cv.match_trimming(trimming)
+        if trim_tab is None:
+            warnings.warn(
+                f"Critical values are tabulated for trimming {_cv.TRIMMINGS} "
+                f"only; with trimming={trimming} break dates and information "
+                f"criteria are computed but critical values are not available.",
+                stacklevel=2,
+            )
+            if selection == "sequential":
+                raise ValueError(
+                    "selection='sequential' needs tabulated critical values: "
+                    f"trimming must be one of {_cv.TRIMMINGS}"
                 )
-                continue
+        else:
+            max_tab = _cv.MAX_BREAKS[trim_tab]
+            if max_breaks > max_tab:
+                warnings.warn(
+                    f"At most {max_tab} breaks are tabulated for trimming "
+                    f"{trim_tab}; max_breaks reduced from {max_breaks}.",
+                    stacklevel=2,
+                )
+                max_breaks = max_tab
+        if q > _cv.MAX_Q and trim_tab is not None:
+            warnings.warn(
+                f"Critical values are tabulated up to q = {_cv.MAX_Q} breaking "
+                f"regressors; the values for q = {_cv.MAX_Q} are used.",
+                stacklevel=2,
+            )
+        qi = min(q, _cv.MAX_Q) - 1
 
-            # Sup-F test
-            # F = ((SSR_0 - SSR_m) / (m * q)) / (SSR_m / (T - (m + 1) * q - p))
-            df1 = m * q
-            df2 = T - (m + 1) * q - self.p
+        # Global minimizers for 1..max_breaks breaks
+        if x is not None:
+            parts, ssr_m, ssr0 = _bp.partial_partition_all(y, z, x, max_breaks, h)
+        else:
+            parts, ssr_m, ssr0 = _bp.partition_all(
+                _bp.ssr_triangle(y, z, h), max_breaks, h
+            )
+        n_ok = 0
+        while n_ok < max_breaks and parts[n_ok].size == n_ok + 1:
+            n_ok += 1
+        if n_ok < 1:
+            raise ValueError(
+                "No admissible partition: the breaking regressors have no "
+                "variation within regimes of the minimum length."
+            )
+        if n_ok < max_breaks:
+            warnings.warn(
+                f"No admissible partition with more than {n_ok} break(s); "
+                f"max_breaks reduced from {max_breaks}.",
+                stacklevel=2,
+            )
+        max_breaks = n_ok
 
-            ssr_m = ssr_vals[m]
-            ssr_0 = ssr_vals[0]
-
-            if df2 <= 0 or ssr_m <= 0:
-                supf = 0.0
-            else:
-                supf = ((ssr_0 - ssr_m) / df1) / (ssr_m / df2)
-                supf = max(0.0, supf)
-
-            supf_stats[m] = supf
-
-            # Critical value (use approximation)
-            crit = _SUPF_CRITICAL_VALUES.get((min(q, 5), m), 10.0)
-            supf_critical[m] = crit
-
-            # Approximate p-value
-            pval = 1 - stats.chi2.cdf(supf * m * q / 2, m * q)
-            supf_pvalues[m] = min(1.0, max(0.0, pval))
-
-            # Information criteria
-            bic_vals[m], lwz_vals[m] = self._compute_information_criteria(ssr_m, m)
-
-        # Sequential F-tests: Seq(m|m-1) tests m-1 vs m breaks.
-        # Computed from pre-computed SSR values for both the pure and
-        # partial structural change cases.
-        # Note: Bai & Perron (1998) Table III provides separate critical
-        # values for sequential tests.  As an approximation, we use the
-        # Sup-F(m) critical values here; this is conservative for small m
-        # and follows the convention used in the original implementation.
+        # An exact fit leaves nothing to test (and the statistics are 0/0)
+        yy = float(y @ y)
+        if not ssr0 > _EXACT_FIT * yy:
+            raise ValueError(
+                "The model without breaks fits the data exactly; there is "
+                "nothing to test."
+            )
         for m in range(1, max_breaks + 1):
-            ssr_null = ssr_vals[m - 1]
-            ssr_alt = ssr_vals[m]
+            if not float(ssr_m[m - 1]) > _EXACT_FIT * yy:
+                raise ValueError(
+                    f"The model with {m} break(s) fits the data exactly (zero "
+                    f"residual variance); the tests are not defined."
+                )
 
-            df2 = T - (m + 1) * q - self.p
+        ssr_vals: dict[int, float] = {0: ssr0}
+        breaks_by_m: dict[int, Sequence[int]] = {0: []}
+        for m in range(1, max_breaks + 1):
+            ssr_vals[m] = float(ssr_m[m - 1])
+            breaks_by_m[m] = [int(b) + 1 for b in parts[m - 1]]
 
-            if df2 <= 0 or ssr_alt <= 0:
-                seqf = 0.0
-            else:
-                seqf = ((ssr_null - ssr_alt) / q) / (ssr_alt / df2)
-                seqf = max(0.0, seqf)
+        # sup F(k|0) at the global minimizers
+        supf_stats = {
+            k: _bp.sup_f(y, z, x, parts[k - 1], opt) for k in range(1, max_breaks + 1)
+        }
+        udmax = max(supf_stats.values())
 
-            seqf_stats[m - 1] = seqf
-            crit = _SUPF_CRITICAL_VALUES.get((min(q, 5), m), 10.0)
-            seqf_critical[m - 1] = crit
+        # Critical values at all tabulated levels; WDmax (weights c(1)/c(k))
+        cv_supf: dict[float, dict[int, float]] = {}
+        cv_seqf: dict[float, dict[int, float]] = {}
+        cv_ud: dict[float, float] = {}
+        cv_wd: dict[float, float] = {}
+        wdmax_stats: dict[float, float] = {}
+        for lev in _cv.LEVELS:
+            t_sup = _cv.supf_table(lev, trimming)
+            t_seq = _cv.seqf_table(lev, trimming)
+            t_dmax = _cv.dmax_table(lev, trimming)
+            if t_sup is None or t_seq is None or t_dmax is None:
+                cv_supf[lev] = dict.fromkeys(range(1, max_breaks + 1), np.nan)
+                cv_seqf[lev] = dict.fromkeys(range(max_breaks), np.nan)
+                cv_ud[lev] = cv_wd[lev] = wdmax_stats[lev] = np.nan
+                continue
+            cv_supf[lev] = {
+                k: float(t_sup[qi, k - 1]) for k in range(1, max_breaks + 1)
+            }
+            cv_seqf[lev] = {
+                ell: float(t_seq[qi, ell]) if ell < t_seq.shape[1] else np.nan
+                for ell in range(max_breaks)
+            }
+            cv_ud[lev], cv_wd[lev] = float(t_dmax[qi, 0]), float(t_dmax[qi, 1])
+            wdmax_stats[lev] = max(
+                t_sup[qi, 0] / t_sup[qi, k - 1] * supf_stats[k]
+                for k in range(1, max_breaks + 1)
+            )
 
-        # UDmax and WDmax
-        udmax = max(supf_stats.values()) if supf_stats else 0.0
-        udmax_crit = _UDMAX_CRITICAL_VALUES.get(min(q, 5), 10.0)
+        # sup F(l+1|l) on the global l-break partitions; l = 0 is sup F(1|0)
+        seqf_stats: dict[int, float] = {}
+        seqf_break: dict[int, int] = {}
+        stat0, at0 = _bp.one_break_sup_f(y, z, x, 0, nobs - 1, h, opt)
+        seqf_stats[0], seqf_break[0] = float(stat0), int(at0) + 1 if at0 >= 0 else -1
+        for ell in range(1, max_breaks):
+            stat, at = _bp.seq_f(y, z, x, parts[ell - 1], h, opt)
+            seqf_stats[ell] = float(stat)
+            seqf_break[ell] = int(at) + 1 if at >= 0 else -1
 
-        # WDmax uses weights based on critical values
-        wdmax_values = [
-            supf_stats[m] * supf_critical.get(m, 10.0) / supf_critical.get(1, 10.0)
-            for m in supf_stats
-        ]
-        wdmax = max(wdmax_values) if wdmax_values else 0.0
+        # Information criteria
+        bic_arr, lwz_arr = _bp.info_criteria(
+            np.array([ssr_vals[m] for m in range(max_breaks + 1)]), nobs, q, p
+        )
+        bic_vals = {m: float(bic_arr[m]) for m in range(max_breaks + 1)}
+        lwz_vals = {m: float(lwz_arr[m]) for m in range(max_breaks + 1)}
+
+        # Sequential procedure
+        seq_n: int | None = None
+        seq_vb: NDArray[np.integer[Any]] = np.empty(0, dtype=np.int64)
+        if trim_tab is not None:
+            seq_n, seq_vb = _bp.sequential(
+                y, z, x, max_breaks, h, trimming, level_tab, opt, repartition
+            )
 
         # Select number of breaks
+        vb: NDArray[np.integer[Any]]
         if selection == "bic":
-            n_breaks = min(bic_vals, key=bic_vals.get)  # type: ignore[arg-type]
+            n_breaks = int(np.nanargmin(bic_arr))
+            vb = parts[n_breaks - 1] if n_breaks > 0 else seq_vb[:0]
         elif selection == "lwz":
-            n_breaks = min(lwz_vals, key=lwz_vals.get)  # type: ignore[arg-type]
-        elif selection == "sequential":
-            # Sequential procedure: start with m=0, increase while significant
-            n_breaks = 0
-            for m in range(max_breaks):
-                if m in seqf_stats:
-                    if seqf_stats[m] > seqf_critical.get(m, 10.0):
-                        n_breaks = m + 1
-                    else:
-                        break
+            n_breaks = int(np.nanargmin(lwz_arr))
+            vb = parts[n_breaks - 1] if n_breaks > 0 else seq_vb[:0]
         else:
-            raise ValueError(f"Unknown selection method: {selection}")
+            assert seq_n is not None
+            n_breaks, vb = seq_n, seq_vb
 
-        break_indices = list(breaks_by_m.get(n_breaks, []))
+        break_indices = [int(b) + 1 for b in vb]
 
-        # Compute confidence intervals for break dates
+        # Confidence intervals for the selected break dates
         break_ci: dict[int, tuple[int, int]] = {}
-        if n_breaks > 0 and break_indices:
-            break_ci = self._compute_break_confidence_intervals(break_indices)
+        break_ci_90: dict[int, tuple[int, int]] = {}
+        if n_breaks > 0:
+            try:
+                ci = _bp.break_ci(y, z, x, vb, opt)
+            except (ArithmeticError, ValueError, np.linalg.LinAlgError) as exc:
+                warnings.warn(
+                    f"Break-date confidence intervals could not be computed: {exc}",
+                    stacklevel=2,
+                )
+            else:
+                for i, b_idx in enumerate(break_indices):
+                    lo95, hi95, lo90, hi90 = (
+                        int(np.clip(c + 1, 0, nobs - 1)) for c in ci[i]
+                    )
+                    break_ci[b_idx] = (lo95, hi95)
+                    break_ci_90[b_idx] = (lo90, hi90)
 
         return BaiPerronResults(
             test_name="Bai-Perron",
-            nobs=T,
+            nobs=nobs,
             n_breaks=n_breaks,
             break_indices=break_indices,
             supf_stats=supf_stats,
-            supf_pvalues=supf_pvalues,
-            supf_critical=supf_critical,
+            supf_critical=cv_supf[level_tab],
             udmax=udmax,
-            udmax_critical=udmax_crit,
-            wdmax=wdmax,
+            udmax_critical=cv_ud[level_tab],
+            wdmax=wdmax_stats[level_tab],
+            wdmax_critical=cv_wd[level_tab],
+            wdmax_stats=wdmax_stats,
             seqf_stats=seqf_stats,
-            seqf_critical=seqf_critical,
+            seqf_critical=cv_seqf[level_tab],
+            seqf_break=seqf_break,
             bic=bic_vals,
             lwz=lwz_vals,
             ssr=ssr_vals,
             breaks_by_m=breaks_by_m,
+            sequential_n_breaks=seq_n,
+            sequential_breaks=[int(b) + 1 for b in seq_vb],
             trimming=trimming,
+            h=h,
             max_breaks=max_breaks,
             selection_method=selection,
+            level=level_tab,
             q=q,
+            p=p,
             break_ci=break_ci,
+            break_ci_90=break_ci_90,
+            critical_values={
+                "supf": cv_supf,
+                "seqf": cv_seqf,
+                "udmax": cv_ud,
+                "wdmax": cv_wd,
+            },
+            options=opt,
+            repartition=repartition,
             _test=self,
         )
 
@@ -1128,130 +1022,29 @@ class BaiPerronTest(BreakTestBase):
     ) -> list[tuple[NDArray[np.floating[Any]], float]]:
         """Get parameter estimates for each regime.
 
+        The model is estimated jointly given the break dates, so that with
+        fixed regressors (``exog``) their coefficients are common to all
+        regimes.
+
         Parameters
         ----------
         break_indices : Sequence[int]
-            Break point indices.
+            Break dates (first observation of each new regime).
 
         Returns
         -------
         list[tuple[NDArray[np.floating], float]]
-            List of (coefficients, ssr) tuples for each regime.
+            One ``(coefficients, ssr)`` tuple per regime: the regime's
+            coefficients on the breaking regressors and the sum of squared
+            residuals within the regime.
         """
+        y, z, x = self._data()
+        q = self.q
+        vb = np.asarray(list(break_indices), dtype=np.int64) - 1
+        delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)
+        bd = _bp.bounds(vb, self.nobs)
         results = []
-        breaks = [0] + list(break_indices) + [self.nobs]
-
-        for i in range(len(breaks) - 1):
-            start, end = breaks[i], breaks[i + 1]
-            ssr, beta = self._compute_ssr_segment(start, end)
-            results.append((beta, ssr))
-
+        for i in range(len(bd) - 1):
+            u = resid[bd[i] : bd[i + 1]]
+            results.append((delta[i * q : (i + 1) * q], float(u @ u)))
         return results
-
-    def _compute_break_confidence_intervals(
-        self,
-        break_indices: Sequence[int],
-        alpha: float = 0.05,
-    ) -> dict[int, tuple[int, int]]:
-        """Compute confidence intervals for break dates.
-
-        Uses the asymptotic distribution from Bai (1997) and Bai-Perron (1998).
-        The confidence interval is computed as:
-
-            CI = [k - c(α) * λ,  k + c(α) * λ]
-
-        where λ = σ² / (δ'Qδ) is the shrinkage factor, σ² is the residual
-        variance, δ is the parameter change at the break, and Q is the
-        second moment matrix of breaking regressors.
-
-        Parameters
-        ----------
-        break_indices : Sequence[int]
-            Break point indices.
-        alpha : float
-            Significance level. Default is 0.05 (95% CI).
-
-        Returns
-        -------
-        dict[int, tuple[int, int]]
-            Dictionary mapping break index to (lower, upper) bounds.
-
-        References
-        ----------
-        Bai, J. (1997). Estimation of a change point in multiple regression
-            models. Review of Economics and Statistics, 79(4), 551-563.
-        """
-        if len(break_indices) == 0:
-            return {}
-
-        # Critical values from Bai (1997) asymptotic distribution
-        # These are for the two-sided case
-        critical_values = {
-            0.10: 6.70,
-            0.05: 7.78,
-            0.01: 11.45,
-        }
-        c_alpha = critical_values.get(alpha, 7.78)
-
-        # Get regime estimates
-        regime_estimates = self.get_regime_estimates(break_indices)
-
-        # Compute total SSR for pooled variance estimate
-        total_ssr = sum(ssr for _, ssr in regime_estimates)
-        total_obs = self.nobs
-        n_params = (len(break_indices) + 1) * self.q + self.p
-        sigma2 = total_ssr / (total_obs - n_params)
-
-        break_ci: dict[int, tuple[int, int]] = {}
-
-        for i, break_idx in enumerate(break_indices):
-            # Get parameter estimates for regimes before and after the break
-            beta_before = regime_estimates[i][0]
-            beta_after = regime_estimates[i + 1][0]
-
-            # Extract breaking regressor coefficients (first q coefficients)
-            delta = beta_after[: self.q] - beta_before[: self.q]
-
-            # Compute Q (second moment matrix of breaking regressors)
-            # For mean-shift model (q=1 with constant), Q = 1
-            if self.q == 1 and self.exog_break is not None:
-                # Check if it's a constant
-                if np.allclose(self.exog_break, 1.0):
-                    Q = 1.0
-                else:
-                    # Use local X'X/T around the break
-                    h = max(20, int(0.1 * self.nobs))  # Window around break
-                    start = max(0, break_idx - h)
-                    end = min(self.nobs, break_idx + h)
-                    X_local = self.exog_break[start:end]
-                    Q = float(np.mean(X_local**2))
-            else:
-                # General case: use X'X/T from full sample
-                if self.exog_break is not None:
-                    X = self.exog_break
-                    Q_matrix = X.T @ X / self.nobs
-                    # Scalar shrinkage factor: δ'Qδ
-                    Q = float(delta @ Q_matrix @ delta) / float(delta @ delta + 1e-10)
-                else:
-                    Q = 1.0
-
-            # Compute shrinkage factor λ = σ² / (δ'Qδ)
-            delta_Q_delta = (
-                float(delta @ delta) * Q
-                if self.q == 1
-                else float(delta @ (Q_matrix @ delta))
-            )
-            if delta_Q_delta < 1e-10:
-                # If parameter change is tiny, CI is very wide
-                lambda_factor = self.nobs  # Conservative upper bound
-            else:
-                lambda_factor = sigma2 / delta_Q_delta
-
-            # Compute CI bounds
-            half_width = c_alpha * lambda_factor
-            lower = int(max(0, np.floor(break_idx - half_width)))
-            upper = int(min(self.nobs - 1, np.ceil(break_idx + half_width)))
-
-            break_ci[break_idx] = (lower, upper)
-
-        return break_ci

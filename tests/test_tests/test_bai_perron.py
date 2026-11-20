@@ -626,3 +626,280 @@ class TestARBaiPerronMethod:
             # Should have 2 params per regime (const + y.L1)
             expected_params = 2 * (bp_results.n_breaks + 1)
             assert len(ols_results.params) == expected_params
+
+
+class TestBaiPerronOptions:
+    """Options, conventions and reported quantities of the ported procedure."""
+
+    @staticmethod
+    def _regression_data(
+        rng: np.random.Generator, n: int = 200
+    ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
+        x = rng.standard_normal(n)
+        y = 1.0 + 0.5 * x + rng.standard_normal(n) * 0.5
+        y[n // 2 :] += 2.0 + 1.0 * x[n // 2 :]
+        return y, np.column_stack([np.ones(n), x])
+
+    def test_minimum_regime_length_rounds_down(self, rng: np.random.Generator) -> None:
+        """h = floor(trimming * T): T = 103 and 0.15 give 15, as in BP (2003)."""
+        results = rg.BaiPerronTest(rng.standard_normal(103)).fit()
+        assert results.h == 15
+        results = rg.BaiPerronTest(rng.standard_normal(103)).fit(h=20)
+        assert results.h == 20
+        assert results.max_breaks == 103 // 20 - 1
+
+    def test_information_criteria_count_break_dates(
+        self,
+        data_with_two_breaks: tuple[NDArray[np.floating[Any]], list[int]],
+    ) -> None:
+        y, _ = data_with_two_breaks
+        results = rg.BaiPerronTest(y).fit(max_breaks=3)
+        n = results.nobs
+        for m in range(4):
+            pstar = (m + 1) * 1 + m
+            assert results.bic[m] == pytest.approx(
+                np.log(results.ssr[m] / n) + pstar * np.log(n) / n
+            )
+            assert results.lwz[m] == pytest.approx(
+                np.log(results.ssr[m] / (n - pstar))
+                + pstar * 0.299 * np.log(n) ** 2.1 / n
+            )
+
+    def test_supf_is_scaled_by_q(self, rng: np.random.Generator) -> None:
+        """With a common variance, sup F(1|0) is q times the classical F."""
+        y, z = self._regression_data(rng)
+        results = rg.BaiPerronTest(y, exog_break=z).fit(max_breaks=2, hetvar=False)
+        q, n = 2, len(y)
+        f_classical = ((results.ssr[0] - results.ssr[1]) / q) / (
+            results.ssr[1] / (n - 2 * q)
+        )
+        assert results.supf_stats[1] == pytest.approx(q * f_classical, rel=1e-9)
+        # critical values are those for q = 2
+        assert results.supf_critical[1] == 11.47
+        assert results.udmax_critical == 11.70
+
+    def test_sequential_statistics(
+        self,
+        data_with_two_breaks: tuple[NDArray[np.floating[Any]], list[int]],
+    ) -> None:
+        y, true_breaks = data_with_two_breaks
+        results = rg.BaiPerronTest(y).fit(max_breaks=4, selection="sequential")
+        # sup F(1|0) is the one-break statistic
+        assert results.seqf_stats[0] == pytest.approx(results.supf_stats[1])
+        assert sorted(results.seqf_stats) == [0, 1, 2, 3]
+        # critical values of sup F(l+1|l) rise with l (5%, q = 1, trimming 0.15)
+        assert [results.seqf_critical[ell] for ell in range(4)] == [
+            8.58,
+            10.13,
+            11.14,
+            11.83,
+        ]
+        assert results.n_breaks == results.sequential_n_breaks == 2
+        assert list(results.break_indices) == list(results.sequential_breaks)
+        for found, true in zip(results.break_indices, true_breaks):
+            assert abs(found - true) <= 5
+
+    def test_levels(
+        self,
+        data_with_mean_shift: tuple[NDArray[np.floating[Any]], int],
+    ) -> None:
+        y, _ = data_with_mean_shift
+        test = rg.BaiPerronTest(y)
+        r10, r01 = test.fit(level=0.10), test.fit(level=0.01)
+        assert r10.supf_critical[1] == 7.04
+        assert r01.supf_critical[1] == 12.29
+        assert r10.critical_values["supf"][0.01][1] == 12.29
+        assert set(r10.critical_values) == {"supf", "seqf", "udmax", "wdmax"}
+        with pytest.raises(ValueError, match="level must be one of"):
+            test.fit(level=0.03)
+
+    def test_untabulated_trimming(
+        self,
+        data_with_mean_shift: tuple[NDArray[np.floating[Any]], int],
+    ) -> None:
+        y, true_break = data_with_mean_shift
+        test = rg.BaiPerronTest(y)
+        with pytest.warns(UserWarning, match="Critical values are tabulated"):
+            results = test.fit(trimming=0.12, max_breaks=3)
+        assert results.n_breaks == 1
+        assert abs(results.break_indices[0] - true_break) <= 5
+        assert np.isnan(results.supf_critical[1])
+        assert np.isnan(results.udmax_critical)
+        assert results.sequential_n_breaks is None
+        assert "Sequential procedure" not in results.summary()
+        with (
+            pytest.warns(UserWarning),
+            pytest.raises(ValueError, match="needs tabulated critical values"),
+        ):
+            test.fit(trimming=0.12, selection="sequential")
+
+    def test_max_breaks_capped_at_tabulated_number(
+        self, rng: np.random.Generator
+    ) -> None:
+        y = rng.standard_normal(300)
+        with pytest.warns(UserWarning, match="At most 3 breaks are tabulated"):
+            results = rg.BaiPerronTest(y).fit(trimming=0.20, max_breaks=4)
+        assert results.max_breaks == 3
+
+    def test_invalid_option_combinations(self, rng: np.random.Generator) -> None:
+        y, z = self._regression_data(rng)
+        with pytest.raises(ValueError, match="hetdat=False"):
+            rg.BaiPerronTest(y, exog_break=z).fit(hetdat=False, robust=True)
+        with pytest.raises(ValueError, match="hetdat=False"):
+            rg.BaiPerronTest(y, exog=z[:, [1]]).fit(hetdat=False)
+        with pytest.raises(ValueError, match="h must exceed"):
+            rg.BaiPerronTest(y, exog_break=z).fit(h=2)
+
+    def test_robust_options_run(self, rng: np.random.Generator) -> None:
+        y, z = self._regression_data(rng)
+        test = rg.BaiPerronTest(y, exog_break=z)
+        base = test.fit(max_breaks=2)
+        robust = test.fit(max_breaks=2, robust=True, prewhiten=True)
+        # break dates and information criteria do not depend on the options
+        assert robust.breaks_by_m == base.breaks_by_m
+        assert robust.bic == base.bic
+        assert robust.supf_stats[1] != base.supf_stats[1]
+        assert robust.options.robust and robust.options.prewhiten
+        assert "serial correlation allowed" in robust.summary()
+
+    def test_no_supf_pvalues(self, simple_data: NDArray[np.floating[Any]]) -> None:
+        results = rg.BaiPerronTest(simple_data).fit(max_breaks=2)
+        assert not hasattr(results, "supf_pvalues")
+        assert "p-value" not in results.summary()
+
+    def test_summary_sections(
+        self,
+        data_with_two_breaks: tuple[NDArray[np.floating[Any]], list[int]],
+    ) -> None:
+        y, _ = data_with_two_breaks
+        summary = rg.BaiPerronTest(y).fit(max_breaks=3).summary()
+        for text in (
+            "Global minimizers",
+            "scaled by q",
+            "UDmax",
+            "WDmax",
+            "Sup-F(l+1|l)",
+            "break dates counted as parameters",
+            "Sequential procedure at 5%",
+            "95% [90%] Confidence Intervals",
+        ):
+            assert text in summary
+
+    def test_partial_model_regime_estimates(self, rng: np.random.Generator) -> None:
+        """Fixed regressors keep one coefficient; regime SSRs add up."""
+        n = 200
+        x = rng.standard_normal(n)
+        y = 0.7 * x + rng.standard_normal(n) * 0.5
+        y[n // 2 :] += 3.0
+        test = rg.BaiPerronTest(y, exog=x[:, None])
+        results = test.fit(max_breaks=2)
+        assert results.p == 1 and results.q == 1
+        assert results.n_breaks == 1
+        estimates = test.get_regime_estimates(results.break_indices)
+        assert len(estimates) == 2
+        assert all(len(beta) == 1 for beta, _ in estimates)
+        assert sum(ssr for _, ssr in estimates) == pytest.approx(results.ssr[1])
+        assert estimates[1][0][0] - estimates[0][0][0] == pytest.approx(3.0, abs=0.3)
+
+    def test_model_methods_pass_options(self, rng: np.random.Generator) -> None:
+        y, z = self._regression_data(rng)
+        results = OLS(y, z, has_constant=False).bai_perron(
+            max_breaks=2, selection="sequential", level=0.10, robust=True
+        )
+        assert results.level == 0.10
+        assert results.options.robust
+        assert results.selection_method == "sequential"
+        ar_results = AR(y, lags=1).bai_perron(max_breaks=2, hetvar=False)
+        assert not ar_results.options.hetvar
+
+    def test_fixed_regressor_duplicating_a_breaking_one_is_dropped(
+        self, rng: np.random.Generator
+    ) -> None:
+        """A constant in ``exog`` next to a breaking constant is not kept fixed."""
+        n = 200
+        x = rng.standard_normal(n)
+        y = 1.0 + 0.7 * x + rng.standard_normal(n) * 0.5
+        y[n // 2 :] += 3.0
+        with_dup = rg.BaiPerronTest(y, exog=np.column_stack([np.ones(n), x])).fit(
+            max_breaks=3
+        )
+        clean = rg.BaiPerronTest(y, exog=x[:, None]).fit(max_breaks=3)
+        assert with_dup.p == clean.p == 1
+        assert with_dup.break_indices == clean.break_indices
+        assert with_dup.ssr == pytest.approx(clean.ssr)
+        assert with_dup.supf_stats == pytest.approx(clean.supf_stats)
+        assert with_dup.bic == pytest.approx(clean.bic)
+        # every fixed regressor duplicated: a pure structural change model
+        pure = rg.BaiPerronTest(y, exog=np.ones((n, 1))).fit(max_breaks=2)
+        assert pure.p == 0
+        assert pure.ssr == pytest.approx(rg.BaiPerronTest(y).fit(max_breaks=2).ssr)
+
+    def test_to_ols_uses_the_columns_fit_used(self, rng: np.random.Generator) -> None:
+        """``to_ols`` leaves out the fixed regressors that ``fit`` left out."""
+        n = 200
+        x = rng.standard_normal(n)
+        y = 0.5 * x + rng.standard_normal(n) * 0.3
+        y[n // 2 :] += 3.0
+        test = rg.BaiPerronTest(y, exog=np.column_stack([np.ones(n), x]))
+        results = test.fit(max_breaks=2)
+        assert test.p == results.p == 1
+        ols = results.to_ols()
+        assert len(ols.params) == 1 + (results.n_breaks + 1)
+        estimates = test.get_regime_estimates(results.break_indices)
+        np.testing.assert_allclose(
+            np.asarray(ols.params)[1:], [float(e[0][0]) for e in estimates], rtol=1e-8
+        )
+        assert float(np.sum(np.asarray(ols.resid) ** 2)) == pytest.approx(
+            results.ssr[results.n_breaks]
+        )
+
+    def test_missing_values_are_rejected(self, rng: np.random.Generator) -> None:
+        y = rng.standard_normal(100)
+        x = rng.standard_normal(100)
+        y_gap = y.copy()
+        y_gap[0] = np.nan
+        with pytest.raises(ValueError, match="endog contains missing"):
+            rg.BaiPerronTest(y_gap).fit()
+        x_gap = x.copy()
+        x_gap[5] = np.inf
+        with pytest.raises(ValueError, match="exog contains missing"):
+            rg.BaiPerronTest(y, exog=x_gap).fit()
+
+    def test_degenerate_inputs_raise(self, rng: np.random.Generator) -> None:
+        with pytest.raises(ValueError, match="max_breaks must be at least 1"):
+            rg.BaiPerronTest(rng.standard_normal(100)).fit(max_breaks=0)
+        with pytest.raises(ValueError, match="without breaks fits the data exactly"):
+            rg.BaiPerronTest(np.ones(60)).fit()
+        step = np.r_[np.zeros(50), np.ones(50)]
+        with pytest.raises(ValueError, match="fits the data exactly"):
+            rg.BaiPerronTest(step).fit()
+
+    def test_near_collinear_regressors_warn(self, rng: np.random.Generator) -> None:
+        n = 150
+        v = rng.standard_normal(n)
+        y = 1.0 + v + rng.standard_normal(n)
+        y[100:] += 2.0
+        z = np.column_stack([np.ones(n), 1e7 + v])
+        with pytest.warns(UserWarning, match="nearly collinear"):
+            shifted = rg.BaiPerronTest(y, exog_break=z).fit(max_breaks=2)
+        centered = rg.BaiPerronTest(y, exog_break=np.column_stack([np.ones(n), v])).fit(
+            max_breaks=2
+        )
+        # the break dates and SSRs do not depend on the level of the regressor
+        assert shifted.breaks_by_m == centered.breaks_by_m
+        np.testing.assert_allclose(
+            list(shifted.ssr.values()), list(centered.ssr.values()), rtol=1e-5
+        )
+
+    def test_summary_mentions_repartition_only_when_applied(
+        self, rng: np.random.Generator
+    ) -> None:
+        y = rng.standard_normal(150)
+        y[75:] += 4.0
+        one = rg.BaiPerronTest(y).fit(selection="sequential", repartition=True)
+        assert one.sequential_n_breaks == 1
+        assert "repartition applied" not in one.summary()
+        y[110:] -= 4.0
+        two = rg.BaiPerronTest(y).fit(selection="sequential", repartition=True)
+        assert two.sequential_n_breaks == 2
+        assert "repartition applied" in two.summary()

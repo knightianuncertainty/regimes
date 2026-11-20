@@ -16,6 +16,25 @@ R reference within `rtol=1e-6`.
 | `dgp2_regression_break.csv` | DGP 2 — regression break (`y ~ x`, n=200, intercept+slope break at t=100) |
 | `dgp3_two_breaks.csv` | DGP 3 — two mean shifts (`y ~ 1`, n=240, breaks at t=80 and t=160) |
 
+## Bai-Perron: Perron's program, OxRegimes and the published results
+
+| File | Description |
+|------|-------------|
+| `bp_exdata.csv` | Example data distributed with Pierre Perron's Bai-Perron program (T = 101; columns `Constant`, `Y`, `X1`). The expected values in `test_bp_core.py::TestPerronProgram` were produced by that program |
+| `bp_simulated_consumption.csv` | Simulated data of the OxRegimes examples (T = 132; columns `dc`, `dy`) |
+| `generate_bai_perron_ox_reference.ox` | Ox script that runs the OxRegimes Bai-Perron core on the two files above for 21 option sets |
+| `bp_oxregimes_reference.json` | Its output: break dates, SSR, sup F, sup F(l+1\|l), BIC, LWZ, sequential results and confidence intervals, compared in `test_bai_perron_ox_parity.py` at `rtol=1e-6` |
+| `bp2003_real_interest_rate.csv` | US ex-post real interest rate, 1961:1-1986:3 (`real.dat` from the Journal of Applied Econometrics data archive entry of Bai and Perron 2003), used by `test_bai_perron_published.py` to reproduce Table I of that paper |
+
+To regenerate the OxRegimes reference (needs Ox and the OxRegimes package; `<packages>` is the folder containing `OxRegimes`):
+
+```bash
+cd tests/reference_data
+oxl -i<packages> generate_bai_perron_ox_reference.ox
+```
+
+The critical values in `src/regimes/tests/_bp_critical_values.py` were dumped from the OxRegimes tables and agree entry by entry with those in the R package `mbreaks`.
+
 ## Data Generating Processes
 
 ### DGP 1 — Mean Shift

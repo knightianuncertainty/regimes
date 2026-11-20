@@ -244,7 +244,7 @@ class TestBaiPerronSummaryIndex:
                 assert str(period_index[b]) in text
             # Confidence intervals should also use labels
             if bp.break_ci:
-                assert "95% Confidence Intervals" in text
+                assert "95% [90%] Confidence Intervals" in text
 
     def test_summary_without_index_unchanged(
         self,
