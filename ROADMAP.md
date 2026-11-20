@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 5: v0.5.0 - Documentation & Release** In progress — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 4: v0.4.0 - Bai-Perron Corrections & Date-Aware Summaries** Complete; Phase 5 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -47,9 +47,7 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
   - [x] 30 tests for style module
 - [x] Target: 80%+ test coverage (achieved: 88% with 718 tests)
 
-## Planned Phases
-
-### Phase 3: v0.3.0 - Structural Break Tests & Markov-Switching
+### Phase 3: v0.3.0 - Structural Break Tests & Markov-Switching (Complete)
 
 - [x] Chow test
 - [x] CUSUM / CUSUM-SQ tests
@@ -74,7 +72,25 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 - [ ] *(Tentative)* Unit root tests (ADF, KPSS, Phillips-Perron)
 - [x] Target: 85%+ test coverage (achieved: 86% with 880 tests)
 
-### Phase 4: v0.4.0 - Model Selection & Indicator Saturation
+### Phase 4: v0.4.0 - Bai-Perron Corrections & Date-Aware Summaries (Complete)
+
+- [x] Bai-Perron procedure ported from the OxRegimes core
+  - Corrected BIC and LWZ, sequential test sup F(l+1|l), sup F(k|0) scaling, WDmax weights
+  - Critical values for trimming 0.05, 0.10, 0.15, 0.20, 0.25 and levels 10%, 5%, 2.5%, 1%
+  - Break-date confidence intervals as in Bai (1997)
+  - Options for serial correlation and heterogeneity across regimes (`robust`, `prewhiten`, `hetdat`, `hetvar`, `hetomega`, `hetq`)
+  - Validated against Perron's program, OxRegimes (21 option sets) and Bai and Perron (2003), Table I
+- [x] Date-aware summaries: optional `index` parameter on all summary methods
+  - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
+  - `BaiPerronResults.summary(index=)`
+  - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
+  - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
+  - Replaces integer observation numbers with date labels throughout
+- [x] 1030 tests
+
+## Planned Phases
+
+### Phase 5: v0.5.0 - Model Selection & Indicator Saturation
 
 - [x] Autometrics-inspired general-to-specific model-selection algorithm (`gets_search()`)
   - [x] Bounded iterative search with multi-path exploration (up to 5 paths)
@@ -93,29 +109,24 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
 - [x] `.isat()` convenience methods on OLS, AR, and ADL models
 - [x] Example notebook: `05_gets_indicator_saturation.ipynb`
 - [x] 166 new tests (1069 total, 86% coverage)
+- [ ] Target: 88%+ test coverage
 
-### Phase 5: v0.5.0 - Documentation & Release
+### Phase 6: v0.6.0 - Documentation & Release
 
-- [x] Date-aware summaries: optional `index` parameter on all summary methods
-  - `OLSResults.summary(index=)`, `ARResults.summary(index=)`, `ADLResults.summary(index=)`
-  - `BaiPerronResults.summary(index=)`
-  - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
-  - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
-  - Replaces integer observation numbers with date labels throughout
 - [ ] Real data examples (US interest rates, inflation)
 - [ ] Comprehensive example notebooks
 - [ ] Full Sphinx documentation on Read the Docs
 - [ ] PyPI stable release
 - [ ] Target: 90%+ test coverage
 
-### Phase 6: v0.6.0 - Advanced Models
+### Phase 7: v0.7.0 - Advanced Models
 
 - [ ] VAR (Vector Autoregression) model with breaks
 - [ ] Cointegration model
 - [ ] Panel data extensions
 - [ ] Bootstrap inference methods
 
-### Phase 7: v0.7.0+ - Forecasting Workflow
+### Phase 8: v0.8.0+ - Forecasting Workflow
 
 - [ ] End-to-end forecasting workflow with structural change
 - [ ] *(Details to be defined as the research program develops)*
@@ -138,7 +149,8 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.0 | Complete | Structural break tests (Chow, CUSUM, Andrews-Ploberger), Markov-switching, 880 tests (86% coverage), 4 example notebooks |
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
-| 0.4.0 | In progress | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics model selection, dual representation, 1069 tests |
-| 0.5.0 | In progress | Date-aware summaries, Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), real data examples, example notebooks, Sphinx docs, PyPI stable release |
-| 0.6.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
-| 0.7.0+ | Future | End-to-end forecasting workflow with structural change |
+| 0.4.0 | Complete | Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), date-aware summaries, 1030 tests |
+| 0.5.0 | In development | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics-inspired model selection, dual representation |
+| 0.6.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
+| 0.7.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
+| 0.8.0+ | Future | End-to-end forecasting workflow with structural change |
