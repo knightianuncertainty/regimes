@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-20
+
 ### Fixed
 
 - **Bai-Perron procedure rewritten** as a port of the OxRegimes core (`regimes.tests._bp_core`), which is cross-validated against Pierre Perron's program. The previous implementation differed from Bai and Perron (1998, 2003) in the following ways, all corrected:
