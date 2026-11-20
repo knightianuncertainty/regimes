@@ -925,7 +925,7 @@ class AR(TimeSeriesModelBase):
             Maximum number of breaks to test. Default is 5.
         trimming : float
             Minimum regime length as a fraction of the sample
-            (``h = floor(trimming * T)``). Default is 0.15.
+            (``h = floor(trimming * T)``, at least ``q + 1``). Default is 0.15.
         selection : str
             Break selection criterion:
             - "bic": Bayesian Information Criterion (default)

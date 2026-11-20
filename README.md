@@ -115,7 +115,7 @@ bp_results = rg.BaiPerronTest.from_model(model).fit()
 ```python
 results = rg.BaiPerronTest(y, exog=x_fixed, exog_break=z_breaking).fit(
     max_breaks=5,
-    trimming=0.15,           # minimum regime length h = floor(trimming * T)
+    trimming=0.15,           # minimum regime length h = floor(trimming * T), at least q + 1
     selection="sequential",  # or "bic" (default), "lwz"
     level=0.05,              # 0.10, 0.05, 0.025 or 0.01
     robust=True,             # allow serial correlation (HAC)
@@ -612,7 +612,7 @@ All regression models support multiple covariance estimators:
 
 ## Testing
 
-The package includes a comprehensive test suite with 924 tests:
+The package includes a comprehensive test suite with 1030 tests:
 
 ```bash
 # Run all tests
