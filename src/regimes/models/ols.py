@@ -417,11 +417,14 @@ class OLS(RegimesModelBase):
         if has_constant and self.exog is None:
             self.exog = np.ones((self.nobs, 1))
             self._exog_names = ["const"]
-        elif has_constant and self.exog is not None:
-            # Check if constant already exists
-            if not self._has_constant_column(self.exog):
-                self.exog = np.column_stack([np.ones(self.nobs), self.exog])
-                self._exog_names = ["const"] + self._exog_names
+        elif (
+            has_constant
+            and self.exog is not None
+            and not self._has_constant_column(self.exog)
+        ):
+            # Add a constant unless one already exists
+            self.exog = np.column_stack([np.ones(self.nobs), self.exog])
+            self._exog_names = ["const"] + self._exog_names
 
     @staticmethod
     def _has_constant_column(X: NDArray[np.floating[Any]]) -> bool:
