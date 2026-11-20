@@ -628,7 +628,7 @@ class TestSummaryByRegime:
         assert "OLS Regression Results by Regime" in summary
         assert "Regime 1" in summary
         assert "Regime 2" in summary
-        assert f"Breaks at observations: {break_point}" in summary
+        assert f"Breaks at: {break_point}" in summary
 
     def test_summary_by_regime_empty_list(self) -> None:
         """Test summary_by_regime with empty list."""

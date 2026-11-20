@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from scipy import stats
 
+from regimes.results.base import _obs_label
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from regimes.models.ar import AR
     from regimes.models.base import CovType
     from regimes.models.ols import OLS, OLSResults
+    from regimes.results.base import IndexLike
 
 
 # Critical values for Bai-Perron tests (approximations from tables)
@@ -226,8 +228,15 @@ class BaiPerronResults(BreakTestResultsBase):
         )
         return ols_model.fit(cov_type=cov_type)
 
-    def summary(self) -> str:
+    def summary(self, index: IndexLike | None = None) -> str:
         """Generate a text summary of Bai-Perron test results.
+
+        Parameters
+        ----------
+        index : IndexLike or None
+            Optional time index (e.g. ``pd.PeriodIndex``). When provided,
+            break locations and confidence intervals are shown as dates
+            instead of integer observation numbers.
 
         Returns
         -------
@@ -301,19 +310,24 @@ class BaiPerronResults(BreakTestResultsBase):
         )
 
         if self.n_breaks > 0:
-            lines.append(f"Break dates: {list(self.break_indices)}")
+            break_labels = [_obs_label(b, index) for b in self.break_indices]
+            lines.append(f"Break dates: {break_labels}")
 
             if self.break_ci:
                 lines.append("\n95% Confidence Intervals for Break Dates:")
                 for break_idx in self.break_indices:
                     if break_idx in self.break_ci:
                         lower, upper = self.break_ci[break_idx]
-                        lines.append(f"  Break at {break_idx}: [{lower}, {upper}]")
+                        bl = _obs_label(break_idx, index)
+                        lo = _obs_label(lower, index)
+                        hi = _obs_label(upper, index)
+                        lines.append(f"  Break at {bl}: [{lo}, {hi}]")
 
             lines.append("\nBreak locations by number of breaks:")
             for m, breaks in sorted(self.breaks_by_m.items()):
                 if m > 0:
-                    lines.append(f"  m={m}: {list(breaks)}")
+                    m_labels = [_obs_label(b, index) for b in breaks]
+                    lines.append(f"  m={m}: {m_labels}")
 
         lines.append("=" * 78)
         return "\n".join(lines)
