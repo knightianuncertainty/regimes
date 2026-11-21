@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GETS indicator saturation** (Autometrics algorithm, Doornik 2009; Castle, Doornik & Hendry 2012)
+  - `gets_search()`: General-to-specific model selection with bounded iterative search, multi-path exploration (up to 5 paths), encompassing tests, and diagnostic checks
+  - `isat()`: Indicator saturation entry point supporting four indicator types:
+    - **SIS** (Step Indicator Saturation) — detect level shifts in the intercept
+    - **IIS** (Impulse Indicator Saturation) — detect one-time outliers
+    - **MIS** (Multiplicative Indicator Saturation) — detect coefficient shifts (interact steps with regressors)
+    - **TIS** (Trend Indicator Saturation) — detect broken linear trends
+  - User-supplied custom indicators via `user_indicators` parameter
+  - Split-half block procedure for large indicator sets exceeding n/2 candidates
+  - **Dual representation**: shifts (initial level + step changes) ↔ regime levels (cumulated per-parameter schedules) with standard error propagation via the delta method
+  - `SaturationResults` dataclass with `.summary()`, `.break_dates`, `.n_regimes`, `.retained_indicators`, `.shifts`, `.regime_levels`
+  - `GETSResults` and `TerminalModel` dataclasses for detailed GETS search inspection
+  - `ShiftsRepresentation`, `RegimeLevelsRepresentation`, `ParameterRegime` dataclasses
+  - `shifts_to_levels()` / `levels_to_shifts()` conversion functions
+  - Indicator generators: `step_indicators()`, `impulse_indicators()`, `multiplicative_indicators()`, `trend_indicators()`
+- **GETS visualization functions**
+  - `plot_sis_coefficients()`: Intercept regime levels as step function with confidence bands
+  - `plot_mis_coefficients()`: Per-parameter coefficient regime levels
+  - `plot_regime_levels()`: Combined SIS + MIS regime levels (multi-panel)
+  - `.plot_sis()`, `.plot_mis()`, `.plot_regime_levels()` convenience methods on `SaturationResults`
+- **`.isat()` convenience methods** on OLS, AR, and ADL models for one-step indicator saturation
+- **Example notebook** `05_gets_indicator_saturation.ipynb` demonstrating all features including AR(1) with dual structural breaks, method comparison (GETS vs Bai-Perron vs Markov switching), and end-to-end workflow
+- 166 new tests (1069 total)
+
 ### Fixed
 
 - **Markov switching: the parameter table used different regime labels from every other result.** After the regimes were relabeled (`ordering="first_appearance"`, the default, or `"intercept"`), `regime_params`, the probabilities and the transition matrix followed the new labels, while `params`, `bse` and `param_names` (and so `summary()`, `to_dataframe()`, `tvalues`, `pvalues`, `conf_int()`) kept the order of the estimation: `const[0]` could be the constant of the regime reported everywhere else as regime 1. The table now follows the same labels in `MarkovRegression`, `MarkovAR` and `MarkovADL`. Code that paired `regime_params[j]` with `bse` through names such as `const[j]` gave the wrong standard errors whenever the regimes had been relabeled.
@@ -60,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `summary_by_regime(index=)`, `ar_summary_by_regime(index=)`, `adl_summary_by_regime(index=)`
   - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
   - Shared helpers `_obs_label()` and `_obs_range_label()` in `results/base.py`
-  - 21 new tests in `test_date_aware_summary.py` (924 total)
+  - 21 new tests in `test_date_aware_summary.py` (1090 total)
 
 ## [0.3.2] - 2026-02-20
 
