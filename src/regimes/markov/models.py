@@ -11,7 +11,9 @@ methods on the original model classes.
 
 from __future__ import annotations
 
+import re
 import warnings
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -105,19 +107,31 @@ def _relabel_regimes(
         return perm
 
     if ordering == "intercept":
-        # Order by intercept/mean value (regime 0 = lowest mean)
-        # Extract regime means from the smoothed probabilities
-        try:
-            regime_means = []
-            for j in range(k_regimes):
-                regime_means.append(sm_results.params[j])  # first param per regime
-            sorted_indices = np.argsort(regime_means)
-            perm = np.zeros(k_regimes, dtype=np.intp)
-            for new_label, old_label in enumerate(sorted_indices):
-                perm[old_label] = new_label
-            return perm
-        except (IndexError, AttributeError):
+        # Order by the regime-specific constant (regime 0 = lowest). In
+        # MarkovAR the constant is the regime mean (Hamilton's form).
+        layout = _parameter_layout(sm_results.model)
+        params = np.asarray(sm_results.params, dtype=np.float64)
+        constants = {
+            info.regime: float(params[i])
+            for i, info in enumerate(layout)
+            if info.kind == "coef" and info.base == "const" and info.regime is not None
+        }
+        if len(constants) != k_regimes:
+            warnings.warn(
+                'ordering="intercept" needs a constant that switches across '
+                "regimes (trend with a constant and switching_trend=True); "
+                "the regimes are left in the order of the estimation.",
+                UserWarning,
+                stacklevel=3,
+            )
             return identity
+        sorted_indices = np.argsort(
+            [constants[j] for j in range(k_regimes)], kind="stable"
+        )
+        perm = np.zeros(k_regimes, dtype=np.intp)
+        for new_label, old_label in enumerate(sorted_indices):
+            perm[old_label] = new_label
+        return perm
 
     return identity
 
@@ -160,27 +174,209 @@ def _apply_permutation(
     return new_transition, new_smoothed, new_filtered, new_predicted, new_regime_params
 
 
+_REGIME_SUFFIX = re.compile(r"\[\d+\]$")
+
+
+@dataclass(frozen=True)
+class _ParamInfo:
+    """What one element of the statsmodels parameter vector is.
+
+    kind : "transition" or "coef"
+    base : name without a regime suffix ("p" for transition probabilities)
+    regime : for a coefficient, the regime it belongs to (None if it does not
+        switch); for a transition probability, the regime of origin
+    to : destination regime of a transition probability, else None
+    group : position of the parameter's group in the statsmodels vector, used
+        to keep the statsmodels order of the groups
+    """
+
+    kind: str
+    base: str
+    regime: int | None
+    to: int | None
+    group: int
+
+
+def _parameter_layout(
+    sm_model: Any, exog_names: Sequence[str] | None = None
+) -> list[_ParamInfo]:
+    """Describe each element of the statsmodels parameter vector.
+
+    The layout is read from ``sm_model.parameters``, which records for every
+    regime where its parameters are and which of them switch. The names alone
+    are not enough: statsmodels gives a non-switching regression coefficient
+    the suffix of the last regime (``x1[1]`` with two regimes).
+
+    Parameters
+    ----------
+    sm_model : statsmodels Markov switching model
+        ``MarkovRegression`` or ``MarkovAutoregression``.
+    exog_names : Sequence[str] | None
+        Names for the columns of ``exog`` (after any trend terms). If None,
+        the statsmodels names (``x1``, ``x2``, ...) are kept.
+
+    Returns
+    -------
+    list[_ParamInfo]
+        One entry per parameter, in the statsmodels order.
+    """
+    k = int(sm_model.k_regimes)
+    raw_names = list(sm_model.param_names)
+    all_idx = np.arange(len(raw_names))
+    parameters = sm_model.parameters
+    k_trend = int(getattr(sm_model, "k_trend", 0))
+
+    layout: dict[int, _ParamInfo] = {}
+    for ptype in parameters.switching:
+        per_regime = [np.atleast_1d(all_idx[parameters[j, ptype]]) for j in range(k)]
+        if ptype == "regime_transition":
+            # per_regime[j] holds p[j->0], ..., p[j->k-2]
+            for j in range(k):
+                for i, ix in enumerate(per_regime[j]):
+                    layout[int(ix)] = _ParamInfo("transition", "p", j, i, -1)
+            continue
+        switching = np.atleast_1d(parameters.switching[ptype])
+        for pos in range(len(per_regime[0])):
+            group = int(min(per_regime[j][pos] for j in range(k)))
+            base = _REGIME_SUFFIX.sub("", raw_names[int(per_regime[0][pos])])
+            if ptype == "exog" and exog_names is not None and pos >= k_trend:
+                base = str(exog_names[pos - k_trend])
+            for j in range(k):
+                layout[int(per_regime[j][pos])] = _ParamInfo(
+                    "coef", base, j if bool(switching[pos]) else None, None, group
+                )
+
+    if len(layout) != len(raw_names):
+        raise RuntimeError(
+            "could not map the statsmodels parameters to regimes: "
+            f"{len(layout)} of {len(raw_names)} parameters identified"
+        )
+    return [layout[i] for i in range(len(raw_names))]
+
+
+def _relabeled_parameters(
+    sm_results: Any,
+    perm: NDArray[np.intp],
+    exog_names: Sequence[str] | None = None,
+) -> tuple[
+    list[str],
+    NDArray[np.floating[Any]],
+    NDArray[np.floating[Any]],
+    dict[int, dict[str, float]],
+]:
+    """Parameter names, estimates and standard errors under relabeled regimes.
+
+    ``perm[old_label]`` is the new label. A regime-specific coefficient
+    ``name[j]`` becomes ``name[perm[j]]`` and the entries are sorted by regime
+    within each group, so that ``const[0]`` is the constant of the regime that
+    every other result calls regime 0. Coefficients that do not switch carry
+    no suffix.
+
+    Transition probabilities are reported as statsmodels reports them, for
+    the destinations ``0, ..., k-2``: ``p[j->i]`` is the probability of moving
+    from regime ``j`` to regime ``i`` in the new labels. statsmodels estimates
+    the probabilities of moving to all regimes but its own last one. Where
+    relabeling moves that regime away from the last position, the probability
+    of moving to it is one minus the sum of the estimated ones, and its
+    standard error follows from their covariance matrix (exact, because the
+    function is linear).
+
+    Returns
+    -------
+    tuple
+        ``(param_names, params, bse, regime_params)``; ``regime_params[r]``
+        holds every coefficient that applies in regime ``r``, including those
+        that do not switch.
+    """
+    layout = _parameter_layout(sm_results.model, exog_names)
+    k = int(sm_results.model.k_regimes)
+    raw_params = np.asarray(sm_results.params, dtype=np.float64)
+    raw_bse = np.asarray(sm_results.bse, dtype=np.float64)
+
+    # (sort key, name, estimate, standard error)
+    entries: list[tuple[tuple[int, int, int], str, float, float]] = []
+
+    # Destination that statsmodels leaves out, in the new labels
+    left_out = int(perm[k - 1])
+    cov: NDArray[np.floating[Any]] | None = None
+    if left_out != k - 1:
+        try:
+            cov = np.asarray(sm_results.cov_params(), dtype=np.float64)
+        except Exception:
+            cov = None
+
+    for origin_old in range(k):
+        origin = int(perm[origin_old])
+        own = [
+            ix
+            for ix, info in enumerate(layout)
+            if info.kind == "transition" and info.regime == origin_old
+        ]
+        for ix in own:
+            to_old = layout[ix].to
+            assert to_old is not None
+            dest = int(perm[to_old])
+            if dest != k - 1:
+                value, se = float(raw_params[ix]), float(raw_bse[ix])
+            else:
+                # Report the probability of moving to the left-out regime
+                dest = left_out
+                value = 1.0 - float(raw_params[own].sum())
+                if cov is None:
+                    se = float("nan")
+                else:
+                    with np.errstate(invalid="ignore"):
+                        se = float(np.sqrt(cov[np.ix_(own, own)].sum()))
+            entries.append(((0, dest, origin), f"p[{origin}->{dest}]", value, se))
+
+    regime_params: dict[int, dict[str, float]] = {r: {} for r in range(k)}
+    for ix, info in enumerate(layout):
+        if info.kind == "transition":
+            continue
+        value, se = float(raw_params[ix]), float(raw_bse[ix])
+        if info.regime is None:
+            entries.append(((1, info.group, 0), info.base, value, se))
+            targets = list(range(k))
+        else:
+            new_label = int(perm[info.regime])
+            entries.append(
+                ((1, info.group, new_label), f"{info.base}[{new_label}]", value, se)
+            )
+            targets = [new_label]
+        for r in targets:
+            regime_params[r][info.base] = value
+
+    entries.sort(key=lambda entry: entry[0])
+    # Keep the statsmodels order of the coefficients within each regime
+    for r in regime_params:
+        regime_params[r] = {
+            base: regime_params[r][base]
+            for _key, base in sorted(
+                {
+                    (info.group, info.base)
+                    for info in layout
+                    if info.kind == "coef" and info.base in regime_params[r]
+                }
+            )
+        }
+
+    names = [entry[1] for entry in entries]
+    params = np.array([entry[2] for entry in entries], dtype=np.float64)
+    bse = np.array([entry[3] for entry in entries], dtype=np.float64)
+    return names, params, bse, regime_params
+
+
 def _extract_regime_params(
     sm_results: Any,
     k_regimes: int,
 ) -> dict[int, dict[str, float]]:
-    """Extract per-regime parameters from statsmodels results."""
-    regime_params: dict[int, dict[str, float]] = {}
-    param_names = sm_results.model.param_names
+    """Per-regime parameters in the regime order of the statsmodels fit.
 
-    for j in range(k_regimes):
-        params_j: dict[str, float] = {}
-        for i, name in enumerate(param_names):
-            # statsmodels uses names like "const[0]", "x1[1]", "sigma2[0]"
-            if f"[{j}]" in name:
-                clean_name = name.replace(f"[{j}]", "")
-                params_j[clean_name] = float(sm_results.params[i])
-            elif "[" not in name:
-                # Non-switching parameter (same across regimes)
-                params_j[name] = float(sm_results.params[i])
-        regime_params[j] = params_j
-
-    return regime_params
+    Every coefficient that applies in a regime is included, whether or not it
+    switches.
+    """
+    identity = np.arange(k_regimes, dtype=np.intp)
+    return _relabeled_parameters(sm_results, identity)[3]
 
 
 class MarkovRegression:
@@ -209,8 +405,12 @@ class MarkovRegression:
     ordering : str | None
         How to order regimes after estimation:
         - "first_appearance" (default): Regime 0 appears first chronologically.
-        - "intercept": Regime 0 has the lowest intercept/mean.
+        - "intercept": Regime 0 has the lowest constant (needs a constant
+          that switches across regimes).
         - None: Keep statsmodels' arbitrary ordering.
+
+        Every result follows this order, including ``params``, ``bse`` and
+        ``param_names``: ``const[0]`` is the constant of regime 0.
 
     Examples
     --------
@@ -360,13 +560,13 @@ class MarkovRegression:
         filtered = np.array(sm_results.filtered_marginal_probabilities)
         predicted = np.array(sm_results.predicted_marginal_probabilities)
 
-        # Extract regime-specific parameters
-        regime_params = _extract_regime_params(sm_results, k)
-
-        # Apply regime relabeling
+        # Relabel the regimes, and with them the parameter table
         perm = _relabel_regimes(sm_results, self.ordering, k)
-        transition, smoothed, filtered, predicted, regime_params = _apply_permutation(
-            perm, k, transition, smoothed, filtered, predicted, regime_params
+        param_names, params, bse, regime_params = _relabeled_parameters(
+            sm_results, perm
+        )
+        transition, smoothed, filtered, predicted, _ = _apply_permutation(
+            perm, k, transition, smoothed, filtered, predicted, {}
         )
 
         # Compute fitted values and residuals (probability-weighted)
@@ -390,9 +590,6 @@ class MarkovRegression:
 
         resid = self.endog - fittedvalues
 
-        # Clean param names
-        param_names = list(sm_results.model.param_names)
-
         # Get convergence info
         converged = getattr(sm_results, "mle_retvals", {}).get("converged", True)
         n_iterations = getattr(sm_results, "mle_retvals", {}).get("iterations", 0)
@@ -400,7 +597,7 @@ class MarkovRegression:
             converged = bool(converged)
 
         return MarkovRegressionResults(
-            params=np.array(sm_results.params),
+            params=params,
             nobs=len(self.endog),
             model_name="Markov Switching Regression",
             k_regimes=k,
@@ -408,7 +605,7 @@ class MarkovRegression:
             smoothed_marginal_probabilities=smoothed,
             filtered_marginal_probabilities=filtered,
             predicted_marginal_probabilities=predicted,
-            bse=np.array(sm_results.bse),
+            bse=bse,
             llf=float(sm_results.llf),
             resid=resid,
             fittedvalues=fittedvalues,
@@ -639,11 +836,12 @@ class MarkovAR:
         filtered = np.array(sm_results.filtered_marginal_probabilities)
         predicted = np.array(sm_results.predicted_marginal_probabilities)
 
-        regime_params = _extract_regime_params(sm_results, k)
-
         perm = _relabel_regimes(sm_results, self.ordering, k)
-        transition, smoothed, filtered, predicted, regime_params = _apply_permutation(
-            perm, k, transition, smoothed, filtered, predicted, regime_params
+        param_names_list, params, bse, regime_params = _relabeled_parameters(
+            sm_results, perm
+        )
+        transition, smoothed, filtered, predicted, _ = _apply_permutation(
+            perm, k, transition, smoothed, filtered, predicted, {}
         )
 
         # Compute fitted values and residuals
@@ -668,24 +866,16 @@ class MarkovAR:
         endog_eff = self.endog[-nobs_eff:]
         resid = endog_eff - fittedvalues
 
-        # Extract AR params per regime
+        # AR coefficients per regime, under the same labels as everything else
         ar_params_dict: dict[int, NDArray[Any]] = {}
-        param_names_list = list(sm_results.model.param_names)
         for j in range(k):
-            ar_coeffs = []
-            for lag in range(1, self.order + 1):
-                # Look for switching or non-switching AR params
-                if self.switching_ar:
-                    target = f"ar.L{lag}[{j}]"
-                else:
-                    target = f"ar.L{lag}"
-                if target in param_names_list:
-                    idx = param_names_list.index(target)
-                    ar_coeffs.append(float(sm_results.params[idx]))
-            if ar_coeffs:
-                ar_params_dict[j] = np.array(ar_coeffs)
-            else:
-                ar_params_dict[j] = np.array([])
+            ar_params_dict[j] = np.array(
+                [
+                    regime_params[j][f"ar.L{lag}"]
+                    for lag in range(1, self.order + 1)
+                    if f"ar.L{lag}" in regime_params[j]
+                ]
+            )
 
         converged = getattr(sm_results, "mle_retvals", {}).get("converged", True)
         n_iterations = getattr(sm_results, "mle_retvals", {}).get("iterations", 0)
@@ -693,7 +883,7 @@ class MarkovAR:
             converged = bool(converged)
 
         return MarkovARResults(
-            params=np.array(sm_results.params),
+            params=params,
             nobs=nobs_eff,
             model_name="Markov Switching AR",
             k_regimes=k,
@@ -701,7 +891,7 @@ class MarkovAR:
             smoothed_marginal_probabilities=smoothed,
             filtered_marginal_probabilities=filtered,
             predicted_marginal_probabilities=predicted,
-            bse=np.array(sm_results.bse),
+            bse=bse,
             llf=float(sm_results.llf),
             resid=resid,
             fittedvalues=fittedvalues,
@@ -1045,11 +1235,12 @@ class MarkovADL:
         filtered = np.array(sm_results.filtered_marginal_probabilities)
         predicted = np.array(sm_results.predicted_marginal_probabilities)
 
-        regime_params = _extract_regime_params(sm_results, k)
-
         perm = _relabel_regimes(sm_results, self.ordering, k)
-        transition, smoothed, filtered, predicted, regime_params = _apply_permutation(
-            perm, k, transition, smoothed, filtered, predicted, regime_params
+        param_names, params, bse, regime_params = _relabeled_parameters(
+            sm_results, perm, exog_names=adl_param_names
+        )
+        transition, smoothed, filtered, predicted, _ = _apply_permutation(
+            perm, k, transition, smoothed, filtered, predicted, {}
         )
 
         nobs_eff = len(smoothed)
@@ -1072,8 +1263,6 @@ class MarkovADL:
         y_eff = self.endog[-nobs_eff:]
         resid = y_eff - fittedvalues
 
-        param_names = list(sm_results.model.param_names)
-
         converged = getattr(sm_results, "mle_retvals", {}).get("converged", True)
         n_iterations = getattr(sm_results, "mle_retvals", {}).get("iterations", 0)
         if isinstance(converged, (int, np.integer)):
@@ -1091,7 +1280,7 @@ class MarkovADL:
             exog_lags_result[var_name] = lags
 
         return MarkovADLResults(
-            params=np.array(sm_results.params),
+            params=params,
             nobs=nobs_eff,
             model_name="Markov Switching ADL",
             k_regimes=k,
@@ -1099,7 +1288,7 @@ class MarkovADL:
             smoothed_marginal_probabilities=smoothed,
             filtered_marginal_probabilities=filtered,
             predicted_marginal_probabilities=predicted,
-            bse=np.array(sm_results.bse),
+            bse=bse,
             llf=float(sm_results.llf),
             resid=resid,
             fittedvalues=fittedvalues,

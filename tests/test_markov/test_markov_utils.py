@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
+import pytest
+from statsmodels.tsa.regime_switching.markov_regression import (
+    MarkovRegression as SMMarkovRegression,
+)
 
 from regimes.markov.models import (
     _apply_permutation,
@@ -145,25 +150,36 @@ class TestRelabelRegimes:
         assert perm[0] == 1
 
     def test_intercept_ordering(self) -> None:
-        mock_results = MagicMock()
-        # params[0] = 5.0 (high), params[1] = 1.0 (low)
-        mock_results.params = np.array(
-            [5.0, 1.0, 0.8, 0.5]
-        )  # intercepts then other params
+        # statsmodels layout: p[0->0], p[1->0], const[0], const[1], sigma2.
+        # The transition probabilities come first and must not be mistaken
+        # for the constants: they would sort the other way here.
+        model = SMMarkovRegression(
+            np.random.default_rng(0).normal(size=50), k_regimes=2
+        )
+        results = SimpleNamespace(
+            model=model, params=np.array([0.2, 0.9, 5.0, 1.0, 0.5])
+        )
 
-        perm = _relabel_regimes(mock_results, ordering="intercept", k_regimes=2)
-        # Regime 0 has param 5.0, regime 1 has param 1.0
-        # After sorting: regime 1 (1.0) should become regime 0, regime 0 (5.0) should become regime 1
-        assert perm[1] == 0  # old regime 1 (low mean) → new regime 0
-        assert perm[0] == 1  # old regime 0 (high mean) → new regime 1
+        perm = _relabel_regimes(results, ordering="intercept", k_regimes=2)
+        assert perm[1] == 0  # old regime 1 (constant 1.0) → new regime 0
+        assert perm[0] == 1  # old regime 0 (constant 5.0) → new regime 1
 
-    def test_intercept_ordering_exception_fallback(self) -> None:
-        mock_results = MagicMock()
-        mock_params = MagicMock()
-        mock_params.__getitem__ = MagicMock(side_effect=IndexError("bad index"))
-        mock_results.params = mock_params
+    def test_intercept_ordering_without_switching_constant(self) -> None:
+        rng = np.random.default_rng(0)
+        model = SMMarkovRegression(
+            rng.normal(size=50),
+            k_regimes=2,
+            exog=rng.normal(size=50),
+            switching_trend=False,
+            switching_exog=True,
+        )
+        # p[0->0], p[1->0], const, x1[0], x1[1], sigma2
+        results = SimpleNamespace(
+            model=model, params=np.array([0.2, 0.9, 5.0, 1.0, 2.0, 0.5])
+        )
 
-        perm = _relabel_regimes(mock_results, ordering="intercept", k_regimes=2)
+        with pytest.warns(UserWarning, match="needs a constant"):
+            perm = _relabel_regimes(results, ordering="intercept", k_regimes=2)
         np.testing.assert_array_equal(perm, np.array([0, 1]))
 
     def test_first_appearance_unseen_regimes_filled(self) -> None:
