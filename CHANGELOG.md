@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Markov switching: the parameter table used different regime labels from every other result.** After the regimes were relabeled (`ordering="first_appearance"`, the default, or `"intercept"`), `regime_params`, the probabilities and the transition matrix followed the new labels, while `params`, `bse` and `param_names` (and so `summary()`, `to_dataframe()`, `tvalues`, `pvalues`, `conf_int()`) kept the order of the estimation: `const[0]` could be the constant of the regime reported everywhere else as regime 1. The table now follows the same labels in `MarkovRegression`, `MarkovAR` and `MarkovADL`. Code that paired `regime_params[j]` with `bse` through names such as `const[j]` gave the wrong standard errors whenever the regimes had been relabeled.
+- **`ordering="intercept"`** sorted the regimes on the first transition probabilities, not on the constants. It now sorts on the regime-specific constant, and warns and leaves the order unchanged when the model has none.
+- **Coefficients that do not switch** (`switching_exog=False`, `switching_trend=False`) were missing from `regime_params` for all regimes but the last, because statsmodels gives them the last regime's suffix (`x1[1]`). They now appear in every regime and are named without a suffix in the table.
+- `MarkovARResults.ar_params` follows the relabeled regimes.
+- **Models with restricted transition probabilities** (`RestrictedMarkovRegression`, `RestrictedMarkovAR`, including `non_recurring()`) were relabeled by first appearance like unrestricted ones, although their restrictions refer to the regime labels; the probabilities and `regime_params` could then describe other regimes than the restrictions. They now keep the labels of the estimation, and an `ordering` argument is ignored with a warning.
+
+### Changed
+
+- `MarkovADL` names its coefficients `y.L1`, `x0`, `x0.L1`, ... (and the column names of a DataFrame) in `param_names` and `regime_params`, instead of statsmodels' `x1`, `x2`, ....
+- Markov results report the transition probabilities `p[j->i]` for the destinations `i = 0, ..., k-2` in the relabeled regimes. Where relabeling changes which destination statsmodels left out, the reported probability is one minus the estimated ones, with the standard error from their covariance matrix.
+
 ## [0.4.0] - 2026-11-20
 
 ### Fixed

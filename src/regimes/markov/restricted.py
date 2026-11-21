@@ -12,6 +12,7 @@ probability mass among free entries via softmax.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -466,8 +467,28 @@ class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregres
         return constrained
 
 
+def _reject_ordering(kwargs: dict[str, Any]) -> None:
+    """Drop an ``ordering`` argument, warning if it asks for relabeling.
+
+    The restrictions are stated in terms of the regime labels, so a model
+    with restricted transition probabilities keeps the labels of the
+    estimation.
+    """
+    if kwargs.pop("ordering", None) is not None:
+        warnings.warn(
+            "ordering is ignored in a model with restricted transition "
+            "probabilities: the restrictions refer to the regime labels, so "
+            "the regimes are not relabeled.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 class RestrictedMarkovRegression(MarkovRegression):
     """MarkovRegression with fixed transition probabilities.
+
+    The regimes are never relabeled (``ordering`` is not available): the
+    restrictions refer to the regime labels.
 
     Parameters
     ----------
@@ -504,7 +525,8 @@ class RestrictedMarkovRegression(MarkovRegression):
         **kwargs: Any,
     ) -> None:
         self.restrictions = restrictions or {}
-        super().__init__(endog, k_regimes=k_regimes, **kwargs)
+        _reject_ordering(kwargs)
+        super().__init__(endog, k_regimes=k_regimes, ordering=None, **kwargs)
 
     def fit(
         self,
@@ -598,6 +620,9 @@ class RestrictedMarkovRegression(MarkovRegression):
 class RestrictedMarkovAR(MarkovAR):
     """MarkovAR with fixed transition probabilities.
 
+    The regimes are never relabeled (``ordering`` is not available): the
+    restrictions refer to the regime labels.
+
     Parameters
     ----------
     endog : ArrayLike
@@ -621,7 +646,10 @@ class RestrictedMarkovAR(MarkovAR):
         **kwargs: Any,
     ) -> None:
         self.restrictions = restrictions or {}
-        super().__init__(endog, k_regimes=k_regimes, order=order, **kwargs)
+        _reject_ordering(kwargs)
+        super().__init__(
+            endog, k_regimes=k_regimes, order=order, ordering=None, **kwargs
+        )
 
     def fit(
         self,
