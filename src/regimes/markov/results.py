@@ -34,7 +34,11 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
     Parameters
     ----------
     params : NDArray[np.floating]
-        Full parameter vector from MLE estimation.
+        Full parameter vector from MLE estimation, in the order of
+        ``param_names``. The regime labels are those of every other result
+        (see the ``ordering`` option of the model): ``const[0]`` is the
+        constant of regime 0. The statsmodels results, with the regimes in
+        the order of the estimation, are kept in ``_sm_results``.
     nobs : int
         Number of observations.
     k_regimes : int
@@ -50,7 +54,8 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
     predicted_marginal_probabilities : NDArray[np.floating]
         Predicted probabilities P(S_t = j | Y_1,...,Y_{t-1}), shape (nobs, k_regimes).
     bse : NDArray[np.floating]
-        Standard errors of the parameter estimates.
+        Standard errors of the parameter estimates, in the order of
+        ``param_names``.
     llf : float
         Log-likelihood at the optimum.
     resid : NDArray[np.floating]
@@ -58,9 +63,14 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
     fittedvalues : NDArray[np.floating]
         Fitted values (probability-weighted).
     param_names : list[str]
-        Names of the parameters.
+        Names of the parameters. ``name[j]`` belongs to regime ``j``; a name
+        without a suffix is common to all regimes. ``p[j->i]`` is the
+        probability of moving from regime ``j`` to regime ``i``, reported for
+        ``i = 0, ..., k_regimes - 2``.
     regime_params : dict[int, dict[str, float]]
-        Per-regime parameters: {0: {"const": 1.5, "sigma2": 0.9}, ...}.
+        Per-regime parameters: {0: {"const": 1.5, "sigma2": 0.9}, ...}. Each
+        regime lists every coefficient that applies in it, including those
+        common to all regimes.
     """
 
     # Regime structure
