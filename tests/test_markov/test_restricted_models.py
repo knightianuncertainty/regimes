@@ -308,3 +308,51 @@ class TestStartingValues:
         params = model.transform_params(np.random.default_rng(3).normal(size=10))
         again = model.transform_params(model.untransform_params(params))
         np.testing.assert_allclose(again, params, atol=1e-7)
+
+
+class TestEMUpdate:
+    """EM steps for a chain that starts in a regime it must leave."""
+
+    def test_likelihood_rises_from_the_default_start(self) -> None:
+        """statsmodels' update sets P(stay) = 1 after one step in this case."""
+        y = _shifts([0, 3], 100, seed=10)
+        model = _RestrictedSMMarkovRegression(y, 2, restrictions={(0, 1): 0.0})
+        model.initialize_known([1.0, 0.0])
+        params = np.array(model.start_params, dtype=float)
+        llfs = []
+        for _ in range(6):
+            llfs.append(float(model.loglike(params, transformed=True)))
+            params = np.asarray(model._em_iteration(params)[1], dtype=float)
+            stay = model.regime_transition_matrix(params)[0, 0, 0]
+            assert 0.0 < stay < 1.0
+        assert np.all(np.diff(llfs) > -1e-8), llfs
+        assert llfs[-1] > llfs[0] + 100
+
+    def test_update_is_moves_over_departures(self) -> None:
+        model = _RestrictedSMMarkovRegression(
+            np.random.default_rng(0).normal(size=50), 3, restrictions={}
+        )
+        rng = np.random.default_rng(1)
+        joint = rng.uniform(size=(3, 3, 50))
+
+        class Raw:
+            smoothed_joint_probabilities = joint
+
+        update = model._em_regime_transition(Raw())
+        moves = joint.sum(axis=-1)
+        expected = moves / moves.sum(axis=0)
+        np.testing.assert_allclose(update, expected[:2, :].T)
+
+    def test_ar_fit_does_not_depend_on_random_restarts(self) -> None:
+        """The case in which only a lucky restart gave a finite likelihood."""
+        rng = np.random.default_rng(42)
+        n = 200
+        y = np.zeros(n)
+        for t in range(1, 100):
+            y[t] = 1.0 + 0.3 * y[t - 1] + rng.standard_normal()
+        for t in range(100, n):
+            y[t] = 3.0 + 0.8 * y[t - 1] + rng.standard_normal()
+        model = RestrictedMarkovAR.non_recurring(y, k_regimes=2, order=1)
+        res = _fit(model, search_reps=0)
+        assert np.isfinite(res.llf)
+        assert 0.9 < res.regime_transition[0, 0] < 1.0

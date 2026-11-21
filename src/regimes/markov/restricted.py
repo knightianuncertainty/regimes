@@ -182,6 +182,34 @@ class _RestrictedFilterMixin:
             matrix[..., 0] = self._impose_restrictions(matrix[..., 0])
         return matrix
 
+    def _em_regime_transition(self, result: Any) -> NDArray[Any]:
+        """EM update of the transition probabilities, under the restrictions.
+
+        The probability of moving from j to i is the expected number of such
+        moves divided by the expected number of periods the chain moves on
+        from j. statsmodels divides by the expected time spent in j over the
+        sample instead, which leaves out the starting period and includes
+        the last one. The difference is small for a regime that is visited
+        often, but when a regime is occupied only briefly at the start, as
+        in the first iterations of a model whose chain starts in a regime it
+        must leave, statsmodels' ratio reaches one and the model can then
+        never leave its first regime.
+
+        Returns an array of shape (k, k-1): row j holds the probabilities of
+        moving from j to the regimes 0, ..., k-2.
+        """
+        k = self.k_regimes  # type: ignore[attr-defined]
+        joint = np.asarray(result.smoothed_joint_probabilities)
+        for _ in range(joint.ndim - 3):
+            joint = joint.sum(axis=-2)
+        moves = joint.sum(axis=-1)  # moves[i, j]: expected moves from j to i
+        totals = moves.sum(axis=0)
+        matrix = np.full((k, k), 1.0 / k)
+        left = totals > 0
+        matrix[:, left] = moves[:, left] / totals[left]
+        matrix = self._impose_restrictions(matrix)
+        return np.asarray(matrix[: k - 1, :].T)
+
     def _free_parameter_jacobian(self) -> NDArray[np.floating[Any]]:
         """Jacobian of the parameter vector in a minimal set of free parameters.
 
@@ -420,16 +448,6 @@ class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregres
     ) -> None:
         self._restrictions = restrictions or {}
         super().__init__(endog, k_regimes, order=order, **kwargs)
-
-
-# statsmodels improves its starting values by EM steps, in fit() and in its
-# random search. Its update of the transition probabilities divides the
-# expected number of moves out of a regime by the expected time spent in it
-# over the whole sample, first period included. When a regime is occupied
-# only briefly at the start, as in the first iterations of a model whose
-# chain starts in a regime it must leave, the probability of staying comes
-# out as one, and the model can then never leave its first regime.
-_NO_EM: dict[str, Any] = {"search_iter": 0}
 
 
 def _reject_ordering(kwargs: dict[str, Any]) -> None:
@@ -723,11 +741,7 @@ class RestrictedMarkovRegression(MarkovRegression):
         search_reps: int = 5,
         **kwargs: Any,
     ) -> MarkovRegressionResults:
-        """Fit with restricted transition matrix.
-
-        ``em_iter`` is accepted for compatibility and not used: the
-        likelihood is maximized directly from the starting values.
-        """
+        """Fit with restricted transition matrix."""
         sm_model = _RestrictedSMMarkovRegression(
             endog=self.endog,
             k_regimes=self.k_regimes,
@@ -743,9 +757,8 @@ class RestrictedMarkovRegression(MarkovRegression):
         if self._time_ordered and "start_params" not in kwargs:
             kwargs["start_params"] = _time_ordered_start_params(sm_model)
 
-        # statsmodels' EM steps are not used (see _NO_EM)
         sm_results = self._fit_with_search(
-            sm_model, method, maxiter, 0, search_reps, **_NO_EM, **kwargs
+            sm_model, method, maxiter, em_iter, search_reps, **kwargs
         )
 
         results = self._wrap_results(sm_results)
@@ -850,11 +863,7 @@ class RestrictedMarkovAR(MarkovAR):
         search_reps: int = 5,
         **kwargs: Any,
     ) -> MarkovARResults:
-        """Fit with restricted transition matrix.
-
-        ``em_iter`` is accepted for compatibility and not used: the
-        likelihood is maximized directly from the starting values.
-        """
+        """Fit with restricted transition matrix."""
         sm_model = _RestrictedSMMarkovAutoregression(
             endog=self.endog,
             k_regimes=self.k_regimes,
@@ -871,9 +880,8 @@ class RestrictedMarkovAR(MarkovAR):
         if self._time_ordered and "start_params" not in kwargs:
             kwargs["start_params"] = _time_ordered_start_params(sm_model)
 
-        # statsmodels' EM steps are not used (see _NO_EM)
         sm_results = self._fit_with_search(
-            sm_model, method, maxiter, 0, search_reps, **_NO_EM, **kwargs
+            sm_model, method, maxiter, em_iter, search_reps, **kwargs
         )
 
         results = self._wrap_results(sm_results)
