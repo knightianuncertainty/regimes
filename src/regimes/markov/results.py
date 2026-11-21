@@ -99,13 +99,20 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
 
     # Restrictions (None if unrestricted)
     restricted_transitions: dict[tuple[int, int], float] | None = None
+    n_free_params: int | None = None
 
     # Back-reference to statsmodels (private)
     _sm_results: Any = field(default=None, repr=False)
 
     @property
     def df_model(self) -> int:
-        """Number of free parameters."""
+        """Number of free parameters.
+
+        In a model with restricted transition probabilities, the parameters
+        that the restrictions determine are not counted.
+        """
+        if self.n_free_params is not None:
+            return self.n_free_params
         return len(self.params)
 
     @property
