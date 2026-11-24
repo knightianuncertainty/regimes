@@ -138,13 +138,16 @@ def _objective_search_fit(
 ) -> Any:
     """The search of ``_seeded_search_fit`` for a (penalized) objective.
 
-    Two differences. Each starting value is taken to its optimum without
-    building a results object, and the smoother (and, if ``inference``, the
-    covariance matrix) is computed once, for the best one. And if
-    ``penalty`` is given, a function of the parameter vector, the optimizer
-    maximizes the log-likelihood plus that penalty and the starting values
-    are compared on the same objective; the log-likelihood of the results
-    is the plain one.
+    Three differences. The covariance matrix is computed once, for the best
+    starting value, and only if ``inference``. If ``penalty`` is given, a
+    function of the parameter vector, the optimizer maximizes the
+    log-likelihood plus that penalty and the starting values are compared
+    on the same objective; the log-likelihood of the results is the plain
+    one, and so is the Hessian behind their standard errors (computed at
+    the penalized estimates). And if the optimizer stops at ``maxiter``
+    from the best starting value, it is continued from there once with five
+    times as many iterations; ``mle_retvals`` of the results says whether
+    it converged.
     """
     generator = rng if rng is not None else np.random.default_rng()
     base = kwargs.pop("start_params", None)
@@ -155,48 +158,57 @@ def _objective_search_fit(
             constrained = params if transformed else sm_model.transform_params(params)
             return plain(params, transformed) + penalty(constrained)
 
-        # statsmodels' optimizer, score and Hessian all go through loglike
+        # statsmodels' optimizer and its numerical score go through loglike
         sm_model.loglike = penalized
 
     best_params = None
     best_value = -np.inf
+    best_retvals: Any = None
 
-    def consider(start: Any, n_em: int) -> None:
-        nonlocal best_params, best_value
+    def consider(start: Any, n_em: int, iterations: int) -> None:
+        nonlocal best_params, best_value, best_retvals
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
                 if start is None:
-                    params = sm_model.fit(
+                    fitted = sm_model.fit(
                         method=method,
-                        maxiter=maxiter,
+                        maxiter=iterations,
                         em_iter=n_em,
-                        return_params=True,
+                        cov_type="none",
                         **kwargs,
                     )
                 else:
-                    params = sm_model.fit(
+                    fitted = sm_model.fit(
                         start_params=np.asarray(start, dtype=float),
                         transformed=True,
                         method=method,
-                        maxiter=maxiter,
+                        maxiter=iterations,
                         em_iter=n_em,
-                        return_params=True,
+                        cov_type="none",
                         **kwargs,
                     )
+                params = np.asarray(fitted.params, dtype=float)
                 value = float(np.real(sm_model.loglike(params)))
             except Exception:
                 return
         if np.isfinite(value) and value > best_value:
-            best_params = np.asarray(params, dtype=float)
+            best_params = params
             best_value = value
+            best_retvals = getattr(fitted, "mle_retvals", None)
 
     try:
-        consider(base, em_iter)
+        consider(base, em_iter, maxiter)
         for _ in range(search_reps):
-            consider(_random_start(sm_model, generator, base), 0)
+            consider(_random_start(sm_model, generator, base), 0, maxiter)
         for start in extra_starts:
-            consider(start, 0)
+            consider(start, 0, maxiter)
+        if (
+            best_params is not None
+            and isinstance(best_retvals, dict)
+            and not best_retvals.get("converged", True)
+        ):
+            consider(best_params, 0, 5 * maxiter)
     finally:
         if penalty is not None:
             del sm_model.loglike
@@ -204,9 +216,12 @@ def _objective_search_fit(
         raise RuntimeError("the Markov switching model could not be estimated")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return sm_model.smooth(
+        results = sm_model.smooth(
             best_params, transformed=True, cov_type="approx" if inference else "none"
         )
+    if best_retvals is not None:
+        results.mle_retvals = best_retvals
+    return results
 
 
 class _SMMarkovAutoregression(MarkovAutoregression):  # type: ignore[misc]
