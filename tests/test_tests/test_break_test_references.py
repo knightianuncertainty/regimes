@@ -463,17 +463,20 @@ class TestCusumReporting:
         assert "c_0" in results.summary()
 
     def test_start_that_does_not_identify_the_coefficients(self) -> None:
-        n = 60
-        rng = np.random.default_rng(5)
+        """A dummy that is zero for the first 30 observations."""
+        rng = np.random.default_rng(22)
+        n = 80
         dummy = (np.arange(n) >= 30).astype(float)
         X = np.column_stack([np.ones(n), dummy])
         y = rng.standard_normal(n)
-        # the recursion starts when the dummy first varies (see
-        # TestRecursiveResidualsNumerics); a dummy that never varies is
-        # collinear with the constant
+        # a dummy that never varies is collinear with the constant
         with pytest.raises(ValueError, match="collinear in the sample"):
             rg.CUSUMTest(y, exog=np.column_stack([np.ones(n), np.zeros(n) + 3])).fit()
-        assert rg.CUSUMTest(y, exog=X).fit().observations[0] == 31
+        # the observation at which the dummy first varies is fitted exactly;
+        # every other observation after the first has a residual
+        results = rg.CUSUMTest(y, exog=X).fit()
+        expected = [t for t in range(n) if t not in (0, 30)]
+        np.testing.assert_array_equal(results.observations, expected)
 
 
 class TestRecursiveResidualsNumerics:
@@ -520,23 +523,29 @@ class TestRecursiveResidualsNumerics:
             results.recursive_residuals, self._direct(y, centered, 2), atol=1e-6
         )
 
-    def test_nearly_collinear_start_is_not_used(self) -> None:
-        """Two first observations that almost coincide: start one later."""
+    def test_nearly_collinear_start(self) -> None:
+        """Two first observations that almost coincide count as one design
+        point: the second has a residual, the third completes the rank."""
         rng = np.random.default_rng(52)
         x = rng.standard_normal(60)
         x[1] = x[0] + 1e-9
         X = np.column_stack([np.ones(60), x])
         y = 1.0 + 0.5 * x + rng.standard_normal(60)
         results = rg.CUSUMTest(y, exog=X).fit()
-        assert len(results.recursive_residuals) == 57
-        assert results.observations[0] == 3
+        assert len(results.recursive_residuals) == 58
+        np.testing.assert_array_equal(results.observations[:3], [1, 3, 4])
+        assert results.recursive_residuals[0] == pytest.approx(
+            (y[1] - y[0]) / np.sqrt(2), abs=1e-6
+        )
         np.testing.assert_allclose(
-            results.recursive_residuals, self._direct(y, X, 3), atol=1e-8
+            results.recursive_residuals[1:], self._direct(y, X, 3), atol=1e-6
+        )
+        assert np.sum(results.recursive_residuals**2) == pytest.approx(
+            sm.OLS(y, X).fit().ssr, rel=1e-6
         )
 
     def test_series_that_starts_at_zero(self) -> None:
-        """An AR(1) of simulated data: y0 = y1 = 0 does not identify two
-        coefficients, the third observation does."""
+        """An AR(1) of simulated data: y0 = y1 = 0 are one design point."""
         rng = np.random.default_rng(53)
         y = np.zeros(120)
         for t in range(2, 120):
@@ -545,20 +554,77 @@ class TestRecursiveResidualsNumerics:
             rg.AR(y, lags=1).cusum_test(),
             rg.AR(y, lags=1).cusum_sq_test(),
         ):
-            assert len(results.recursive_residuals) == 119 - 3
+            # 119 observations in the estimation sample, two coefficients
+            assert len(results.recursive_residuals) == 117
             assert np.all(np.isfinite(results.statistic_path))
 
-    def test_dummy_that_is_constant_at_the_start(self) -> None:
+    def test_dummy_in_the_middle_of_the_sample(self) -> None:
+        """The test still covers the whole sample (it used to start after
+        the dummy, or to fail)."""
         rng = np.random.default_rng(54)
-        n = 80
-        dummy = (np.arange(n) >= 30).astype(float)
-        X = np.column_stack([np.ones(n), dummy])
+        n = 200
+        impulse = np.zeros(n)
+        impulse[150] = 1.0
+        X = np.column_stack([np.ones(n), impulse])
         y = rng.standard_normal(n)
+        y[60:] *= 3.0  # the variance triples long before the dummy
+        cusum_sq = rg.CUSUMSQTest(y, exog=X).fit()
+        cusum = rg.CUSUMTest(y, exog=X).fit()
+        expected = [t for t in range(n) if t not in (0, 150)]
+        for results in (cusum, cusum_sq):
+            np.testing.assert_array_equal(results.observations, expected)
+            assert len(results.recursive_residuals) == n - 2
+            assert np.sum(results.recursive_residuals**2) == pytest.approx(
+                sm.OLS(y, X).fit().ssr, rel=1e-10
+            )
+        assert cusum_sq.reject
+        # before the dummy the residuals are those of the constant-only model
+        constant_only = rg.CUSUMTest(y[:150]).fit()
+        np.testing.assert_allclose(
+            cusum.recursive_residuals[:149],
+            constant_only.recursive_residuals,
+            atol=1e-10,
+        )
+        # bounds and scale use the number of residuals
+        assert cusum.sigma_hat == pytest.approx(
+            np.sqrt(np.sum(cusum.recursive_residuals**2) / (n - 2))
+        )
+        assert cusum.upper_bound[-1] == pytest.approx(3 * 0.948 * np.sqrt(n - 2))
+        assert cusum_sq.critical_value == pytest.approx(
+            cusum_sq_critical_value(0.05, n - 2)
+        )
+        # a crossing is reported at its observation, also after the gap
+        crossed = np.where(
+            (cusum_sq.statistic_path > cusum_sq.upper_bound)
+            | (cusum_sq.statistic_path < cusum_sq.lower_bound)
+        )[0]
+        assert cusum_sq.first_crossing == expected[crossed[0]]
+        assert cusum_sq.crossing_indices == [expected[i] for i in crossed]
+
+    def test_dummy_at_the_last_observation(self) -> None:
+        rng = np.random.default_rng(67)
+        n = 60
+        impulse = np.zeros(n)
+        impulse[-1] = 1.0
+        y = rng.standard_normal(n)
+        results = rg.CUSUMTest(y, exog=np.column_stack([np.ones(n), impulse])).fit()
+        np.testing.assert_array_equal(results.observations, np.arange(1, n - 1))
+        np.testing.assert_allclose(
+            results.recursive_residuals,
+            rg.CUSUMTest(y[:-1]).fit().recursive_residuals,
+            atol=1e-10,
+        )
+
+    def test_long_sample_is_fast(self) -> None:
+        import time
+
+        rng = np.random.default_rng(68)
+        X = np.column_stack([np.ones(6000), rng.standard_normal((6000, 4))])
+        y = rng.standard_normal(6000)
+        start = time.perf_counter()
         results = rg.CUSUMTest(y, exog=X).fit()
-        # identified from the first observation in which the dummy is one
-        assert results.observations[0] == 31
-        assert len(results.statistic_path) == n - 31
-        assert results.upper_bound[-1] == pytest.approx(3 * 0.948 * np.sqrt(n - 31))
+        assert time.perf_counter() - start < 20.0
+        assert len(results.recursive_residuals) == 5995
 
     def test_collinear_regressors_raise(self) -> None:
         rng = np.random.default_rng(55)
@@ -661,13 +727,31 @@ class TestHansenEdges:
         assert results.sup_f_pvalue == pytest.approx(results.exp_f_pvalue)
         assert results.sup_f_pvalue == pytest.approx(results.ave_f_pvalue)
 
-    def test_very_small_trimming_warns(self) -> None:
-        with pytest.warns(UserWarning, match="below 0.01"):
-            small = hansen_pvalue(12.0, 1, 0.002, "sup")
-        assert small == pytest.approx(hansen_pvalue(12.0, 1, 0.01, "sup"))
+    def test_very_small_trimming_warns_once(self) -> None:
+        # below the tables: the value for pi_0 = 0.01
+        assert hansen_pvalue(12.0, 1, 0.002, "sup") == pytest.approx(
+            hansen_pvalue(12.0, 1, 0.01, "sup")
+        )
         y = np.random.default_rng(61).standard_normal(2000)
-        with pytest.warns(UserWarning, match="below 0.01"):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             rg.AndrewsPlobergerTest(y).fit(trimming=0.002)
+        messages = [str(w.message) for w in caught if "below 0.01" in str(w.message)]
+        assert len(messages) == 1
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            rg.AndrewsPlobergerTest(y[:300]).fit(trimming=0.05)
+
+    def test_exp_statistic_between_the_last_row_and_a_single_date(self) -> None:
+        """For pi_0 between 0.49 and 0.5 the p-value runs linearly from the
+        table to the chi-squared tail of twice the statistic."""
+        q, statistic = 2, 3.0
+        at_049 = hansen_pvalue(statistic, q, 0.49, "exp")
+        at_050 = hansen_pvalue(statistic, q, 0.5, "exp")
+        assert at_050 == pytest.approx(stats.chi2.sf(2 * statistic, q))
+        middle = hansen_pvalue(statistic, q, 0.495, "exp")
+        assert middle == pytest.approx(0.5 * (at_049 + at_050), rel=1e-9)
+        assert min(at_049, at_050) <= middle <= max(at_049, at_050)
 
     def test_critical_value_below_the_floor_is_nan(self) -> None:
         assert np.isnan(hansen_critical_value(1e-6, 2, 0.15, "exp"))
@@ -739,3 +823,54 @@ class TestLargeMeanAndRedundantBreak:
         model = rg.OLS(rng.standard_normal(n), X, has_constant=False)
         test = rg.ChowTest.from_model(model, break_vars="const")
         assert (test.n_break_params, test.n_nonbreak_params) == (1, 1)
+
+
+class TestChowDegenerateDesigns:
+    """Designs in which there is nothing to test raise a ValueError."""
+
+    def test_breaking_regressor_that_is_zero_in_a_sub_sample(self) -> None:
+        rng = np.random.default_rng(69)
+        n = 100
+        x = rng.standard_normal(n)
+        step = (np.arange(n) >= 60).astype(float)
+        y = rng.standard_normal(n)
+        fixed = np.column_stack([np.ones(n), x])
+        with pytest.raises(ValueError, match="not identified"):
+            rg.ChowTest(y, exog=fixed, exog_break=step).fit(break_points=50)
+        with pytest.raises(ValueError, match="not identified"):
+            rg.ChowTest(y, exog=x, exog_break=np.column_stack([np.ones(n), step])).fit(
+                break_points=60
+            )
+        # a step among the regressors that do not break, tested elsewhere,
+        # is a real test of the two breaking coefficients
+        results = rg.ChowTest(
+            y, exog=step, exog_break=np.column_stack([np.ones(n), x])
+        ).fit(break_points=80)
+        assert results.df_num[80] == 2
+        assert results.f_stats[80] > 0
+
+    def test_predictive_variant_with_an_impulse_in_the_predicted_part(self) -> None:
+        rng = np.random.default_rng(70)
+        n = 100
+        impulse = np.zeros(n)
+        impulse[99] = 1.0
+        X = np.column_stack([rng.standard_normal(n), impulse])
+        y = rng.standard_normal(n)
+        with pytest.raises(ValueError, match="nothing to test"):
+            rg.ChowTest(y, exog=X).fit(break_points=99)
+        # without the dummy the predictive test of the last observation runs
+        results = rg.ChowTest(y, exog=X[:, :1]).fit(break_points=99)
+        assert results.is_predictive[99]
+
+    def test_break_points_are_integers(self) -> None:
+        y = np.random.default_rng(71).standard_normal(80)
+        test = rg.ChowTest(y)
+        for bad in (40.7, [40.7], [True], "40"):
+            with pytest.raises(TypeError, match="must be integers"):
+                test.fit(break_points=bad)  # type: ignore[arg-type]
+        assert list(test.fit(break_points=[np.int64(40), 50]).f_stats) == [40, 50]
+
+    def test_andrews_ploberger_exact_fit(self) -> None:
+        y = np.concatenate([np.zeros(30), np.ones(30)])
+        with pytest.raises(ValueError, match="exactly"):
+            rg.AndrewsPlobergerTest(y).fit()

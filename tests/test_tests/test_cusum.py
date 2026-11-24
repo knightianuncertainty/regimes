@@ -22,7 +22,7 @@ class TestRecursiveResiduals:
         X = np.column_stack([np.ones(T), rng.standard_normal((T, k - 1))])
         y = X @ rng.standard_normal(k) + rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert len(w) == T - k
         assert len(f) == T - k
@@ -34,7 +34,7 @@ class TestRecursiveResiduals:
         beta = np.array([1.0, 2.0])
         y = X @ beta + rng.standard_normal(T) * 0.5
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         # Mean should be close to zero (not exact due to finite sample)
         assert abs(np.mean(w)) < 0.3
@@ -45,7 +45,7 @@ class TestRecursiveResiduals:
         X = np.column_stack([np.ones(T), rng.standard_normal(T)])
         y = rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert np.all(f > 1.0)
 
@@ -55,7 +55,7 @@ class TestRecursiveResiduals:
         X = np.ones((T, 1))
         y = 3.0 + rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert len(w) == T - 1
         assert len(f) == T - 1

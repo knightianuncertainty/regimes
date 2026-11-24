@@ -42,6 +42,7 @@ Hansen, B. E. (1997). Approximate asymptotic p values for structural-change
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -50,6 +51,7 @@ import numpy as np
 from regimes.tests._bp_core import independent_columns
 from regimes.tests._hansen_pvalues import (
     MAX_Q,
+    SMALLEST_PI0,
     hansen_critical_value,
     hansen_pvalue,
     pi0_from_range,
@@ -611,6 +613,15 @@ class AndrewsPlobergerTest(BreakTestBase):
         # candidate dates actually used
         T = self.nobs
         pi0 = pi0_from_range(candidate_indices[0] / T, candidate_indices[-1] / T)
+        if pi0 < SMALLEST_PI0 - 1e-12:
+            warnings.warn(
+                f"the candidate dates leave pi_0 = {pi0:.4f}, below 0.01, the "
+                "smallest value Hansen (1997) tabulates (trimming of less "
+                "than about 1 percent); the p-values and critical values are "
+                "those for 0.01, so the p-values are too small",
+                UserWarning,
+                stacklevel=2,
+            )
         sup_f_pv = hansen_pvalue(sup_f, q, pi0, "sup")
         exp_f_pv = hansen_pvalue(exp_f, q, pi0, "exp")
         ave_f_pv = hansen_pvalue(ave_f, q, pi0, "ave")

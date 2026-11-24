@@ -12,6 +12,7 @@ Chow, G. C. (1960). Tests of equality between sets of coefficients in two
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -20,6 +21,15 @@ from scipy import stats
 
 from regimes.tests._bp_core import independent_columns
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+
+
+def _scaled_rank(X: NDArray[np.floating[Any]]) -> int:
+    """Rank of ``X`` with its columns scaled to unit length (zero columns kept)."""
+    if X.shape[1] == 0:
+        return 0
+    norms = np.linalg.norm(X, axis=0)
+    return int(np.linalg.matrix_rank(X / np.where(norms > 0, norms, 1.0)))
+
 
 # A sum of squared residuals this small relative to y'y is rounding error:
 # the model fits exactly and the statistic is not defined. (The threshold
@@ -381,6 +391,7 @@ class ChowTest(BreakTestBase):
 
         n1 = break_point
         n2 = T - break_point
+        label = break_point  # the break point as error messages name it
 
         # Build full-sample regressor matrix and compute SSR_full
         X_full = self._build_regressor_matrix(0, T)
@@ -411,20 +422,35 @@ class ChowTest(BreakTestBase):
                 n_large = n2
                 ssr_large = ssr2
 
+            # A regressor that varies only in the small sub-sample (an
+            # impulse dummy there) fits those observations: nothing to test.
+            large = (
+                slice(0, break_point)
+                if n1 >= total_params_per_sub
+                else slice(break_point, T)
+            )
+            if _scaled_rank(X_full[large]) < _scaled_rank(X_full):
+                raise ValueError(
+                    f"break point {label}: a regressor is zero or collinear "
+                    "with the others outside the sub-sample that is predicted "
+                    "(an impulse dummy in it, for example), so it fits those "
+                    "observations and there is nothing to test"
+                )
+
             # F = ((SSR_full - SSR_large) / n_small) / (SSR_large / (n_large - k - p))
             df_num = n_small
             df_denom = n_large - total_params_per_sub
 
             if df_denom <= 0:
                 raise ValueError(
-                    f"break point {break_point}: neither sub-sample has more "
+                    f"break point {label}: neither sub-sample has more "
                     f"observations ({n1} and {n2}) than the model has "
                     f"coefficients ({total_params_per_sub}), so the test "
                     "cannot be computed"
                 )
             if ssr_large <= _EXACT_FIT * float(y_full @ y_full):
                 raise ValueError(
-                    f"break point {break_point}: the model fits the larger "
+                    f"break point {label}: the model fits the larger "
                     "sub-sample exactly, so the test statistic is not defined"
                 )
 
@@ -478,30 +504,26 @@ class ChowTest(BreakTestBase):
 
             if (
                 self.exog is not None
-                and (ssr_full - ssr_unrestricted) <= 1e-10 * ssr_full
+                and self.exog_break is not None
+                and _scaled_rank(X_unrestricted) < X_unrestricted.shape[1]
             ):
-                redundant = (
-                    np.linalg.matrix_rank(
-                        X_unrestricted / np.linalg.norm(X_unrestricted, axis=0)
-                    )
-                    < X_unrestricted.shape[1]
+                raise ValueError(
+                    f"break point {label}: the model with a break is not "
+                    "identified. A regressor that breaks is zero or collinear "
+                    "with the others in one of the sub-samples, or the "
+                    "regressors that do not break already contain this break "
+                    "(a step dummy at the same date, for example), so there "
+                    "is nothing to test"
                 )
-                if redundant:
-                    raise ValueError(
-                        f"break point {break_point}: the regressors that do "
-                        "not break already contain this break (a step dummy "
-                        "at the same date, for example), so there is nothing "
-                        "to test"
-                    )
             if df_denom <= 0:
                 raise ValueError(
-                    f"break point {break_point}: the sample has {T} "
+                    f"break point {label}: the sample has {T} "
                     f"observations and the model with a break {2 * k + p} "
                     "coefficients, so the test cannot be computed"
                 )
             if ssr_unrestricted <= _EXACT_FIT * float(y_full @ y_full):
                 raise ValueError(
-                    f"break point {break_point}: the model with a break fits "
+                    f"break point {label}: the model with a break fits "
                     "the data exactly, so the test statistic is not defined"
                 )
 
@@ -553,11 +575,25 @@ class ChowTest(BreakTestBase):
         ValueError
             If a break point is outside the valid range [1, T-1].
         """
-        # Normalize to list
-        if isinstance(break_points, (int, np.integer)):
+        # Normalize to list; a break point is an observation number
+        if isinstance(break_points, (int, np.integer)) and not isinstance(
+            break_points, bool
+        ):
             break_points = [int(break_points)]
         else:
-            break_points = [int(bp) for bp in break_points]
+            if isinstance(break_points, (bool, float, str)):
+                raise TypeError(f"break points must be integers, got {break_points!r}")
+            points = []
+            for bp in break_points:
+                if isinstance(bp, (bool, np.bool_)):
+                    raise TypeError(f"break points must be integers, got {bp!r}")
+                try:
+                    points.append(operator.index(bp))
+                except TypeError:
+                    raise TypeError(
+                        f"break points must be integers, got {bp!r}"
+                    ) from None
+            break_points = points
 
         T = self.nobs
 

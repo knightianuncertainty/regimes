@@ -19,8 +19,8 @@ used: for ``pi_0`` between 0.49 and 0.5 (almost a single candidate date) the
 ExpF statistic is doubled before it is referred to chi-squared, since it is
 half the statistic of that date; far in the tail, where the polynomials for
 ``q <= 3`` turn back, the p-value is held at its minimum; and a warning is
-issued for ``pi_0`` below 0.01, the smallest tabulated value, where the
-p-value for 0.01 is returned.
+issued by ``AndrewsPlobergerTest`` for ``pi_0`` below 0.01, the smallest
+tabulated value, where the p-value for 0.01 is returned.
 
 The range of candidate dates enters through
 
@@ -45,7 +45,6 @@ References
 
 from __future__ import annotations
 
-import warnings
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -65,6 +64,9 @@ _TABLES = {
     "exp": _hansen_tables.EXP,
     "ave": _hansen_tables.AVE,
 }
+
+
+SMALLEST_PI0 = 0.01
 
 
 def pi0_from_range(pi_1: float, pi_2: float) -> float:
@@ -170,15 +172,9 @@ def hansen_pvalue(statistic: float, q: int, pi0: float, kind: Kind) -> float:
     argument = np.maximum(argument, 0.0)
     tails = stats.chi2.sf(argument, beta[:, n_terms])
 
-    if pi0 < 0.01 - 1e-12:
-        warnings.warn(
-            f"pi_0 = {pi0:.4f} is below 0.01, the smallest value Hansen "
-            "(1997) tabulates; the p-value is that for pi_0 = 0.01 and is too "
-            "small (trimming of less than about 1 percent)",
-            UserWarning,
-            stacklevel=3,
-        )
     if pi0 <= 0.01:
+        # below the smallest tabulated value: the p-value for 0.01, which is
+        # too small (the caller warns)
         return float(tails[-1])
     if pi0 >= 0.49:
         return float(((0.5 - pi0) * tails[0] + (pi0 - 0.49) * chi2_tail) * 100.0)
