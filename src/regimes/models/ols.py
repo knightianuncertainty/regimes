@@ -8,7 +8,7 @@ errors using the Newey-West estimator.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import statsmodels.api as sm
@@ -84,7 +84,8 @@ class OLSResults(RegressionResultsBase):
     @property
     def sigma(self) -> float:
         """Residual standard error (sigma)."""
-        return np.sqrt(self.sigma_squared)
+        sigma: float = np.sqrt(self.sigma_squared)
+        return sigma
 
     @property
     def aic(self) -> float:
@@ -98,7 +99,8 @@ class OLSResults(RegressionResultsBase):
         """Bayesian Information Criterion."""
         if self.llf is None:
             return np.nan
-        return -2 * self.llf + np.log(self.nobs) * self.df_model
+        bic: float = -2 * self.llf + np.log(self.nobs) * self.df_model
+        return bic
 
     def _f_test(self) -> tuple[float, int]:
         """F statistic for overall significance and its numerator df.
@@ -561,13 +563,16 @@ class OLS(RegimesModelBase):
         indices.append((prev, self.nobs))
         return indices
 
-    def _create_break_design(self) -> tuple[NDArray[np.floating[Any]], list[str]]:
+    def _create_break_design(
+        self,
+    ) -> tuple[NDArray[np.floating[Any]] | None, list[str]]:
         """Create design matrix with regime-specific coefficients.
 
         Returns
         -------
-        tuple[NDArray[np.floating], list[str]]
+        tuple[NDArray[np.floating] | None, list[str]]
             Design matrix with regime interactions and parameter names.
+            The matrix is None when the model has no regressors.
         """
         if self.exog is None:
             return self.exog, self._exog_names
@@ -622,7 +627,7 @@ class OLS(RegimesModelBase):
         # Calculate total number of columns needed
         # For each variable: if it has breaks, num_regimes = len(breaks) + 1
         # Otherwise, just 1 column (no breaks)
-        columns = []
+        columns: list[NDArray[np.floating[Any]]] = []
         param_names = []
 
         for var_idx in range(k):
@@ -700,8 +705,10 @@ class OLS(RegimesModelBase):
 
         cov_kwds = cov_kwds or {}
 
-        # Create design matrix (with regime interactions if breaks specified)
-        X, param_names = self._create_break_design()
+        # Create design matrix (with regime interactions if breaks specified);
+        # it is not None, because exog is not None
+        design, param_names = self._create_break_design()
+        X = cast("NDArray[np.floating[Any]]", design)
         if self.breaks or self._variable_breaks:
             check_break_design(X, param_names)
 

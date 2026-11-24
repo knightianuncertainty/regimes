@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from numpy.typing import ArrayLike, NDArray
+    from typing_extensions import Self
 
 
 def split_constant(
@@ -127,7 +128,7 @@ class BreakTestBase(ABC):
     index_offset: int = 0
 
     @classmethod
-    def _create(cls, index_offset: int, *args: Any, **kwargs: Any) -> Any:
+    def _create(cls, index_offset: int, *args: Any, **kwargs: Any) -> Self:
         """Construct a test and record the offset of its first observation."""
         test = cls(*args, **kwargs)
         test.index_offset = int(index_offset)
@@ -171,7 +172,7 @@ class BreakTestBase(ABC):
         return len(self.endog)
 
     @abstractmethod
-    def fit(self, **kwargs: Any) -> BreakTestResultsBase:
+    def fit(self, *args: Any, **kwargs: Any) -> BreakTestResultsBase:
         """Perform the structural break test.
 
         Returns

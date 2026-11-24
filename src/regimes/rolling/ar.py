@@ -268,7 +268,7 @@ class RollingAR(RollingEstimatorBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -536,7 +536,7 @@ class RecursiveAR(RollingEstimatorBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms

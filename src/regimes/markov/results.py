@@ -123,12 +123,14 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
     @property
     def bic(self) -> float:
         """Bayesian Information Criterion."""
-        return -2 * self.llf + np.log(self.nobs) * self.df_model
+        bic: float = -2 * self.llf + np.log(self.nobs) * self.df_model
+        return bic
 
     @property
     def hqic(self) -> float:
         """Hannan-Quinn Information Criterion."""
-        return -2 * self.llf + 2 * np.log(np.log(self.nobs)) * self.df_model
+        hqic: float = -2 * self.llf + 2 * np.log(np.log(self.nobs)) * self.df_model
+        return hqic
 
     @property
     def tvalues(self) -> NDArray[np.floating[Any]]:
@@ -139,7 +141,10 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
     @property
     def pvalues(self) -> NDArray[np.floating[Any]]:
         """Two-sided p-values using normal distribution (MLE inference)."""
-        return 2 * (1 - stats.norm.cdf(np.abs(self.tvalues)))
+        pvalues: NDArray[np.floating[Any]] = 2 * (
+            1 - stats.norm.cdf(np.abs(self.tvalues))
+        )
+        return pvalues
 
     @property
     def expected_durations(self) -> NDArray[np.floating[Any]]:
@@ -163,7 +168,10 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
         NDArray[np.intp]
             Array of shape (nobs,) with regime indices (0-based).
         """
-        return np.argmax(self.smoothed_marginal_probabilities, axis=1)
+        regimes: NDArray[np.intp] = np.argmax(
+            self.smoothed_marginal_probabilities, axis=1
+        )
+        return regimes
 
     @property
     def regime_assignments(self) -> NDArray[np.intp]:
@@ -220,7 +228,7 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
             p-values, and confidence intervals.
         """
         ci = self.conf_int()
-        return pd.DataFrame(
+        frame: pd.DataFrame = pd.DataFrame(
             {
                 "coef": self.params,
                 "std_err": self.bse,
@@ -231,6 +239,7 @@ class MarkovSwitchingResultsBase(RegimesResultsBase):
             },
             index=self.param_names,
         )
+        return frame
 
     def summary(self) -> str:
         """Generate a text summary of Markov switching results.

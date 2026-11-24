@@ -56,7 +56,7 @@ Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -254,7 +254,11 @@ def _compute_recursive_residuals(
         )
 
     # From there on: the triangular factor of [X, y], updated row by row.
-    triangular = np.linalg.qr(np.column_stack([basis[:t], y[:t]]), mode="r")
+    # with mode="r" numpy returns the triangular factor alone (an array)
+    triangular = cast(
+        "NDArray[np.floating[Any]]",
+        np.linalg.qr(np.column_stack([basis[:t], y[:t]]), mode="r"),
+    )
     for s in range(t, T):
         r_xx = triangular[:k, :k]
         beta = np.linalg.solve(r_xx, triangular[:k, k])
@@ -264,8 +268,9 @@ def _compute_recursive_residuals(
         residuals.append(float(y[s] - x_s @ beta) / np.sqrt(f_s))
         scales.append(f_s)
         positions.append(s)
-        triangular = np.linalg.qr(
-            np.vstack([triangular, np.append(x_s, y[s])]), mode="r"
+        triangular = cast(
+            "NDArray[np.floating[Any]]",
+            np.linalg.qr(np.vstack([triangular, np.append(x_s, y[s])]), mode="r"),
         )
 
     return (
@@ -744,7 +749,8 @@ class CUSUMTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,
@@ -961,7 +967,8 @@ class CUSUMSQTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,
