@@ -34,7 +34,7 @@ pip install git+https://github.com/knightianuncertainty/regimes.git
 or a released version by its tag:
 
 ```bash
-pip install git+https://github.com/knightianuncertainty/regimes.git@v0.4.0
+pip install git+https://github.com/knightianuncertainty/regimes.git@v0.5.0
 ```
 
 For development, clone the repository and install it in editable mode:
