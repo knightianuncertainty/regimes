@@ -954,3 +954,14 @@ class TestSequentialProcedure:
         # a cycle
         cycle = np.array([[0.9, 0.0, 0.1], [0.1, 0.9, 0.0], [0.0, 0.1, 0.9]])
         assert not three._check_non_recurring(cycle)
+
+
+def test_differences_within_rounding_are_zero() -> None:
+    """Two fits of one optimum differ by about 1e-6 in the log-likelihood."""
+    lr = module._lr_statistic
+    assert lr(-100.0, -100.000001, "test") == 0.0
+    assert lr(-100.0, -100.00005, "test") == 0.0
+    assert lr(-100.000001, -100.0, "test") == 0.0
+    assert lr(-100.0, -100.001, "test") == pytest.approx(0.002)
+    with pytest.warns(UserWarning, match="was not maximized"):
+        assert lr(-100.01, -100.0, "test") == 0.0

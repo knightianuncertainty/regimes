@@ -91,7 +91,8 @@ _MODEL_TYPES = ("regression", "ar")
 _MULTIPLE_TESTING = ("holm", "bonferroni", "none")
 # Two fits of the same optimum differ by rounding in the optimizer. A larger
 # model whose log-likelihood is more than this below that of a model nested in
-# it was not maximized.
+# it was not maximized; a likelihood ratio statistic within twice this of
+# zero is zero.
 _NESTING_TOLERANCE = 1e-4
 
 
@@ -440,6 +441,13 @@ def _lr_statistic(llf_alternative: float, llf_null: float, what: str) -> float:
     when both are maximized. A shortfall beyond rounding means the
     alternative was not maximized; it is reported and the statistic is set
     to zero.
+
+    A difference within rounding of zero, in either direction, is zero: two
+    fits of the same optimum differ by about 1e-6 in the log-likelihood,
+    and a statistic of that size is the optimizer's noise, not evidence. In
+    samples from a non-recurring model the unrestricted estimate is often
+    non-recurring itself, so this is the common case under the null, and
+    without it a bootstrap would compare noise with noise.
     """
     if not np.isfinite(llf_alternative) or not np.isfinite(llf_null):
         raise RuntimeError(f"{what}: a model could not be estimated")
@@ -453,7 +461,9 @@ def _lr_statistic(llf_alternative: float, llf_null: float, what: str) -> float:
             UserWarning,
             stacklevel=3,
         )
-    return float(max(0.0, difference))
+    if difference <= 2.0 * _NESTING_TOLERANCE:
+        return 0.0
+    return float(difference)
 
 
 def _check_arguments(
