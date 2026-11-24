@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -1637,7 +1637,8 @@ class MarkovADL:
         ar_order = max(model.lags) if model.lags else 0
         instance = cls(
             endog=model.endog,
-            exog=model.exog,
+            # an ADL model always has regressors
+            exog=cast("NDArray[np.floating[Any]]", model.exog),
             k_regimes=k_regimes,
             ar_order=ar_order,
             exog_lags=model._exog_lags_raw,

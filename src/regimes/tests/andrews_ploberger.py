@@ -383,6 +383,7 @@ class AndrewsPlobergerTest(BreakTestBase):
         from regimes.models.ar import AR as ARModel
         from regimes.models.ols import OLS as OLSModel
 
+        exog_all: NDArray[np.floating[Any]] | None
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
             offset = int(model.maxlag)
@@ -417,14 +418,16 @@ class AndrewsPlobergerTest(BreakTestBase):
         """Number of breaking regressors (q)."""
         if self.exog_break is None:
             return 0
-        return self.exog_break.shape[1]
+        n_break: int = self.exog_break.shape[1]
+        return n_break
 
     @property
     def n_nonbreak_params(self) -> int:
         """Number of non-breaking regressors (p)."""
         if self.exog is None:
             return 0
-        return self.exog.shape[1]
+        n_nonbreak: int = self.exog.shape[1]
+        return n_nonbreak
 
     def _compute_ssr(
         self,
@@ -451,8 +454,8 @@ class AndrewsPlobergerTest(BreakTestBase):
 
     def _build_regressor_matrix(
         self,
-        start: int,
-        end: int,
+        start: int | np.integer[Any],
+        end: int | np.integer[Any],
     ) -> NDArray[np.floating[Any]]:
         """Build the full regressor matrix for a segment [start, end).
 

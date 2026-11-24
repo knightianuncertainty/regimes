@@ -6,7 +6,7 @@ recursive coefficient estimates over time with confidence bands.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -122,7 +122,7 @@ def plot_rolling_coefficients(
             else:
                 # Single axes provided
                 axes = np.array([[ax]])
-                fig = ax.get_figure()
+                fig = cast("Figure", cast("Axes", ax).get_figure())
 
         # Flatten axes for easy iteration
         axes_flat = axes.flatten()

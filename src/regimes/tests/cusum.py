@@ -56,7 +56,7 @@ Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -249,7 +249,7 @@ def _compute_recursive_residuals(
         j: np.eye(k)[j] for j in range(k)
     }
     # triangular factor of [X[:t, pivots], y[:t]]
-    triangular = np.zeros((1, 1))
+    triangular: NDArray[np.floating[Any]] = np.zeros((1, 1))
 
     complete_at = T
     for t in range(T):
@@ -277,8 +277,8 @@ def _compute_recursive_residuals(
                     dependencies[j] - (value_at[j] / value_at[broken]) * n_star
                 )
             pivots.append(broken)
-            triangular = np.linalg.qr(
-                np.column_stack([X[: t + 1][:, pivots], y[: t + 1]]), mode="r"
+            triangular = _triangular_factor(
+                np.column_stack([X[: t + 1][:, pivots], y[: t + 1]])
             )
             continue
 
@@ -295,8 +295,8 @@ def _compute_recursive_residuals(
         residuals.append((y[t] - prediction) / np.sqrt(f_t))
         scales.append(f_t)
         positions.append(t)
-        triangular = np.linalg.qr(
-            np.vstack([triangular, np.append(x_t[pivots], y[t])]), mode="r"
+        triangular = _triangular_factor(
+            np.vstack([triangular, np.append(x_t[pivots], y[t])])
         )
 
     if len(pivots) < k:
@@ -347,6 +347,12 @@ def _compute_recursive_residuals(
     )
 
 
+def _triangular_factor(a: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
+    """The triangular factor of a QR decomposition of ``a``."""
+    # with mode="r" numpy returns the factor alone (an array, not a tuple)
+    return cast("NDArray[np.floating[Any]]", np.linalg.qr(a, mode="r"))
+
+
 def _complete_rank_residuals(
     Z: NDArray[np.floating[Any]], y: NDArray[np.floating[Any]], first: int
 ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
@@ -358,7 +364,7 @@ def _complete_rank_residuals(
     T, k = Z.shape
     w = np.empty(T - first)
     f = np.empty(T - first)
-    triangular = np.linalg.qr(np.column_stack([Z[:first], y[:first]]), mode="r")
+    triangular = _triangular_factor(np.column_stack([Z[:first], y[:first]]))
     if triangular.shape[0] < k + 1:
         # exactly as many observations as columns: no row for y yet
         triangular = np.vstack([triangular, np.zeros((1, k + 1))])
@@ -370,9 +376,7 @@ def _complete_rank_residuals(
         f_t = 1.0 + float(v @ v)
         w[t - first] = (y[t] - prediction) / np.sqrt(f_t)
         f[t - first] = f_t
-        triangular = np.linalg.qr(
-            np.vstack([triangular, np.append(z_t, y[t])]), mode="r"
-        )
+        triangular = _triangular_factor(np.vstack([triangular, np.append(z_t, y[t])]))
     return w, f
 
 
@@ -852,7 +856,8 @@ class CUSUMTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,
@@ -1069,7 +1074,8 @@ class CUSUMSQTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,

@@ -392,7 +392,7 @@ class RollingADL(RollingEstimatorBase):
         y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -743,7 +743,7 @@ class RecursiveADL(RollingEstimatorBase):
         y = self._endog_full[self.maxlag :]
         n_eff = len(y)
 
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms

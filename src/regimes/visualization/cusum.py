@@ -6,7 +6,7 @@ results, following the regimes PLOTTING_STYLE.md specification (Section 4.4).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -80,7 +80,7 @@ def plot_cusum(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         n = len(results.statistic_path)
         x = results.observations
@@ -147,7 +147,7 @@ def plot_cusum(
         ax.set_ylabel(ylabel)
         ax.legend(loc="best", frameon=False)
 
-    return fig, ax  # type: ignore[return-value]
+    return fig, ax
 
 
 def plot_cusum_sq(
@@ -219,7 +219,7 @@ def plot_cusum_sq(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         n = len(results.statistic_path)
         x = results.observations
@@ -271,13 +271,15 @@ def plot_cusum_sq(
                 alpha=rejection_alpha,
                 color=bound_color,
             )
+            # Any: some matplotlib stubs want a Sequence[bool] for `where`
+            lower_positive: Any = results.lower_bound > 0
             ax.fill_between(
                 x,
                 np.zeros(n),
                 results.lower_bound,
                 alpha=rejection_alpha,
                 color=bound_color,
-                where=results.lower_bound > 0,
+                where=lower_positive,
             )
 
         # Mark the first boundary crossing
@@ -296,4 +298,4 @@ def plot_cusum_sq(
         ax.set_ylabel(ylabel)
         ax.legend(loc="best", frameon=False)
 
-    return fig, ax  # type: ignore[return-value]
+    return fig, ax

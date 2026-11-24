@@ -263,6 +263,7 @@ class ChowTest(BreakTestBase):
         from regimes.models.ols import OLS as OLSModel
 
         # Extract endog and exog from model
+        exog_all: NDArray[np.floating[Any]] | None
         if isinstance(model, (AR, ADLModel)):
             y, X, _ = model._build_design_matrix()
             offset = int(model.maxlag)
@@ -297,14 +298,16 @@ class ChowTest(BreakTestBase):
         """Number of breaking regressors (k)."""
         if self.exog_break is None:
             return 0
-        return self.exog_break.shape[1]
+        n_break: int = self.exog_break.shape[1]
+        return n_break
 
     @property
     def n_nonbreak_params(self) -> int:
         """Number of non-breaking regressors."""
         if self.exog is None:
             return 0
-        return self.exog.shape[1]
+        n_nonbreak: int = self.exog.shape[1]
+        return n_nonbreak
 
     def _build_regressor_matrix(
         self,
