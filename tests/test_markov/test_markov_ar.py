@@ -6,6 +6,7 @@ import warnings
 from typing import Any
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.models import MarkovAR
@@ -106,3 +107,46 @@ class TestMarkovARConvenience:
 
         assert isinstance(results, MarkovARResults)
         assert results.k_regimes == 2
+
+
+class TestSwitchingVarianceHigherOrder:
+    """``order >= 2`` with ``switching_variance=True`` (a statsmodels defect)."""
+
+    def test_variance_follows_the_current_regime(self) -> None:
+        """``MarkovAR`` estimates with the corrected likelihood.
+
+        statsmodels 0.14 and 0.15 give the variance of period ``t`` to the
+        regime of period ``t - order + 1``. That the corrected class has the
+        right likelihood is checked against a direct sum over regime paths
+        in ``test_simulate.py``; an estimate on a long series with
+        persistent regimes is close under either likelihood, so the
+        assertion that matters here is that ``MarkovAR`` builds the
+        corrected class. The other assertions check that estimation works.
+        """
+        from regimes.markov.models import _SMMarkovAutoregression
+
+        rng = np.random.default_rng(5)
+        n = 400
+        sigma = np.where(np.arange(n) < n // 2, 0.3, 2.0)
+        y = np.zeros(n)
+        for t in range(2, n):
+            y[t] = 0.4 * y[t - 1] - 0.2 * y[t - 2] + sigma[t] * rng.standard_normal()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = MarkovAR(
+                y,
+                k_regimes=2,
+                order=2,
+                switching_ar=False,
+                switching_trend=False,
+                switching_variance=True,
+            ).fit(search_reps=3)
+        assert isinstance(results._sm_results.model, _SMMarkovAutoregression)
+        variances = sorted(results.regime_params[j]["sigma2"] for j in (0, 1))
+        assert variances[0] == pytest.approx(0.09, rel=0.35)
+        assert variances[1] == pytest.approx(4.0, rel=0.35)
+        # the regime path follows the variance, period by period
+        noisy = int(np.argmax([results.regime_params[j]["sigma2"] for j in (0, 1)]))
+        prob_noisy = np.asarray(results.smoothed_marginal_probabilities)[:, noisy]
+        assert prob_noisy[: n // 2 - 30].mean() < 0.1
+        assert prob_noisy[n // 2 + 10 :].mean() > 0.9
