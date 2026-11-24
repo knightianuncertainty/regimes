@@ -22,7 +22,7 @@ class TestRecursiveResiduals:
         X = np.column_stack([np.ones(T), rng.standard_normal((T, k - 1))])
         y = X @ rng.standard_normal(k) + rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert len(w) == T - k
         assert len(f) == T - k
@@ -34,7 +34,7 @@ class TestRecursiveResiduals:
         beta = np.array([1.0, 2.0])
         y = X @ beta + rng.standard_normal(T) * 0.5
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         # Mean should be close to zero (not exact due to finite sample)
         assert abs(np.mean(w)) < 0.3
@@ -45,7 +45,7 @@ class TestRecursiveResiduals:
         X = np.column_stack([np.ones(T), rng.standard_normal(T)])
         y = rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert np.all(f > 1.0)
 
@@ -55,7 +55,7 @@ class TestRecursiveResiduals:
         X = np.ones((T, 1))
         y = 3.0 + rng.standard_normal(T)
 
-        w, f = _compute_recursive_residuals(y, X)
+        w, f, _positions = _compute_recursive_residuals(y, X)
 
         assert len(w) == T - 1
         assert len(f) == T - 1
@@ -96,7 +96,9 @@ class TestCUSUMBasic:
 
         assert results.reject
         assert not results.is_stable
-        assert results.n_breaks >= 1
+        assert results.first_crossing is not None
+        # a crossing is not an estimate of the break date
+        assert results.n_breaks == 0
 
     def test_statistic_path_shape(self, rng: np.random.Generator) -> None:
         """Statistic path should have length T - k."""
@@ -509,21 +511,24 @@ class TestCUSUMEdgeCases:
         y = rng.standard_normal(100)
         test = CUSUMSQTest(y)
 
-        with pytest.raises(ValueError, match="significance must be in"):
+        with pytest.raises(ValueError, match="significance must be one of"):
             test.fit(significance=0.0)
 
-        with pytest.raises(ValueError, match="significance must be in"):
+        with pytest.raises(ValueError, match="significance must be one of"):
             test.fit(significance=1.0)
 
-    def test_cusumsq_any_significance(self, rng: np.random.Generator) -> None:
-        """CUSUM-SQ should accept any significance in (0, 1)."""
+    def test_cusumsq_tabulated_significance(self, rng: np.random.Generator) -> None:
+        """CUSUM-SQ accepts the levels for which the bounds are tabulated."""
         y = rng.standard_normal(100)
         test = CUSUMSQTest(y)
 
-        # These should all work
-        for sig in [0.001, 0.025, 0.05, 0.10, 0.20, 0.50]:
+        widths = []
+        for sig in [0.20, 0.10, 0.05, 0.02, 0.01]:
             results = test.fit(significance=sig)
             assert results.significance == sig
+            widths.append(results.critical_value)
+        # stricter levels have wider bounds
+        assert widths == sorted(widths)
 
     def test_crossing_indices_empty_when_stable(self, rng: np.random.Generator) -> None:
         """crossing_indices should be empty when stable."""

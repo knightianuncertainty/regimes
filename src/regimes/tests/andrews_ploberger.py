@@ -1,32 +1,68 @@
-"""Andrews-Ploberger test for a single structural break at unknown date.
+"""Andrews-Ploberger tests for a single structural break at an unknown date.
 
-This module implements the Andrews (1993) SupF test and the Andrews-Ploberger
-(1994) ExpF and AveF tests. All three statistics are computed from the same
-sequence of F-statistics evaluated at every candidate break date in a trimmed
-range.
+This module implements the SupF test of Andrews (1993) and the ExpF and
+AveF tests of Andrews and Ploberger (1994). All three are functions of one
+sequence of statistics, one for every candidate break date ``tau`` in a
+trimmed range:
 
-- **SupF**: max F(τ) — powerful against a single sharp break
-- **ExpF**: ln[(1/T*) Σ exp(½ F(τ))] — optimal Bayesian average power
-- **AveF**: (1/T*) Σ F(τ) — simple average, detects diffuse instability
+    F(tau) = (SSR_0 - SSR_1(tau)) / (SSR_1(tau) / (T - 2q - p))
+
+where ``SSR_0`` is the sum of squared residuals without a break,
+``SSR_1(tau)`` the sum with a break at ``tau`` in the ``q`` breaking
+coefficients, and ``p`` the number of coefficients that do not break.
+``F(tau)`` is ``q`` times the classical Chow F statistic: it is "scaled by
+q", not divided by it, and is asymptotically chi-squared with ``q`` degrees
+of freedom at a given date. That is the scale on which the three statistics
+are defined in the literature and tabulated:
+
+- **SupF**: ``max F(tau)``
+- **ExpF**: ``ln[ mean( exp(F(tau) / 2) ) ]``
+- **AveF**: ``mean F(tau)``
+
+P-values are the approximate asymptotic p-values of Hansen (1997); critical
+values are obtained by inverting them. They are available for up to 40
+breaking coefficients and for any trimming. The same statistic and scaling
+are used by ``BaiPerronTest`` for one break (with ``hetvar=False``).
+
+The statistics assume homoskedastic, serially uncorrelated errors.
 
 References
 ----------
 Andrews, D. W. K. (1993). Tests for parameter instability and structural
     change with unknown change point. Econometrica, 61(4), 821-856.
+    (Corrigendum: Econometrica, 71(1), 2003, 395-397.)
 
 Andrews, D. W. K. & Ploberger, W. (1994). Optimal tests when a nuisance
     parameter is present only under the alternative. Econometrica, 62(6),
     1383-1414.
+
+Hansen, B. E. (1997). Approximate asymptotic p values for structural-change
+    tests. Journal of Business and Economic Statistics, 15(1), 60-67.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase
+from regimes.tests._bp_core import independent_columns
+from regimes.tests._hansen_pvalues import (
+    MAX_Q,
+    SMALLEST_PI0,
+    hansen_critical_value,
+    hansen_pvalue,
+    pi0_from_range,
+)
+from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+
+# A sum of squared residuals this small relative to y'y is rounding error:
+# the model fits exactly and the statistic is not defined. (The threshold
+# is far below the residual variance of any series with noise, also when
+# its mean is large.)
+_EXACT_FIT = 1e-24
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike, NDArray
@@ -35,238 +71,7 @@ if TYPE_CHECKING:
     from regimes.models.ar import AR
     from regimes.models.ols import OLS
 
-# ---------------------------------------------------------------------------
-# Critical value tables
-# ---------------------------------------------------------------------------
-# Source: Andrews (1993) Table 1, Andrews & Ploberger (1994) Table 1.
-# Keys: (q, pi0) where q = number of breaking parameters, pi0 = trimming.
-# Values: {significance_level: critical_value}.
-
-_SUPF_CRITICAL_VALUES: dict[tuple[int, float], dict[float, float]] = {
-    # q=1
-    (1, 0.05): {0.10: 11.47, 0.05: 13.97, 0.01: 19.30},
-    (1, 0.10): {0.10: 9.63, 0.05: 11.70, 0.01: 16.19},
-    (1, 0.15): {0.10: 8.68, 0.05: 10.55, 0.01: 14.51},
-    (1, 0.20): {0.10: 8.06, 0.05: 9.63, 0.01: 12.82},
-    # q=2
-    (2, 0.05): {0.10: 13.78, 0.05: 16.16, 0.01: 21.42},
-    (2, 0.10): {0.10: 11.80, 0.05: 13.86, 0.01: 18.42},
-    (2, 0.15): {0.10: 10.69, 0.05: 12.57, 0.01: 16.56},
-    (2, 0.20): {0.10: 10.01, 0.05: 11.68, 0.01: 15.06},
-    # q=3
-    (3, 0.05): {0.10: 15.85, 0.05: 18.17, 0.01: 23.46},
-    (3, 0.10): {0.10: 13.69, 0.05: 15.72, 0.01: 20.30},
-    (3, 0.15): {0.10: 12.49, 0.05: 14.30, 0.01: 18.35},
-    (3, 0.20): {0.10: 11.69, 0.05: 13.41, 0.01: 17.05},
-    # q=4
-    (4, 0.05): {0.10: 17.71, 0.05: 20.08, 0.01: 25.32},
-    (4, 0.10): {0.10: 15.41, 0.05: 17.44, 0.01: 22.12},
-    (4, 0.15): {0.10: 14.11, 0.05: 15.98, 0.01: 19.99},
-    (4, 0.20): {0.10: 13.30, 0.05: 14.98, 0.01: 18.60},
-    # q=5
-    (5, 0.05): {0.10: 19.49, 0.05: 21.84, 0.01: 27.14},
-    (5, 0.10): {0.10: 17.07, 0.05: 19.11, 0.01: 23.72},
-    (5, 0.15): {0.10: 15.63, 0.05: 17.54, 0.01: 21.55},
-    (5, 0.20): {0.10: 14.77, 0.05: 16.49, 0.01: 20.16},
-    # q=6
-    (6, 0.05): {0.10: 21.15, 0.05: 23.54, 0.01: 28.84},
-    (6, 0.10): {0.10: 18.63, 0.05: 20.68, 0.01: 25.28},
-    (6, 0.15): {0.10: 17.15, 0.05: 18.97, 0.01: 23.06},
-    (6, 0.20): {0.10: 16.15, 0.05: 17.94, 0.01: 21.51},
-    # q=7
-    (7, 0.05): {0.10: 22.75, 0.05: 25.17, 0.01: 30.45},
-    (7, 0.10): {0.10: 20.15, 0.05: 22.23, 0.01: 26.80},
-    (7, 0.15): {0.10: 18.55, 0.05: 20.43, 0.01: 24.50},
-    (7, 0.20): {0.10: 17.49, 0.05: 19.29, 0.01: 22.97},
-    # q=8
-    (8, 0.05): {0.10: 24.28, 0.05: 26.69, 0.01: 32.04},
-    (8, 0.10): {0.10: 21.58, 0.05: 23.68, 0.01: 28.27},
-    (8, 0.15): {0.10: 19.91, 0.05: 21.84, 0.01: 25.84},
-    (8, 0.20): {0.10: 18.81, 0.05: 20.57, 0.01: 24.40},
-    # q=9
-    (9, 0.05): {0.10: 25.73, 0.05: 28.18, 0.01: 33.53},
-    (9, 0.10): {0.10: 22.99, 0.05: 25.08, 0.01: 29.70},
-    (9, 0.15): {0.10: 21.23, 0.05: 23.17, 0.01: 27.22},
-    (9, 0.20): {0.10: 20.06, 0.05: 21.88, 0.01: 25.70},
-    # q=10
-    (10, 0.05): {0.10: 27.18, 0.05: 29.60, 0.01: 34.97},
-    (10, 0.10): {0.10: 24.34, 0.05: 26.45, 0.01: 31.11},
-    (10, 0.15): {0.10: 22.53, 0.05: 24.44, 0.01: 28.54},
-    (10, 0.20): {0.10: 21.28, 0.05: 23.10, 0.01: 26.90},
-}
-
-_EXPF_CRITICAL_VALUES: dict[tuple[int, float], dict[float, float]] = {
-    # q=1
-    (1, 0.05): {0.10: 3.15, 0.05: 4.39, 0.01: 7.08},
-    (1, 0.10): {0.10: 2.72, 0.05: 3.78, 0.01: 6.13},
-    (1, 0.15): {0.10: 2.51, 0.05: 3.42, 0.01: 5.48},
-    (1, 0.20): {0.10: 2.36, 0.05: 3.16, 0.01: 4.88},
-    # q=2
-    (2, 0.05): {0.10: 4.39, 0.05: 5.67, 0.01: 8.47},
-    (2, 0.10): {0.10: 3.76, 0.05: 4.87, 0.01: 7.34},
-    (2, 0.15): {0.10: 3.40, 0.05: 4.38, 0.01: 6.48},
-    (2, 0.20): {0.10: 3.16, 0.05: 4.03, 0.01: 5.82},
-    # q=3
-    (3, 0.05): {0.10: 5.45, 0.05: 6.78, 0.01: 9.62},
-    (3, 0.10): {0.10: 4.71, 0.05: 5.82, 0.01: 8.30},
-    (3, 0.15): {0.10: 4.23, 0.05: 5.23, 0.01: 7.32},
-    (3, 0.20): {0.10: 3.92, 0.05: 4.80, 0.01: 6.67},
-    # q=4
-    (4, 0.05): {0.10: 6.44, 0.05: 7.78, 0.01: 10.69},
-    (4, 0.10): {0.10: 5.57, 0.05: 6.74, 0.01: 9.23},
-    (4, 0.15): {0.10: 5.03, 0.05: 6.03, 0.01: 8.14},
-    (4, 0.20): {0.10: 4.65, 0.05: 5.55, 0.01: 7.38},
-    # q=5
-    (5, 0.05): {0.10: 7.35, 0.05: 8.73, 0.01: 11.68},
-    (5, 0.10): {0.10: 6.40, 0.05: 7.57, 0.01: 10.09},
-    (5, 0.15): {0.10: 5.77, 0.05: 6.82, 0.01: 8.99},
-    (5, 0.20): {0.10: 5.33, 0.05: 6.28, 0.01: 8.10},
-    # q=6
-    (6, 0.05): {0.10: 8.22, 0.05: 9.61, 0.01: 12.60},
-    (6, 0.10): {0.10: 7.17, 0.05: 8.37, 0.01: 10.92},
-    (6, 0.15): {0.10: 6.48, 0.05: 7.54, 0.01: 9.79},
-    (6, 0.20): {0.10: 5.98, 0.05: 6.97, 0.01: 8.83},
-    # q=7
-    (7, 0.05): {0.10: 9.07, 0.05: 10.47, 0.01: 13.49},
-    (7, 0.10): {0.10: 7.93, 0.05: 9.14, 0.01: 11.73},
-    (7, 0.15): {0.10: 7.16, 0.05: 8.25, 0.01: 10.51},
-    (7, 0.20): {0.10: 6.62, 0.05: 7.64, 0.01: 9.55},
-    # q=8
-    (8, 0.05): {0.10: 9.88, 0.05: 11.31, 0.01: 14.33},
-    (8, 0.10): {0.10: 8.66, 0.05: 9.88, 0.01: 12.49},
-    (8, 0.15): {0.10: 7.84, 0.05: 8.93, 0.01: 11.26},
-    (8, 0.20): {0.10: 7.23, 0.05: 8.27, 0.01: 10.24},
-    # q=9
-    (9, 0.05): {0.10: 10.67, 0.05: 12.11, 0.01: 15.16},
-    (9, 0.10): {0.10: 9.37, 0.05: 10.60, 0.01: 13.24},
-    (9, 0.15): {0.10: 8.49, 0.05: 9.60, 0.01: 11.96},
-    (9, 0.20): {0.10: 7.84, 0.05: 8.88, 0.01: 10.95},
-    # q=10
-    (10, 0.05): {0.10: 11.44, 0.05: 12.90, 0.01: 15.94},
-    (10, 0.10): {0.10: 10.06, 0.05: 11.32, 0.01: 13.96},
-    (10, 0.15): {0.10: 9.14, 0.05: 10.24, 0.01: 12.60},
-    (10, 0.20): {0.10: 8.43, 0.05: 9.49, 0.01: 11.62},
-}
-
-_AVEF_CRITICAL_VALUES: dict[tuple[int, float], dict[float, float]] = {
-    # q=1
-    (1, 0.05): {0.10: 4.12, 0.05: 5.47, 0.01: 8.48},
-    (1, 0.10): {0.10: 3.58, 0.05: 4.71, 0.01: 7.28},
-    (1, 0.15): {0.10: 3.26, 0.05: 4.26, 0.01: 6.47},
-    (1, 0.20): {0.10: 3.04, 0.05: 3.91, 0.01: 5.77},
-    # q=2
-    (2, 0.05): {0.10: 5.55, 0.05: 6.92, 0.01: 10.01},
-    (2, 0.10): {0.10: 4.76, 0.05: 5.95, 0.01: 8.63},
-    (2, 0.15): {0.10: 4.30, 0.05: 5.34, 0.01: 7.62},
-    (2, 0.20): {0.10: 3.98, 0.05: 4.90, 0.01: 6.84},
-    # q=3
-    (3, 0.05): {0.10: 6.82, 0.05: 8.22, 0.01: 11.35},
-    (3, 0.10): {0.10: 5.86, 0.05: 7.05, 0.01: 9.77},
-    (3, 0.15): {0.10: 5.28, 0.05: 6.34, 0.01: 8.65},
-    (3, 0.20): {0.10: 4.87, 0.05: 5.80, 0.01: 7.82},
-    # q=4
-    (4, 0.05): {0.10: 7.98, 0.05: 9.43, 0.01: 12.59},
-    (4, 0.10): {0.10: 6.89, 0.05: 8.10, 0.01: 10.83},
-    (4, 0.15): {0.10: 6.21, 0.05: 7.27, 0.01: 9.59},
-    (4, 0.20): {0.10: 5.72, 0.05: 6.65, 0.01: 8.73},
-    # q=5
-    (5, 0.05): {0.10: 9.10, 0.05: 10.57, 0.01: 13.78},
-    (5, 0.10): {0.10: 7.85, 0.05: 9.11, 0.01: 11.86},
-    (5, 0.15): {0.10: 7.07, 0.05: 8.18, 0.01: 10.50},
-    (5, 0.20): {0.10: 6.50, 0.05: 7.49, 0.01: 9.55},
-    # q=6
-    (6, 0.05): {0.10: 10.17, 0.05: 11.67, 0.01: 14.91},
-    (6, 0.10): {0.10: 8.78, 0.05: 10.06, 0.01: 12.84},
-    (6, 0.15): {0.10: 7.91, 0.05: 9.04, 0.01: 11.38},
-    (6, 0.20): {0.10: 7.28, 0.05: 8.28, 0.01: 10.35},
-    # q=7
-    (7, 0.05): {0.10: 11.21, 0.05: 12.74, 0.01: 15.99},
-    (7, 0.10): {0.10: 9.69, 0.05: 10.98, 0.01: 13.78},
-    (7, 0.15): {0.10: 8.73, 0.05: 9.87, 0.01: 12.25},
-    (7, 0.20): {0.10: 8.02, 0.05: 9.06, 0.01: 11.14},
-    # q=8
-    (8, 0.05): {0.10: 12.21, 0.05: 13.77, 0.01: 17.05},
-    (8, 0.10): {0.10: 10.56, 0.05: 11.88, 0.01: 14.68},
-    (8, 0.15): {0.10: 9.52, 0.05: 10.68, 0.01: 13.06},
-    (8, 0.20): {0.10: 8.74, 0.05: 9.78, 0.01: 11.91},
-    # q=9
-    (9, 0.05): {0.10: 13.19, 0.05: 14.77, 0.01: 18.03},
-    (9, 0.10): {0.10: 11.43, 0.05: 12.76, 0.01: 15.58},
-    (9, 0.15): {0.10: 10.28, 0.05: 11.48, 0.01: 13.88},
-    (9, 0.20): {0.10: 9.45, 0.05: 10.51, 0.01: 12.65},
-    # q=10
-    (10, 0.05): {0.10: 14.13, 0.05: 15.74, 0.01: 18.99},
-    (10, 0.10): {0.10: 12.26, 0.05: 13.62, 0.01: 16.43},
-    (10, 0.15): {0.10: 11.03, 0.05: 12.24, 0.01: 14.68},
-    (10, 0.20): {0.10: 10.14, 0.05: 11.23, 0.01: 13.40},
-}
-
-
-def _lookup_critical_values(
-    table: dict[tuple[int, float], dict[float, float]],
-    q: int,
-    pi0: float,
-) -> dict[float, float]:
-    """Look up critical values for given q and trimming.
-
-    If exact (q, pi0) is not in the table, uses the nearest available
-    trimming for that q, or the largest available q if q > 10.
-
-    Parameters
-    ----------
-    table : dict
-        One of the three CV tables.
-    q : int
-        Number of breaking parameters.
-    pi0 : float
-        Trimming fraction.
-
-    Returns
-    -------
-    dict[float, float]
-        {significance_level: critical_value} for 0.10, 0.05, 0.01.
-    """
-    q_eff = min(max(q, 1), 10)
-
-    available_pi0 = sorted({k[1] for k in table if k[0] == q_eff})
-    if not available_pi0:
-        return {0.10: np.nan, 0.05: np.nan, 0.01: np.nan}
-
-    # Find nearest trimming
-    best_pi0 = min(available_pi0, key=lambda p: abs(p - pi0))
-    return table[(q_eff, best_pi0)]
-
-
-def _coarse_pvalue(stat: float, critical_dict: dict[float, float]) -> float:
-    """Compute a coarse p-value from critical value comparison.
-
-    Parameters
-    ----------
-    stat : float
-        Test statistic value.
-    critical_dict : dict[float, float]
-        {significance_level: critical_value}.
-
-    Returns
-    -------
-    float
-        Approximate p-value: < 0.01 returns 0.005, < 0.05 returns 0.025,
-        < 0.10 returns 0.075, otherwise 0.20.
-    """
-    if np.isnan(stat):
-        return np.nan
-    cv_01 = critical_dict.get(0.01, np.inf)
-    cv_05 = critical_dict.get(0.05, np.inf)
-    cv_10 = critical_dict.get(0.10, np.inf)
-
-    if stat >= cv_01:
-        return 0.005
-    elif stat >= cv_05:
-        return 0.025
-    elif stat >= cv_10:
-        return 0.075
-    else:
-        return 0.20
+_TABULATED_LEVELS = (0.10, 0.05, 0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +81,11 @@ def _coarse_pvalue(stat: float, critical_dict: dict[float, float]) -> float:
 
 @dataclass
 class AndrewsPlobergerResults(BreakTestResultsBase):
-    """Results from the Andrews-Ploberger structural break test.
+    """Results from the Andrews-Ploberger structural break tests.
 
     Contains three test statistics (SupF, ExpF, AveF) computed from the
-    same F-statistic sequence, along with critical values and approximate
-    p-values.
+    same sequence ``F(tau)``, with the p-values of Hansen (1997) and the
+    critical values implied by them.
 
     Attributes
     ----------
@@ -289,35 +94,43 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
     nobs : int
         Number of observations.
     n_breaks : int
-        Number of breaks detected (0 or 1).
+        1 if the SupF test rejects, otherwise 0.
     break_indices : Sequence[int]
-        Break index (argmax of F-sequence) if any statistic rejects.
+        The date that maximizes ``F(tau)`` if the SupF test rejects,
+        otherwise empty. (The date belongs to the SupF test: ExpF and AveF
+        are averages over dates and do not point to one.)
     sup_f : float
-        SupF statistic (maximum of F-sequence).
+        SupF statistic (maximum of the sequence).
     exp_f : float
-        ExpF statistic (log of average of exp(F/2)).
+        ExpF statistic (log of the average of ``exp(F / 2)``).
     ave_f : float
-        AveF statistic (average of F-sequence).
+        AveF statistic (average of the sequence).
     sup_f_critical : dict[float, float]
-        Critical values for SupF at 10%, 5%, 1%.
+        Critical values for SupF at 10%, 5%, 1% and at
+        ``significance_level``.
     exp_f_critical : dict[float, float]
-        Critical values for ExpF at 10%, 5%, 1%.
+        Critical values for ExpF.
     ave_f_critical : dict[float, float]
-        Critical values for AveF at 10%, 5%, 1%.
+        Critical values for AveF.
     sup_f_pvalue : float
-        Approximate p-value for SupF.
+        Asymptotic p-value for SupF (Hansen, 1997).
     exp_f_pvalue : float
-        Approximate p-value for ExpF.
+        Asymptotic p-value for ExpF.
     ave_f_pvalue : float
-        Approximate p-value for AveF.
+        Asymptotic p-value for AveF.
     f_sequence : NDArray[np.floating]
-        F-statistic at each candidate break date.
+        ``F(tau)`` at each candidate break date, scaled by ``q`` (see the
+        module docstring).
     candidate_indices : NDArray[np.intp]
-        Observation indices corresponding to each F-statistic.
+        Candidate break dates: ``tau`` is the first observation of the
+        second regime.
     sup_f_break_index : int
-        Estimated break date (argmax of F-sequence).
+        The date that maximizes ``F(tau)``, whether or not the test
+        rejects.
     trimming : float
-        Trimming fraction used.
+        Trimming fraction requested.
+    pi0 : float
+        Andrews' ``pi_0`` for the range of candidate dates actually used.
     q : int
         Number of breaking parameters.
     p : int
@@ -343,6 +156,7 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
     )
     sup_f_break_index: int = 0
     trimming: float = 0.15
+    pi0: float = np.nan
     q: int = 0
     p: int = 0
     significance_level: float = 0.05
@@ -353,9 +167,9 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
         """Whether H0 was rejected for each test statistic."""
         alpha = self.significance_level
         return {
-            "SupF": self.sup_f_pvalue < alpha,
-            "ExpF": self.exp_f_pvalue < alpha,
-            "AveF": self.ave_f_pvalue < alpha,
+            "SupF": bool(self.sup_f_pvalue < alpha),
+            "ExpF": bool(self.exp_f_pvalue < alpha),
+            "AveF": bool(self.ave_f_pvalue < alpha),
         }
 
     def plot(
@@ -396,14 +210,14 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
         alpha = self.significance_level
         lines = []
         lines.append("=" * 78)
-        lines.append(f"{'Andrews-Ploberger Structural Break Test':^78}")
+        lines.append(f"{'Andrews-Ploberger Structural Break Tests':^78}")
         lines.append("=" * 78)
         lines.append(f"Number of observations:   {self.nobs:>10}")
         lines.append(f"Breaking parameters (q):  {self.q:>10}")
         lines.append(f"Non-breaking params (p):  {self.p:>10}")
         lines.append(f"Trimming:                 {self.trimming:>10.2f}")
         lines.append(f"Significance level:       {self.significance_level:>10.3f}")
-        lines.append(f"Estimated break date:     {self.sup_f_break_index:>10}")
+        lines.append(f"Date of the largest F:    {self.sup_f_break_index:>10}")
         lines.append("-" * 78)
 
         # Header row
@@ -414,63 +228,42 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
         )
         lines.append("-" * 78)
 
-        # SupF row
-        cv10 = self.sup_f_critical.get(0.10, np.nan)
-        cv05 = self.sup_f_critical.get(0.05, np.nan)
-        cv01 = self.sup_f_critical.get(0.01, np.nan)
-        reject_sup = "Yes" if self.sup_f_pvalue < alpha else "No"
-        pv_str = _format_pvalue(self.sup_f_pvalue)
-        lines.append(
-            f"{'SupF':>12} {self.sup_f:>12.4f} "
-            f"{cv10:>10.2f} {cv05:>10.2f} {cv01:>10.2f} "
-            f"{pv_str:>10} {reject_sup:>8}"
+        rows = (
+            ("SupF", self.sup_f, self.sup_f_critical, self.sup_f_pvalue),
+            ("ExpF", self.exp_f, self.exp_f_critical, self.exp_f_pvalue),
+            ("AveF", self.ave_f, self.ave_f_critical, self.ave_f_pvalue),
         )
-
-        # ExpF row
-        cv10 = self.exp_f_critical.get(0.10, np.nan)
-        cv05 = self.exp_f_critical.get(0.05, np.nan)
-        cv01 = self.exp_f_critical.get(0.01, np.nan)
-        reject_exp = "Yes" if self.exp_f_pvalue < alpha else "No"
-        pv_str = _format_pvalue(self.exp_f_pvalue)
-        lines.append(
-            f"{'ExpF':>12} {self.exp_f:>12.4f} "
-            f"{cv10:>10.2f} {cv05:>10.2f} {cv01:>10.2f} "
-            f"{pv_str:>10} {reject_exp:>8}"
-        )
-
-        # AveF row
-        cv10 = self.ave_f_critical.get(0.10, np.nan)
-        cv05 = self.ave_f_critical.get(0.05, np.nan)
-        cv01 = self.ave_f_critical.get(0.01, np.nan)
-        reject_ave = "Yes" if self.ave_f_pvalue < alpha else "No"
-        pv_str = _format_pvalue(self.ave_f_pvalue)
-        lines.append(
-            f"{'AveF':>12} {self.ave_f:>12.4f} "
-            f"{cv10:>10.2f} {cv05:>10.2f} {cv01:>10.2f} "
-            f"{pv_str:>10} {reject_ave:>8}"
-        )
+        for name, value, critical, pvalue in rows:
+            cv10 = critical.get(0.10, np.nan)
+            cv05 = critical.get(0.05, np.nan)
+            cv01 = critical.get(0.01, np.nan)
+            reject = "Yes" if pvalue < alpha else "No"
+            lines.append(
+                f"{name:>12} {value:>12.4f} "
+                f"{cv10:>10.2f} {cv05:>10.2f} {cv01:>10.2f} "
+                f"{_format_pvalue(pvalue):>10} {reject:>8}"
+            )
 
         lines.append("-" * 78)
-        n_rejected = sum(1 for v in self.rejected.values() if v)
-        lines.append(
-            f"\nRejected H0 for {n_rejected} of 3 statistics at the {alpha:.0%} level"
-        )
+        lines.append("Statistics are scaled by q; p-values from Hansen (1997).")
+        if self.n_breaks > 0:
+            lines.append(
+                f"SupF rejects at the {alpha:.1%} level: break estimated at "
+                f"{self.sup_f_break_index}"
+            )
+        else:
+            lines.append(f"SupF does not reject at the {alpha:.1%} level")
         lines.append("=" * 78)
         return "\n".join(lines)
 
 
 def _format_pvalue(pv: float) -> str:
-    """Format a coarse p-value for display."""
+    """Format a p-value for display."""
     if np.isnan(pv):
         return "n/a"
-    if pv <= 0.005:
-        return "< 0.01"
-    elif pv <= 0.025:
-        return "< 0.05"
-    elif pv <= 0.075:
-        return "< 0.10"
-    else:
-        return "> 0.10"
+    if pv < 0.0001:
+        return "< 0.0001"
+    return f"{pv:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -479,18 +272,21 @@ def _format_pvalue(pv: float) -> str:
 
 
 class AndrewsPlobergerTest(BreakTestBase):
-    """Andrews-Ploberger test for a single structural break at unknown date.
+    """Andrews-Ploberger tests for a single structural break at an unknown date.
 
     Tests whether regression coefficients change at an unknown break point
-    by computing F-statistics at every candidate break date in a trimmed
-    range. Reports three summary statistics: SupF, ExpF, and AveF.
+    by computing a statistic at every candidate break date in a trimmed
+    range. Reports three summary statistics: SupF, ExpF, and AveF, each with
+    its own p-value. See the module docstring for the definitions.
 
     Parameters
     ----------
     endog : ArrayLike
         Dependent variable (n_obs,).
     exog : ArrayLike | None
-        Exogenous regressors whose coefficients do NOT break.
+        Exogenous regressors whose coefficients do NOT break. A column that
+        is a linear combination of the breaking regressors (a constant,
+        when the constant breaks) is left out.
     exog_break : ArrayLike | None
         Regressors whose coefficients may break. If None, defaults to
         a constant (mean-shift model).
@@ -507,14 +303,16 @@ class AndrewsPlobergerTest(BreakTestBase):
 
     Notes
     -----
-    The test assumes normally distributed, homoskedastic errors for
-    the F-distribution to be exact. It is valid asymptotically under
-    weaker assumptions.
+    The statistics are valid asymptotically under homoskedastic, serially
+    uncorrelated errors. No robust version is implemented.
 
-    The trimming parameter pi0 controls how close to the sample
-    boundaries candidate break dates can be. The default of 0.15
-    (Andrews's recommendation) excludes the first and last 15% of
-    observations.
+    The trimming parameter controls how close to the sample boundaries
+    candidate break dates can be: with ``h = floor(trimming * T)`` (the rule
+    ``BaiPerronTest`` uses), each regime has at least ``h`` observations.
+    Andrews (1993) recommends 0.15 for SupF.
+
+    The three tests are separate tests. Rejecting when any one of them
+    rejects is a different test with a larger size.
 
     References
     ----------
@@ -524,6 +322,10 @@ class AndrewsPlobergerTest(BreakTestBase):
     Andrews, D. W. K. & Ploberger, W. (1994). Optimal tests when a nuisance
         parameter is present only under the alternative. Econometrica, 62(6),
         1383-1414.
+
+    Hansen, B. E. (1997). Approximate asymptotic p values for
+        structural-change tests. Journal of Business and Economic
+        Statistics, 15(1), 60-67.
     """
 
     def __init__(
@@ -537,6 +339,13 @@ class AndrewsPlobergerTest(BreakTestBase):
             exog_break = np.ones((len(np.asarray(endog)), 1))
 
         super().__init__(endog, exog, exog_break)
+
+        # A fixed regressor that the breaking regressors span (a constant
+        # when the constant breaks) is not identified: leave it out.
+        fixed = self.exog
+        if fixed is not None and self.exog_break is not None:
+            keep = independent_columns(self.exog_break, fixed)
+            self.exog = fixed[:, keep] if keep else None
 
     @classmethod
     def from_model(
@@ -553,7 +362,8 @@ class AndrewsPlobergerTest(BreakTestBase):
         break_vars : "all" | "const"
             Which variables can have breaks:
             - "all": All regressors can break (default)
-            - "const": Only intercept can break (mean-shift model)
+            - "const": Only the intercept can break (mean-shift model); the
+              model must have a constant.
 
         Returns
         -------
@@ -587,7 +397,11 @@ class AndrewsPlobergerTest(BreakTestBase):
         if break_vars == "all":
             return cls(endog, exog_break=exog_all)
         elif break_vars == "const":
-            return cls(endog, exog=exog_all)
+            return cls(
+                endog,
+                exog=split_constant(np.asarray(exog_all, dtype=np.float64)),
+                exog_break=np.ones((len(endog), 1)),
+            )
         else:
             raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
@@ -624,14 +438,9 @@ class AndrewsPlobergerTest(BreakTestBase):
         float
             Sum of squared residuals.
         """
-        try:
-            beta, residuals, _rank, _s = np.linalg.lstsq(X, y, rcond=None)
-            if len(residuals) > 0:
-                return float(residuals[0])
-            else:
-                return float(np.sum((y - X @ beta) ** 2))
-        except np.linalg.LinAlgError:
-            return np.inf
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        resid = y - X @ beta
+        return float(resid @ resid)
 
     def _build_regressor_matrix(
         self,
@@ -663,63 +472,17 @@ class AndrewsPlobergerTest(BreakTestBase):
 
         return np.column_stack(parts)
 
-    def _compute_f_statistic(self, tau: int) -> float:
-        """Compute the F-statistic for a single candidate break date.
-
-        F(τ) = [(SSR₀ - SSR₁ - SSR₂) / q] / [(SSR₁ + SSR₂) / (T - 2q - p)]
-
-        Parameters
-        ----------
-        tau : int
-            Candidate break date (index).
-
-        Returns
-        -------
-        float
-            F-statistic at this break date.
-        """
-        T = self.nobs
+    def _segment_length(self, trimming: float) -> int:
+        """Minimum number of observations in each regime."""
         q = self.n_break_params
         p = self.n_nonbreak_params
-
-        # Full-sample regression
-        X_full = self._build_regressor_matrix(0, T)
-        ssr_full = self._compute_ssr(self.endog, X_full)
-
-        # Compute unrestricted SSR
-        if self.exog is not None and self.exog_break is not None:
-            # Partial break: non-breaking regressors common across regimes
-            X1_break = self.exog_break[:tau]
-            X2_break = self.exog_break[tau:]
-            X_nonbreak = self.exog
-
-            Z1_break = np.zeros((T, q))
-            Z1_break[:tau] = X1_break
-            Z2_break = np.zeros((T, q))
-            Z2_break[tau:] = X2_break
-
-            X_unrestricted = np.column_stack([Z1_break, Z2_break, X_nonbreak])
-            ssr_unrestricted = self._compute_ssr(self.endog, X_unrestricted)
-        else:
-            # All coefficients break
-            X1 = self._build_regressor_matrix(0, tau)
-            X2 = self._build_regressor_matrix(tau, T)
-            ssr1 = self._compute_ssr(self.endog[:tau], X1)
-            ssr2 = self._compute_ssr(self.endog[tau:], X2)
-            ssr_unrestricted = ssr1 + ssr2
-
-        df_denom = T - 2 * q - p
-        if df_denom <= 0 or ssr_unrestricted <= 0:
-            return 0.0
-
-        f_stat = ((ssr_full - ssr_unrestricted) / q) / (ssr_unrestricted / df_denom)
-        return max(0.0, f_stat)
+        return max(int(np.floor(self.nobs * trimming + 1e-9)), q + p + 1)
 
     def _compute_f_sequence(
         self,
         trimming: float,
     ) -> tuple[NDArray[np.floating[Any]], NDArray[np.intp]]:
-        """Compute the F-statistic at every candidate break date.
+        """Compute ``F(tau)`` (scaled by q) at every candidate break date.
 
         Parameters
         ----------
@@ -736,11 +499,12 @@ class AndrewsPlobergerTest(BreakTestBase):
         p = self.n_nonbreak_params
 
         # Determine trimmed range
-        min_obs = max(int(np.ceil(T * trimming)), q + p + 1)
+        min_obs = self._segment_length(trimming)
         start = min_obs
         end = T - min_obs
 
-        if start >= end:
+        df_denom = T - 2 * q - p
+        if start > end or df_denom <= 0:
             return np.array([]), np.array([], dtype=int)
 
         candidate_indices = np.arange(start, end + 1)
@@ -753,16 +517,12 @@ class AndrewsPlobergerTest(BreakTestBase):
         for i, tau in enumerate(candidate_indices):
             # Compute unrestricted SSR for this break date
             if self.exog is not None and self.exog_break is not None:
-                X1_break = self.exog_break[:tau]
-                X2_break = self.exog_break[tau:]
-                X_nonbreak = self.exog
-
                 Z1_break = np.zeros((T, q))
-                Z1_break[:tau] = X1_break
+                Z1_break[:tau] = self.exog_break[:tau]
                 Z2_break = np.zeros((T, q))
-                Z2_break[tau:] = X2_break
+                Z2_break[tau:] = self.exog_break[tau:]
 
-                X_unrestricted = np.column_stack([Z1_break, Z2_break, X_nonbreak])
+                X_unrestricted = np.column_stack([Z1_break, Z2_break, self.exog])
                 ssr_unrestricted = self._compute_ssr(self.endog, X_unrestricted)
             else:
                 X1 = self._build_regressor_matrix(0, tau)
@@ -771,14 +531,14 @@ class AndrewsPlobergerTest(BreakTestBase):
                 ssr2 = self._compute_ssr(self.endog[tau:], X2)
                 ssr_unrestricted = ssr1 + ssr2
 
-            df_denom = T - 2 * q - p
-            if df_denom <= 0 or ssr_unrestricted <= 0:
-                f_sequence[i] = 0.0
-            else:
-                f_val = ((ssr_full - ssr_unrestricted) / q) / (
-                    ssr_unrestricted / df_denom
+            if ssr_unrestricted <= _EXACT_FIT * float(self.endog @ self.endog):
+                raise ValueError(
+                    "the model fits the data exactly with a break at "
+                    f"observation {tau}; the test statistic is not defined"
                 )
-                f_sequence[i] = max(0.0, f_val)
+            # q times the classical F statistic (Wald scale)
+            f_val = (ssr_full - ssr_unrestricted) / (ssr_unrestricted / df_denom)
+            f_sequence[i] = max(0.0, f_val)
 
         return f_sequence, candidate_indices
 
@@ -788,13 +548,13 @@ class AndrewsPlobergerTest(BreakTestBase):
         significance: float = 0.05,
         **kwargs: Any,
     ) -> AndrewsPlobergerResults:
-        """Perform the Andrews-Ploberger test.
+        """Perform the Andrews-Ploberger tests.
 
         Parameters
         ----------
         trimming : float
             Fraction of observations trimmed from each end. Default is
-            0.15 (Andrews's recommendation).
+            0.15 (Andrews's recommendation for SupF).
         significance : float
             Significance level for rejection decisions. Default is 0.05.
         **kwargs
@@ -803,20 +563,29 @@ class AndrewsPlobergerTest(BreakTestBase):
         Returns
         -------
         AndrewsPlobergerResults
-            Results with SupF, ExpF, AveF statistics, critical values,
-            and rejection decisions.
+            Results with SupF, ExpF, AveF statistics, p-values, critical
+            values, and rejection decisions.
 
         Raises
         ------
         ValueError
-            If trimming is not in (0, 0.5) or if there are too few
-            candidate break dates after trimming.
+            If trimming is not in (0, 0.5), if significance is not in
+            (0, 1), if there are no candidate break dates after trimming,
+            or if there are more than 40 breaking coefficients (the range
+            of Hansen's p-values).
         """
         if not 0 < trimming < 0.5:
             raise ValueError(f"trimming must be in (0, 0.5), got {trimming}")
+        if not 0 < significance < 1:
+            raise ValueError(f"significance must be in (0, 1), got {significance}")
 
         q = self.n_break_params
         p = self.n_nonbreak_params
+        if q > MAX_Q:
+            raise ValueError(
+                f"p-values are available for up to {MAX_Q} breaking "
+                f"coefficients, got q = {q}"
+            )
 
         # Compute F-sequence
         f_sequence, candidate_indices = self._compute_f_sequence(trimming)
@@ -840,24 +609,32 @@ class AndrewsPlobergerTest(BreakTestBase):
         # Break location
         sup_f_break_index = int(candidate_indices[np.argmax(f_sequence)])
 
-        # Look up critical values
-        sup_f_cv = _lookup_critical_values(_SUPF_CRITICAL_VALUES, q, trimming)
-        exp_f_cv = _lookup_critical_values(_EXPF_CRITICAL_VALUES, q, trimming)
-        ave_f_cv = _lookup_critical_values(_AVEF_CRITICAL_VALUES, q, trimming)
+        # P-values and critical values (Hansen, 1997), for the range of
+        # candidate dates actually used
+        T = self.nobs
+        pi0 = pi0_from_range(candidate_indices[0] / T, candidate_indices[-1] / T)
+        if pi0 < SMALLEST_PI0 - 1e-12:
+            warnings.warn(
+                f"the candidate dates leave pi_0 = {pi0:.4f}, below 0.01, the "
+                "smallest value Hansen (1997) tabulates (trimming of less "
+                "than about 1 percent); the p-values and critical values are "
+                "those for 0.01, so the p-values are too small",
+                UserWarning,
+                stacklevel=2,
+            )
+        sup_f_pv = hansen_pvalue(sup_f, q, pi0, "sup")
+        exp_f_pv = hansen_pvalue(exp_f, q, pi0, "exp")
+        ave_f_pv = hansen_pvalue(ave_f, q, pi0, "ave")
 
-        # Compute coarse p-values
-        sup_f_pv = _coarse_pvalue(sup_f, sup_f_cv)
-        exp_f_pv = _coarse_pvalue(exp_f, exp_f_cv)
-        ave_f_pv = _coarse_pvalue(ave_f, ave_f_cv)
+        levels = sorted({*_TABULATED_LEVELS, float(significance)}, reverse=True)
+        sup_f_cv = {a: hansen_critical_value(a, q, pi0, "sup") for a in levels}
+        exp_f_cv = {a: hansen_critical_value(a, q, pi0, "exp") for a in levels}
+        ave_f_cv = {a: hansen_critical_value(a, q, pi0, "ave") for a in levels}
 
-        # Determine break indices
-        any_rejected = (
-            sup_f_pv < significance
-            or exp_f_pv < significance
-            or ave_f_pv < significance
-        )
-        break_indices: list[int] = [sup_f_break_index] if any_rejected else []
-        n_breaks = 1 if any_rejected else 0
+        # A break date is reported when the SupF test rejects
+        sup_rejects = bool(sup_f_pv < significance)
+        break_indices: list[int] = [sup_f_break_index] if sup_rejects else []
+        n_breaks = 1 if sup_rejects else 0
 
         return AndrewsPlobergerResults(
             test_name="Andrews-Ploberger",
@@ -877,6 +654,7 @@ class AndrewsPlobergerTest(BreakTestBase):
             candidate_indices=candidate_indices,
             sup_f_break_index=sup_f_break_index,
             trimming=trimming,
+            pi0=pi0,
             q=q,
             p=p,
             significance_level=significance,

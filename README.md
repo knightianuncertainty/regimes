@@ -175,7 +175,9 @@ print(cusum_results.summary())
 fig, ax = cusum_results.plot()
 ```
 
-CUSUM-SQ for variance instability:
+A path that leaves its bounds rejects stability. The observation at which it first does so is reported as `first_crossing`; it is not an estimate of the date of the change, and the CUSUM tests report no break date (use `BaiPerronTest` or `AndrewsPlobergerTest` for that).
+
+CUSUM-SQ for variance instability (significance levels 20, 10, 5, 2 and 1 percent, the levels for which the bounds of Durbin, 1969, are tabulated; at least 20 recursive residuals):
 
 ```python
 # Simulate data with a variance change
@@ -199,7 +201,7 @@ fig, ax = cusum_from_model.plot()
 
 ### Testing for a Break at Unknown Date (Andrews-Ploberger)
 
-The **Andrews-Ploberger test** tests for a single structural break at an unknown date, reporting three statistics (SupF, ExpF, AveF) with different power properties:
+The **Andrews-Ploberger tests** test for a single structural break at an unknown date. Three statistics (SupF, ExpF, AveF) with different power properties are reported, each with its own asymptotic p-value (Hansen, 1997). The statistics are built from `q` times the Chow F statistic at each candidate date (`q` breaking coefficients), the scale on which they are defined and tabulated in the literature. A break date is reported when the SupF test rejects:
 
 ```python
 import numpy as np
@@ -644,6 +646,9 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 - Chow, G. C. (1960). Tests of equality between sets of coefficients in two linear regressions. *Econometrica*, 28(3), 591-605.
 - Andrews, D. W. K. (1993). Tests for parameter instability and structural change with unknown change point. *Econometrica*, 61(4), 821-856.
 - Andrews, D. W. K. & Ploberger, W. (1994). Optimal tests when a nuisance parameter is present only under the alternative. *Econometrica*, 62(6), 1383-1414.
+- Hansen, B. E. (1997). Approximate asymptotic p values for structural-change tests. *Journal of Business and Economic Statistics*, 15(1), 60-67.
+- Durbin, J. (1969). Tests for serial correlation in regression analysis based on the periodogram of least-squares residuals. *Biometrika*, 56(1), 1-15.
+- Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic in medium and large sized samples. *Oxford Bulletin of Economics and Statistics*, 56(3), 355-365.
 - Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary time series and the business cycle. *Econometrica*, 57(2), 357-384.
 - Chib, S. (1998). Estimation and comparison of multiple change-point models. *Journal of Econometrics*, 86(2), 221-241.
 - Andrews, D. W. K. (2001). Testing when a parameter is on the boundary of the maintained hypothesis. *Econometrica*, 69(3), 683-734.
