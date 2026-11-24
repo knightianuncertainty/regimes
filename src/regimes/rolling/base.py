@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 import pandas as pd
 
+from regimes._warn import warn_user
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -20,6 +22,31 @@ if TYPE_CHECKING:
 
 
 RollingCovType = Literal["nonrobust", "HC0"]
+
+
+def check_rolling_cov_type(cov_type: str) -> None:
+    """Rolling and recursive estimation supports two covariance types.
+
+    Raises
+    ------
+    ValueError
+        For any other value. (They used to be treated as "HC0" silently,
+        while the results recorded the name that was asked for.)
+    """
+    if cov_type not in ("nonrobust", "HC0"):
+        raise ValueError(
+            "rolling and recursive estimation supports cov_type 'nonrobust' "
+            f"and 'HC0', got {cov_type!r}"
+        )
+
+
+def warn_if_breaks(model: Any) -> None:
+    """Warn that rolling and recursive estimation ignores a model's breaks."""
+    if getattr(model, "breaks", None) or getattr(model, "_variable_breaks", None):
+        warn_user(
+            "the model has breaks; rolling and recursive estimation uses its "
+            "data, lags and trend only and ignores the breaks"
+        )
 
 
 def _ensure_array(

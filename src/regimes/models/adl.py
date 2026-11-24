@@ -22,7 +22,19 @@ import numpy as np
 import statsmodels.api as sm
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
-from regimes.models.base import CovType, RegimesModelBase, _ensure_array
+from regimes.models._dynamics import (
+    ar_coefficients_by_segment,
+    ar_roots,
+    distributed_lag_effects_by_segment,
+)
+from regimes.models.base import (
+    CovType,
+    RegimesModelBase,
+    _ensure_array,
+    check_break_design,
+    fit_with_covariance,
+    normalize_breaks,
+)
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
 if TYPE_CHECKING:
@@ -81,33 +93,53 @@ class ADLResults(RegressionResultsBase):
     )
     _nobs_original: int | None = field(default=None, repr=False)
 
+    def _ar_segments(self) -> list[tuple[int, dict[int, float]]]:
+        """Autoregressive coefficients by lag, for each stretch of the sample
+        between break dates of the autoregressive coefficients."""
+        names = list(self.param_names) if self.param_names is not None else []
+        if not names:
+            return []
+        return ar_coefficients_by_segment(
+            names, self.params, self._breaks, self._variable_breaks
+        )
+
+    @property
+    def roots_by_regime(self) -> list[NDArray[np.complexfloating[Any, Any]]]:
+        """Roots of the AR characteristic polynomial in each regime.
+
+        One array for each stretch of the sample in which the autoregressive
+        coefficients are constant (a single array without breaks). The
+        polynomial is ``1 - sum_L phi_L z^L`` over the lags ``L`` in the
+        model, so non-consecutive lags are placed at their own powers.
+        """
+        return [ar_roots(coefficients) for _start, coefficients in self._ar_segments()]
+
     @property
     def roots(self) -> NDArray[np.complexfloating[Any, Any]]:
-        """Roots of the AR characteristic polynomial.
+        """Roots of the AR characteristic polynomial (first regime).
 
         Returns
         -------
         NDArray[np.complexfloating]
-            Roots of 1 - phi_1*z - phi_2*z^2 - ... - phi_p*z^p.
-            For stationarity, all roots should be outside the unit circle.
+            Roots of ``1 - sum_L phi_L z^L``. With breaks these are the
+            roots of the first regime; see ``roots_by_regime``.
         """
-        if self.ar_params is None or len(self.ar_params) == 0:
+        by_regime = self.roots_by_regime
+        if not by_regime:
             return np.array([], dtype=np.complex128)
-
-        # Characteristic polynomial: 1 - phi_1*z - phi_2*z^2 - ...
-        # numpy.roots expects coefficients in descending order
-        coeffs = np.concatenate([[1], -self.ar_params])[::-1]
-        return np.roots(coeffs)
+        return by_regime[0]
 
     @property
     def is_stationary(self) -> bool:
-        """Check if the AR component is stationary.
+        """Check if the AR component is stationary in every regime.
 
-        Returns True if all roots are outside the unit circle.
+        Returns True if all roots of every regime are outside the unit
+        circle.
         """
-        if len(self.roots) == 0:
-            return True
-        return bool(np.all(np.abs(self.roots) > 1))
+        return all(
+            len(roots) == 0 or bool(np.all(np.abs(roots) > 1))
+            for roots in self.roots_by_regime
+        )
 
     @property
     def aic(self) -> float:
@@ -134,20 +166,44 @@ class ADLResults(RegressionResultsBase):
         return np.sqrt(self.sigma_squared)
 
     @property
+    def effects_by_regime(self) -> list[tuple[int, dict[str, tuple[float, float]]]]:
+        """Cumulative effect and long-run multiplier in each regime.
+
+        Returns
+        -------
+        list[tuple[int, dict[str, tuple[float, float]]]]
+            One entry for each stretch of the sample in which the
+            autoregressive and distributed-lag coefficients are constant:
+            ``(start, {variable: (cumulative, long_run)})``, where ``start``
+            is the first observation of the stretch (0 for the first). A
+            model without breaks has one entry.
+        """
+        names = list(self.param_names) if self.param_names is not None else []
+        if not names:
+            return []
+        return distributed_lag_effects_by_segment(
+            names, self.params, self.exog_lags, self._breaks, self._variable_breaks
+        )
+
+    @property
     def cumulative_effect(self) -> dict[str, float]:
         """Sum of distributed lag coefficients per exogenous variable.
 
         The cumulative effect (or total multiplier) measures the total
         effect of a unit change in x on y, summed across all lags.
 
+        With breaks this is the effect in the first regime; see
+        ``effects_by_regime`` for every regime.
+
         Returns
         -------
         dict[str, float]
             Cumulative effect for each exogenous variable.
         """
-        if self.dl_params is None:
+        by_regime = self.effects_by_regime
+        if not by_regime:
             return {}
-        return {var: float(np.sum(coefs)) for var, coefs in self.dl_params.items()}
+        return {var: values[0] for var, values in by_regime[0][1].items()}
 
     @property
     def long_run_multiplier(self) -> dict[str, float]:
@@ -155,29 +211,22 @@ class ADLResults(RegressionResultsBase):
 
         The long-run multiplier measures the equilibrium effect of a
         permanent unit change in x on y, accounting for the autoregressive
-        dynamics.
+        dynamics. It is NaN if the sum of the autoregressive coefficients is
+        one or more in absolute value.
+
+        With breaks this is the multiplier of the first regime; see
+        ``effects_by_regime`` for every regime. No standard error is
+        computed.
 
         Returns
         -------
         dict[str, float]
             Long-run multiplier for each exogenous variable.
         """
-        if self.dl_params is None:
+        by_regime = self.effects_by_regime
+        if not by_regime:
             return {}
-
-        # Sum of AR coefficients
-        ar_sum = float(np.sum(self.ar_params)) if self.ar_params is not None else 0.0
-
-        # Check for stationarity (sum of AR coefficients < 1 in absolute value)
-        if abs(ar_sum) >= 1:
-            # Non-stationary: long-run multiplier is undefined
-            return dict.fromkeys(self.dl_params, np.nan)
-
-        multiplier = 1.0 / (1.0 - ar_sum)
-        return {
-            var: float(np.sum(coefs)) * multiplier
-            for var, coefs in self.dl_params.items()
-        }
+        return {var: values[1] for var, values in by_regime[0][1].items()}
 
     def diagnostics(
         self, lags_autocorr: int = 2, lags_arch: int = 1
@@ -250,7 +299,8 @@ class ADLResults(RegressionResultsBase):
             lines.append("Variable-Specific Structural Breaks")
             lines.append("-" * 81)
 
-            for var_name, breaks in self._variable_breaks.items():
+            for var_name, unsorted_breaks in self._variable_breaks.items():
+                breaks = sorted(unsorted_breaks)
                 break_str = ", ".join(_obs_label(bp, index) for bp in breaks)
                 if len(breaks) == 1:
                     lines.append(f"{var_name}: break at {break_str}")
@@ -362,22 +412,30 @@ class ADLResults(RegressionResultsBase):
 
         # Stationarity check
         if self.ar_params is not None and len(self.ar_params) > 0:
+            where = " in every regime" if len(self.roots_by_regime) > 1 else ""
             if self.is_stationary:
-                lines.append("AR roots are outside the unit circle (stationary).")
+                lines.append(
+                    f"AR roots are outside the unit circle{where} (stationary)."
+                )
             else:
                 lines.append(
                     "WARNING: Some AR roots are inside the unit circle (non-stationary)."
                 )
 
         # Distributed lag effects
-        if self.dl_params:
+        effects = self.effects_by_regime
+        if effects:
             lines.append("-" * 81)
             lines.append("Distributed Lag Effects:")
-            for var, cum_eff in self.cumulative_effect.items():
-                lr_mult = self.long_run_multiplier.get(var, np.nan)
-                lines.append(
-                    f"  {var}: Cumulative = {cum_eff:.4f}, Long-run = {lr_mult:.4f}"
-                )
+            for i, (start, by_variable) in enumerate(effects):
+                if len(effects) > 1:
+                    lines.append(f"  Regime {i + 1} (from {_obs_label(start, index)}):")
+                indent = "    " if len(effects) > 1 else "  "
+                for var, (cum_eff, lr_mult) in by_variable.items():
+                    lines.append(
+                        f"{indent}{var}: Cumulative = {cum_eff:.4f}, "
+                        f"Long-run = {lr_mult:.4f}"
+                    )
 
         if self.cov_type == "HAC":
             lines.append("Note: Standard errors are HAC (Newey-West) robust.")
@@ -466,6 +524,13 @@ class ADL(RegimesModelBase):
 
         super().__init__(endog, exog_arr, breaks)
 
+        # the names of a pandas object (the array above has lost them)
+        columns = getattr(exog, "columns", None)
+        if columns is not None:
+            self._exog_names = [str(c) for c in columns]
+        elif hasattr(exog, "name") and hasattr(exog, "index"):
+            self._exog_names = [str(exog.name) if exog.name is not None else "x0"]
+
         # Validate that breaks and variable_breaks are not both specified
         if breaks is not None and variable_breaks is not None:
             raise ValueError(
@@ -481,7 +546,7 @@ class ADL(RegimesModelBase):
             raise ValueError(f"trend must be 'c', 'ct', or 'n', got {trend}")
 
         # Process AR lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             if lags < 0:
                 raise ValueError("lags must be non-negative")
             self.lags: list[int] = list(range(1, lags + 1)) if lags > 0 else []
@@ -507,11 +572,11 @@ class ADL(RegimesModelBase):
 
         # Get max exog lag
         exog_max = 0
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             exog_max = self._exog_lags_raw
         elif isinstance(self._exog_lags_raw, dict):
             for val in self._exog_lags_raw.values():
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     exog_max = max(exog_max, val)
                 else:
                     exog_max = max(exog_max, max(val) if val else 0)
@@ -537,7 +602,7 @@ class ADL(RegimesModelBase):
         k_exog = self.exog.shape[1]
         result: dict[int, list[int]] = {}
 
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             # Same lag structure for all variables
             lags_list = list(range(0, self._exog_lags_raw + 1))
             for i in range(k_exog):
@@ -546,7 +611,7 @@ class ADL(RegimesModelBase):
             # Variable-specific lags
             for key, val in self._exog_lags_raw.items():
                 # Convert key to index
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     # String key - find in exog names
@@ -565,7 +630,7 @@ class ADL(RegimesModelBase):
                     )
 
                 # Convert val to list of lags
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
@@ -727,13 +792,18 @@ class ADL(RegimesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for design "
                         f"matrix with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 if key not in param_names:
                     raise ValueError(
@@ -742,19 +812,21 @@ class ADL(RegimesModelBase):
                     )
                 idx = param_names.index(key)
 
-            # Validate and sort break points (in original sample coordinates)
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
+            # sorted, distinct integers inside the sample (original
+            # observation numbers)
+            breaks_list = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
             # Adjust for effective sample (subtract maxlag)
-            adjusted_breaks = [
-                bp - self.maxlag for bp in breaks_list if bp > self.maxlag
-            ]
+            for bp in breaks_list:
+                if bp <= self.maxlag:
+                    raise ValueError(
+                        f"Break point {bp} for variable '{key}' leaves no "
+                        f"observations before it: the first {self.maxlag} "
+                        "observations are used as initial values for the lags"
+                    )
+            adjusted_breaks = [bp - self.maxlag for bp in breaks_list]
             if adjusted_breaks:
                 normalized[idx] = adjusted_breaks
 
@@ -828,10 +900,14 @@ class ADL(RegimesModelBase):
             return X, param_names
 
         # Adjust break indices for effective sample
-        adjusted_breaks = [b - self.maxlag for b in self.breaks if b >= self.maxlag]
-
-        if not adjusted_breaks:
-            return X, param_names
+        for b in self.breaks:
+            if b <= self.maxlag:
+                raise ValueError(
+                    f"Break index {b} leaves no observations before it: the "
+                    f"first {self.maxlag} observations are used as initial "
+                    "values for the lags"
+                )
+        adjusted_breaks = [b - self.maxlag for b in self.breaks]
 
         # Create regime indices for effective sample
         n_eff = len(y)
@@ -875,8 +951,11 @@ class ADL(RegimesModelBase):
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
         cov_kwds : dict | None
-            Additional keywords for covariance estimation. For HAC, can
-            include 'maxlags'.
+            Additional keywords for covariance estimation, used with
+            ``cov_type="HAC"`` only: ``maxlags`` (default the fixed rule
+            ``floor(4 (T / 100)^(2/9))`` on the effective sample) and other
+            keywords of statsmodels' HAC covariance. See ``OLS.fit`` for the
+            conventions (pooled error variance with breaks, t distribution).
         **kwargs
             Additional arguments (reserved for future use).
 
@@ -892,25 +971,12 @@ class ADL(RegimesModelBase):
 
         # Handle breaks
         X, param_names = self._create_break_design(y, X, param_names)
+        if self.breaks or self._variable_breaks:
+            check_break_design(X, param_names)
 
         # Use statsmodels for estimation
         sm_model = sm.OLS(y, X)
-
-        # Map cov_type to statsmodels format
-        if cov_type == "nonrobust":
-            sm_results = sm_model.fit()
-        elif cov_type.startswith("HC"):
-            sm_results = sm_model.fit(cov_type=cov_type)
-        elif cov_type == "HAC":
-            maxlags = cov_kwds.get("maxlags")
-            if maxlags is None:
-                maxlags = int(np.floor(4 * (len(y) / 100) ** (2 / 9)))
-            sm_results = sm_model.fit(
-                cov_type="HAC",
-                cov_kwds={"maxlags": maxlags, "use_correction": True},
-            )
-        else:
-            raise ValueError(f"Unknown cov_type: {cov_type}")
+        sm_results = fit_with_covariance(sm_model, cov_type, cov_kwds, len(y))
 
         # Extract results
         params = np.asarray(sm_results.params)
@@ -1018,6 +1084,15 @@ class ADL(RegimesModelBase):
     ) -> tuple[int, int]:
         """Select optimal lag structure via information criteria grid search.
 
+        Every candidate ``(p, q)`` with ``p <= max_ar_lags`` autoregressive
+        lags and ``q <= max_exog_lags`` lags of each regressor is estimated
+        on the same sample, the one that remains after dropping
+        ``max(max_ar_lags, max_exog_lags)`` initial observations. Criteria
+        from different samples are not comparable, and a selection based on
+        them changes with the units of the data.
+
+        The candidates have the trend of the model and no breaks.
+
         Parameters
         ----------
         max_ar_lags : int, default 4
@@ -1030,7 +1105,25 @@ class ADL(RegimesModelBase):
         Returns
         -------
         tuple[int, int]
-            Optimal (ar_lags, exog_lags) specification.
+            Optimal (ar_lags, exog_lags) specification. Ties go to the
+            smaller model.
+
+        Raises
+        ------
+        ValueError
+            For an unknown criterion or a negative maximum; if the common
+            sample does not have more observations than the largest
+            candidate has coefficients; if a candidate's criterion is not
+            finite.
+
+        Notes
+        -----
+        Every regressor gets the same number of lags, ``0, ..., q``. The
+        values of the criteria are those of statsmodels' ``ARDL`` on the
+        same sample; ``ardl_select_order`` searches a larger set (a lag
+        length for each regressor, including leaving a regressor out), so
+        its choice is the same only when the best model of that larger set
+        is in this one.
 
         Examples
         --------
@@ -1038,32 +1131,53 @@ class ADL(RegimesModelBase):
         >>> optimal_p, optimal_q = model.select_lags(max_ar_lags=4, max_exog_lags=4)
         >>> print(f"Optimal ADL({optimal_p},{optimal_q})")
         """
+        if criterion not in ("aic", "bic"):
+            raise ValueError(f"criterion must be 'aic' or 'bic', got {criterion!r}")
+        if max_ar_lags < 0 or max_exog_lags < 0:
+            raise ValueError("max_ar_lags and max_exog_lags must be non-negative")
+        hold_back = max(max_ar_lags, max_exog_lags)
+        if self.exog is None:
+            raise ValueError("exog is required for ADL models")
+
+        # the largest candidate must be estimable on the common sample
+        n_common = self.nobs - hold_back
+        k_trend = {"n": 0, "c": 1, "ct": 2}[self.trend]
+        k_largest = k_trend + max_ar_lags + self.exog.shape[1] * (max_exog_lags + 1)
+        if n_common <= k_largest:
+            raise ValueError(
+                f"the sample is too short to compare lag lengths up to "
+                f"({max_ar_lags}, {max_exog_lags}): after dropping "
+                f"{hold_back} initial observations {n_common} remain, for a "
+                f"largest model with {k_largest} coefficients; lower "
+                "max_ar_lags or max_exog_lags"
+            )
+
         best_ic = np.inf
         best_p = 0
         best_q = 0
 
         for p in range(0, max_ar_lags + 1):
             for q in range(0, max_exog_lags + 1):
-                try:
-                    # Create temporary model with this specification
-                    temp_model = ADL(
-                        endog=self.endog,
-                        exog=self.exog,
-                        lags=p if p > 0 else [],
-                        exog_lags=q,
-                        trend=self.trend,
+                # Same effective sample for every candidate: a model with
+                # fewer lags starts later in the data
+                drop = hold_back - max(p, q)
+                temp_results = ADL(
+                    endog=self.endog[drop:],
+                    exog=self.exog[drop:],
+                    lags=p if p > 0 else [],
+                    exog_lags=q,
+                    trend=self.trend,
+                ).fit()
+                ic = temp_results.aic if criterion == "aic" else temp_results.bic
+                if not np.isfinite(ic):
+                    raise ValueError(
+                        f"the {criterion.upper()} of the ADL({p},{q}) candidate "
+                        "is not finite (an exact fit, or collinear regressors)"
                     )
-                    temp_results = temp_model.fit()
-
-                    ic = temp_results.aic if criterion == "aic" else temp_results.bic
-
-                    if ic < best_ic:
-                        best_ic = ic
-                        best_p = p
-                        best_q = q
-                except (np.linalg.LinAlgError, ValueError):
-                    # Skip invalid specifications
-                    continue
+                if ic < best_ic:
+                    best_ic = ic
+                    best_p = p
+                    best_q = q
 
         return best_p, best_q
 
@@ -1316,6 +1430,14 @@ class ADL(RegimesModelBase):
         return ms_model.fit(**fit_kwargs)
 
 
+def _results_maxlag(results: ADLResults) -> int:
+    """Initial observations an ADL fit loses: the longest lag of ``y`` or ``x``."""
+    lags = list(results.lags)
+    for lag_list in results.exog_lags.values():
+        lags.extend(lag_list)
+    return max(lags) if lags else 0
+
+
 def adl_summary_by_regime(
     results_list: list[ADLResults],
     breaks: Sequence[int] | None = None,
@@ -1362,14 +1484,14 @@ def adl_summary_by_regime(
 
     # Compute nobs_total if not provided
     if nobs_total is None:
-        maxlag = max(results_list[0].lags) if results_list[0].lags else 0
+        maxlag = _results_maxlag(results_list[0])
         nobs_total = sum(r.nobs + maxlag for r in results_list)
 
     # Compute regime boundaries
     if breaks:
         boundaries = [0] + list(breaks) + [nobs_total]
     else:
-        maxlag = max(results_list[0].lags) if results_list[0].lags else 0
+        maxlag = _results_maxlag(results_list[0])
         boundaries = [0]
         for r in results_list:
             boundaries.append(boundaries[-1] + r.nobs + maxlag)
