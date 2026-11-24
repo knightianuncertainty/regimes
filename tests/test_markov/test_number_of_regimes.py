@@ -26,6 +26,7 @@ from regimes.markov.selection import (
     RegimeNumberSelection,
     _fit_one_regime,
     _split_starts,
+    _variance_penalty,
 )
 
 REF = Path(__file__).resolve().parents[1] / "reference_data"
@@ -248,14 +249,120 @@ class TestBaselineAndCounts:
         assert results.selected_k == 1
 
     def test_argument_checks(self) -> None:
-        y = np.zeros(30)
+        y = np.random.default_rng(0).standard_normal(30)
         with pytest.raises(ValueError, match="method must be one of"):
             RegimeNumberSelection(y, method="lrt")
         with pytest.raises(ValueError, match="model_type"):
             RegimeNumberSelection(y, model_type="adl")
-        with pytest.raises(ValueError, match="could never reject"):
-            RegimeNumberSelection(y, method="sequential", n_bootstrap=19)
+        # 19 replications give an exact test at 5 percent; 18 cannot reject
+        with pytest.raises(ValueError, match="use at least 19 replications"):
+            RegimeNumberSelection(y, method="sequential", n_bootstrap=18)
+        RegimeNumberSelection(y, method="sequential", n_bootstrap=19)
         RegimeNumberSelection(y, method="bic", n_bootstrap=5)
+        # a misspelled model argument is an error, not "one regime"
+        with pytest.raises(TypeError, match="switching_varaince"):
+            RegimeNumberSelection(y, switching_varaince=True)
+        with pytest.raises(ValueError, match="order must be a positive integer"):
+            RegimeNumberSelection(y, model_type="ar", order=0)
+        with pytest.raises(ValueError, match="search_reps"):
+            RegimeNumberSelection(y, search_reps=-1)
+        assert RegimeNumberSelection(y, search_reps=7)._search_reps == 7
+
+    @pytest.mark.parametrize(
+        ("trend", "names"), [("c", ["const"]), ("ct", ["const", "trend"]), ("n", [])]
+    )
+    def test_one_regime_model_has_the_trend_of_the_model(
+        self, trend: str, names: list[str]
+    ) -> None:
+        rng = np.random.default_rng(12)
+        n = 90
+        y = 1.0 + 0.03 * np.arange(n) + rng.standard_normal(n)
+        test = RegimeNumberSelection(y, trend=trend)
+        one = test._fit_k1()["results"]
+        assert one.param_names == names
+        design = {
+            "c": np.ones((n, 1)),
+            "ct": np.column_stack([np.ones(n), np.arange(1, n + 1)]),
+            "n": np.zeros((n, 0)),
+        }[trend]
+        fitted = design @ np.linalg.lstsq(design, y, rcond=None)[0] if names else 0.0
+        ssr = float(np.sum((y - fitted) ** 2))
+        assert one.llf == pytest.approx(
+            -0.5 * n * (np.log(2 * np.pi * ssr / n) + 1), abs=1e-8
+        )
+        assert one.df_model == len(names) + 1
+
+    def test_criteria_and_counts_of_the_one_regime_autoregression(self) -> None:
+        rng = np.random.default_rng(13)
+        n = 160
+        x = rng.standard_normal(n)
+        y = np.zeros(n)
+        for t in range(2, n):
+            y[t] = 0.4 * y[t - 1] + 0.2 * y[t - 2] + 0.5 * x[t] + rng.standard_normal()
+        test = RegimeNumberSelection(y, model_type="ar", order=2, exog=x)
+        info = test._fit_k1()
+        one = info["results"]
+        # constant, slope, two autoregressive coefficients and the variance
+        assert one.df_model == 5
+        assert one.nobs == n - 2
+        assert info["n_params"] == 5
+        assert info["aic"] == pytest.approx(-2 * one.llf + 2 * 5)
+        assert info["bic"] == pytest.approx(-2 * one.llf + 5 * np.log(n - 2))
+        assert info["hqic"] == pytest.approx(
+            -2 * one.llf + 2 * 5 * np.log(np.log(n - 2))
+        )
+        table = test._build_ic_table({1: info}).set_index("K")
+        assert table.loc[1, "AIC"] == info["aic"]
+        assert table.loc[1, "BIC"] == info["bic"]
+        assert table.loc[1, "HQIC"] == info["hqic"]
+
+
+class TestVariancePenalty:
+    """Regime-specific variances: the penalty of Kasahara and Shimotsu."""
+
+    def test_formula(self) -> None:
+        y = np.random.default_rng(14).standard_normal(100)
+        common = SMMarkovRegression(y, k_regimes=2)
+        assert _variance_penalty(common, 1.3) is None
+        model = SMMarkovRegression(y, k_regimes=3, switching_variance=True)
+        penalty = _variance_penalty(model, 1.3)
+        params = np.asarray(model.start_params, dtype=float)
+        positions = np.arange(model.k_params)[model.parameters["variance"]]
+        params[positions] = 1.3
+        assert penalty(params) == pytest.approx(0.0, abs=1e-12)
+        params[positions] = [1.3, 0.13, 2.6]
+        a_n = 20 / np.sqrt(100)
+        expected = -a_n * sum(1.3 / v + np.log(v / 1.3) - 1 for v in (1.3, 0.13, 2.6))
+        assert penalty(params) == pytest.approx(expected)
+        # a variance at the lower bound of the paper costs about 10^4 a_n
+        params[positions] = [1.3, 1.3 * 0.01**2, 1.3]
+        assert penalty(params) < -9000 * a_n
+
+    def test_no_variance_spike_and_the_same_result_for_every_seed(
+        self, reference: tuple[np.ndarray, dict[str, Any]]
+    ) -> None:
+        """Without the penalty the three-regime fit put a variance of 0.002
+        on a few observations, a different spike for every seed (likelihood
+        ratio statistics from 3.9 to 9.7)."""
+        y, _ref = reference
+        statistics = []
+        for seed in (1, 2):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                results = RegimeNumberSelection(
+                    y, k_max=3, random_state=seed, switching_variance=True
+                ).fit()
+            table = results.ic_table.set_index("K")
+            sm_results = results.results_by_k[3]._sm_results
+            variances = sm_results.params[sm_results.model.parameters["variance"]]
+            assert variances.min() > 0.2 * results.results_by_k[1].sigma2
+            # the plain log-likelihood is reported, not the penalized one
+            assert table.loc[3, "llf"] == pytest.approx(
+                sm_results.model.loglike(sm_results.params), abs=1e-8
+            )
+            statistics.append(2 * (table.loc[3, "llf"] - table.loc[2, "llf"]))
+        assert statistics[0] == pytest.approx(statistics[1], abs=0.05)
+        assert 0 <= statistics[0] < 6
 
 
 class TestAgainstMSTest:
@@ -310,87 +417,158 @@ class TestAgainstMSTest:
             ).fit()
         table = results.ic_table.set_index("K")
         assert table.loc[1, "llf"] == pytest.approx(case["llf"]["k1"], abs=1e-8)
-        # the maximum is at least the value MSTest's EM algorithm stops at
-        assert table.loc[2, "llf"] >= case["llf"]["k2"] - 1e-6
-        assert table.loc[2, "llf"] == pytest.approx(case["llf"]["k2"], abs=0.05)
+        if case["switching_variance"]:
+            # estimated with the variance penalty, which MSTest does not have
+            assert table.loc[2, "llf"] == pytest.approx(case["llf"]["k2"], abs=0.1)
+        else:
+            # the maximum is at least the value MSTest's EM algorithm stops at
+            assert table.loc[2, "llf"] >= case["llf"]["k2"] - 1e-6
+            assert table.loc[2, "llf"] == pytest.approx(case["llf"]["k2"], abs=0.05)
         lr = 2 * (table.loc[2, "llf"] - table.loc[1, "llf"])
         assert lr == pytest.approx(case["lr"]["k1_vs_k2"], abs=0.1)
         assert results.selected_k == 2
 
+    def test_three_regimes_against_the_reference(
+        self, reference: tuple[np.ndarray, dict[str, Any]]
+    ) -> None:
+        """Common variance: the search ends at one of two local maxima, the
+        better of which is the value MSTest reports (-458.13 and -458.33)."""
+        y, ref = reference
+        case = next(c for c in ref["models"] if not c["switching_variance"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = RegimeNumberSelection(y, k_max=3, random_state=0).fit()
+        table = results.ic_table.set_index("K")
+        assert table.loc[3, "llf"] >= table.loc[2, "llf"] - 1e-6
+        assert table.loc[3, "llf"] == pytest.approx(case["llf"]["k3"], abs=0.25)
+        assert table.loc[3, "n_params"] == 10
 
-class _Fit:
-    def __init__(self, llf: float) -> None:
-        self.llf = llf
+
+def _fake_fit(llf: float, k: int) -> dict[str, Any]:
+    return {
+        "results": OneRegimeResults(
+            params=np.zeros(1),
+            param_names=["const"],
+            ar_params=np.zeros(0),
+            sigma2=1.0,
+            llf=llf,
+            nobs=50,
+            df_model=1 + 3 * (k - 1),
+        ),
+        "llf": llf,
+        "aic": 0.0,
+        "bic": 0.0,
+        "hqic": 0.0,
+        "n_params": 1 + 3 * (k - 1),
+        "penalized": False,
+    }
 
 
 class TestSequentialBootstrap:
     def _table(
         self, test: RegimeNumberSelection, monkeypatch: Any, llf: dict[int, float]
-    ) -> list[Any]:
-        calls: list[Any] = []
+    ) -> list[int]:
+        """Replace the estimations by a table of log-likelihoods."""
+        fitted: list[int] = []
 
-        def fake_fit(
-            k: int, endog: Any = None, lower: Any = None, starts: Any = ()
+        def fit_k1(endog: Any = None) -> Any:
+            fitted.append(1)
+            return _fake_fit(llf[1], 1)
+
+        def fit_k(
+            k: int, lower: Any, one: Any, endog: Any = None, inference: bool = True
         ) -> Any:
-            calls.append((k, endog is not None, lower is not None, len(starts)))
-            return {
-                "results": OneRegimeResults(
-                    params=np.zeros(1),
-                    param_names=["const"],
-                    ar_params=np.zeros(0),
-                    sigma2=1.0,
-                    llf=llf[k],
-                    nobs=50,
-                    df_model=1 + 3 * (k - 1),
-                ),
-                "llf": llf[k],
-                "aic": 0.0,
-                "bic": 0.0,
-                "hqic": 0.0,
-                "n_params": 1 + 3 * (k - 1),
-            }
+            fitted.append(k)
+            if isinstance(llf[k], Exception):
+                raise llf[k]
+            return _fake_fit(llf[k], k)
 
-        monkeypatch.setattr(test, "_fit", fake_fit)
-        monkeypatch.setattr(test, "_fit_k1", lambda endog=None: fake_fit(1, endog))
-        monkeypatch.setattr(
-            test,
-            "_fit_k_regimes",
-            lambda k, endog=None, lower=None, starts=(): fake_fit(
-                k, endog, lower, starts
-            ),
-        )
-        return calls
+        monkeypatch.setattr(test, "_fit_k1", fit_k1)
+        monkeypatch.setattr(test, "_fit_k_regimes", fit_k)
+        return fitted
 
-    def test_stops_at_the_first_test_that_does_not_reject(
-        self, monkeypatch: Any
-    ) -> None:
-        test = RegimeNumberSelection(np.zeros(50), k_max=4, method="sequential")
-        self._table(test, monkeypatch, {1: -100.0, 2: -80.0, 3: -79.0, 4: -60.0})
-        p_values = iter([0.01, 0.40])
+    @staticmethod
+    def _p_values(monkeypatch: Any, values: list[float]) -> list[float]:
         observed: list[float] = []
+        iterator = iter(values)
 
         def fake_monte_carlo(
             lr: float, simulate: Any, statistic: Any, n: int, rng: Any
         ) -> Any:
             observed.append(lr)
             return MonteCarloPValue(
-                p_value=next(p_values),
+                p_value=next(iterator),
                 statistics=np.array([1.0, 2.0]),
                 n_valid=n,
                 n_failed=0,
             )
 
         monkeypatch.setattr(module, "monte_carlo_pvalue", fake_monte_carlo)
+        return observed
+
+    def test_stops_at_the_first_test_that_does_not_reject(
+        self, monkeypatch: Any
+    ) -> None:
+        test = RegimeNumberSelection(np.zeros(50), k_max=4, method="sequential")
+        fitted = self._table(
+            test, monkeypatch, {1: -100.0, 2: -80.0, 3: -79.0, 4: -60.0}
+        )
+        observed = self._p_values(monkeypatch, [0.01, 0.40])
         results = test.fit()
         assert observed == [40.0, 2.0]
         assert results.selected_k == 2
+        # a model is estimated only when a test needs it
+        assert fitted == [1, 2, 3]
+        assert sorted(results.results_by_k) == [1, 2, 3]
         tests = results.sequential_tests
         assert tests is not None and len(tests) == 2
         assert [t["rejected"] for t in tests] == [True, False]
         assert tests[0]["n_extra_params"] == 3
         assert tests[0]["n_bootstrap"] == 199
+        assert results.notes == []
         assert "K=2 vs K=3" in results.summary()
         assert "parametric bootstrap" in results.summary()
+
+    def test_rejects_at_the_boundary(self, monkeypatch: Any) -> None:
+        """p = 0.05 rejects at 5 percent (10 of 200 with the default 199)."""
+        test = RegimeNumberSelection(np.zeros(50), k_max=3, method="sequential")
+        self._table(test, monkeypatch, {1: -100.0, 2: -80.0, 3: -79.0})
+        self._p_values(monkeypatch, [10 / 200, 11 / 200])
+        results = test.fit()
+        assert [t["rejected"] for t in results.sequential_tests] == [True, False]
+        assert results.selected_k == 2
+
+    def test_selected_number_equal_to_k_max_is_flagged(self, monkeypatch: Any) -> None:
+        test = RegimeNumberSelection(np.zeros(50), k_max=2, method="sequential")
+        self._table(test, monkeypatch, {1: -100.0, 2: -80.0})
+        self._p_values(monkeypatch, [0.01])
+        results = test.fit()
+        assert results.selected_k == 2
+        assert results.notes == ["2 regimes is k_max: it was not tested against 3"]
+        assert "Note: 2 regimes is k_max" in results.summary()
+
+    @pytest.mark.parametrize("method", ["bic", "sequential"])
+    def test_model_that_cannot_be_estimated_is_reported(
+        self, monkeypatch: Any, method: str
+    ) -> None:
+        """It used to be dropped silently, and the answer was a smaller K."""
+        test = RegimeNumberSelection(np.zeros(50), k_max=4, method=method)
+        fitted = self._table(
+            test,
+            monkeypatch,
+            {1: -100.0, 2: -80.0, 3: np.linalg.LinAlgError("singular"), 4: -60.0},
+        )
+        self._p_values(monkeypatch, [0.01])
+        with pytest.warns(UserWarning, match="3 regimes could not be estimated"):
+            results = test.fit()
+        assert fitted == [1, 2, 3]
+        assert sorted(results.results_by_k) == [1, 2]
+        assert len(results.notes) == 1
+        assert "LinAlgError: singular" in results.notes[0]
+        assert "could not be estimated" in results.summary()
+        if method == "sequential":
+            assert results.selected_k == 2
+            assert len(results.sequential_tests) == 1
 
     def test_zero_statistic_needs_no_bootstrap(self, monkeypatch: Any) -> None:
         test = RegimeNumberSelection(np.zeros(50), k_max=2, method="sequential")
@@ -421,6 +599,23 @@ class TestSequentialBootstrap:
         with pytest.raises(RuntimeError, match="any bootstrap replication") as info:
             test.fit()
         assert isinstance(info.value.__cause__, KeyError)
+
+    def test_too_few_valid_replications_warn(self, monkeypatch: Any) -> None:
+        test = RegimeNumberSelection(np.zeros(50), k_max=2, method="sequential")
+        self._table(test, monkeypatch, {1: -100.0, 2: -90.0})
+        monkeypatch.setattr(
+            module,
+            "monte_carlo_pvalue",
+            lambda *args: MonteCarloPValue(
+                p_value=1 / 11,
+                statistics=np.arange(10.0),
+                n_valid=10,
+                n_failed=189,
+            ),
+        )
+        with pytest.warns(UserWarning, match="too few for a test at level 0.05"):
+            results = test.fit()
+        assert not results.sequential_tests[0]["rejected"]
 
     def test_samples_and_statistic(self, monkeypatch: Any) -> None:
         """Samples come from the fitted null; the statistic refits both models."""
@@ -459,37 +654,81 @@ class TestSequentialBootstrap:
         assert seen["on_sample"] >= 0.0
         assert results.selected_k == 1
 
-    def test_sample_from_a_markov_null_starts_from_its_parameters(
-        self, monkeypatch: Any
-    ) -> None:
+    def test_samples_of_a_one_regime_autoregression(self) -> None:
+        """The null of ``model_type="ar"``: an autoregression around the mean,
+        started from the first observations of the data."""
+        rng = np.random.default_rng(15)
+        n = 400
+        y = np.full(n, 5.0)
+        for t in range(2, n):
+            y[t] = (
+                5.0
+                + 0.5 * (y[t - 1] - 5.0)
+                + 0.3 * (y[t - 2] - 5.0)
+                + rng.standard_normal()
+            )
+        test = RegimeNumberSelection(y, model_type="ar", order=2)
+        null = test._fit_k1()["results"]
+        assert null.ar_params[0] > 0.3
+        draws = np.random.default_rng(16)
+        estimates = []
+        for _ in range(40):
+            sample = test._simulate(null, draws)
+            assert sample.shape == (n,)
+            np.testing.assert_array_equal(sample[:2], y[:2])
+            estimates.append(test._fit_k1(sample)["results"].ar_params)
+        # white noise would give coefficients near zero
+        np.testing.assert_allclose(
+            np.mean(estimates, axis=0), null.ar_params, atol=0.04
+        )
+        assert np.mean(sample) == pytest.approx(5.0, abs=1.0)
+
+    def test_every_sample_is_treated_like_the_data(self, monkeypatch: Any) -> None:
+        """Two regimes against three: on a sample, as on the data, the model
+        with two regimes is built up from one regime and the model with
+        three from the two-regime fit of that sample."""
         rng = np.random.default_rng(10)
         y = np.concatenate([rng.normal(m, 1, 40) for m in (0, 3, 0, 3)])
         test = RegimeNumberSelection(y, k_max=3, method="sequential", random_state=1)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            null = test._fit_k_regimes(2, lower=test._fit_k1()["results"])["results"]
-        calls: list[Any] = []
-        original = test._fit
+        test._rng = np.random.default_rng(1)
+        calls: list[dict[str, Any]] = []
+        original = test._fit_k_regimes
 
         def recording(
-            k: int, endog: Any = None, lower: Any = None, starts: Any = ()
+            k: int, lower: Any, one: Any, endog: Any = None, inference: bool = True
         ) -> Any:
-            calls.append((k, lower is not None, [np.asarray(s) for s in starts]))
-            return original(k, endog, lower, starts)
+            out = original(k, lower, one, endog, inference)
+            calls.append(
+                {
+                    "k": k,
+                    "lower": lower,
+                    "one": one,
+                    "endog": endog,
+                    "inference": inference,
+                    "results": out["results"],
+                }
+            )
+            return out
 
-        monkeypatch.setattr(test, "_fit", recording)
+        monkeypatch.setattr(test, "_fit_k_regimes", recording)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            sample = test._simulate(null, np.random.default_rng(2))
-            statistic = test._lr_statistic(2, sample, null)
+            on_data = test._fit_up_to(3, y, inference=True)
+            sample = test._simulate(on_data[2]["results"], np.random.default_rng(2))
+            del calls[:]
+            statistic = test._lr_statistic(2, sample)
         assert statistic >= 0.0
-        assert [c[0] for c in calls] == [2, 3]
-        # the two-regime model is also started from the parameters of the null
-        np.testing.assert_array_equal(
-            calls[0][2][0], np.asarray(null._sm_results.params)
-        )
-        # the three-regime model from the two-regime fit of the sample
-        assert calls[1][1] is True
+        assert [c["k"] for c in calls] == [2, 3]
+        for call in calls:
+            assert call["endog"] is sample
+            assert call["inference"] is False
+            # the one-regime model of the sample, not of the data
+            assert isinstance(call["one"], OneRegimeResults)
+            assert call["one"] is calls[0]["lower"]
+            assert call["one"].llf != on_data[1]["results"].llf
+        # three regimes are started from the two-regime fit of the sample
+        assert calls[1]["lower"] is calls[0]["results"]
+        assert calls[1]["lower"] is not on_data[2]["results"]
 
     def test_end_to_end_and_reproducible(self) -> None:
         """A real bootstrap: two recurring regimes are found, twice the same."""

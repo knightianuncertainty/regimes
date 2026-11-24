@@ -17,49 +17,74 @@ parameter space. Its limiting distribution has been derived (Qu and Zhuo,
 2021, for one regime against two; Kasahara and Shimotsu, 2018, for ``K``
 against ``K + 1``), but it depends on the model, on which parameters switch
 and on the regressors, so it cannot be tabulated. The test here is the
-parametric bootstrap that both papers show to be asymptotically valid:
+parametric bootstrap of Kasahara and Shimotsu (2018, Section 9):
 
 1. Estimate the models with ``K`` and ``K + 1`` regimes and compute the
    likelihood ratio statistic.
 2. Draw samples from the estimated ``K``-regime model, conditional on the
    regressors and the initial observations.
-3. Estimate both models on each sample, exactly as on the data.
-4. The p-value is ``(1 + #{simulated >= observed}) / (B + 1)``, the Monte
-   Carlo p-value of Dufour (2006) that Rodriguez-Rondon and Dufour (2025)
-   use for this test.
+3. On each sample, estimate the models with ``1, ..., K + 1`` regimes by
+   the procedure used on the data and compute the statistic.
+4. The p-value is ``(1 + #{simulated >= observed}) / (B + 1)`` and the test
+   rejects when it is at most the level: the Monte Carlo test of Dufour
+   (2006), which Rodriguez-Rondon and Dufour (2025) use for this
+   statistic. (Kasahara and Shimotsu use ``#{simulated > observed} / B``.)
 
-What is known about the test, and its conditions:
+What supports the test, and where the support ends:
 
-* Size in simulations is close to the nominal level, with mild
-  over-rejection in small samples when the null has two regimes: 4.0 to
-  5.3 percent at a nominal 5 for one regime, 3.9 to 7.2 for two regimes
-  (Kasahara and Shimotsu, 2018, Table 1, n = 200 and 500); 4.2 to 6.8
-  percent in Rodriguez-Rondon and Dufour (2025, Tables 1, 6 and 7). The
-  designs are autoregressions of order one with a switching intercept and,
-  in some, a switching variance.
-* The proof of validity is written out for one regime against two; for
-  more regimes Kasahara and Shimotsu state that it extends.
-* The theory requires transition probabilities bounded away from zero and
-  one, and a lower bound on a switching variance. Neither bound is imposed
-  here; a regime that is (almost) never left or an estimated variance near
-  zero is a sign that the conditions fail.
+* Theory. Kasahara and Shimotsu prove that the bootstrap critical values
+  are consistent for one regime against two (their Proposition 21) and
+  state that the argument extends to more regimes. Their framework covers
+  models in which the distribution of ``y_t`` depends on the current
+  regime only, lagged dependent variables entering as regressors with a
+  switching intercept. It excludes models in which the distribution
+  depends on lagged regimes as well (their Assumption 1 and footnote 5),
+  which is the case of the mean-adjusted autoregression that
+  ``model_type="ar"`` estimates. Qu and Zhuo derive the limiting
+  distribution for one regime against two; they do not prove a bootstrap
+  result.
+* Simulations. Kasahara and Shimotsu (Table 1; n = 200 and 500; B = 199;
+  an autoregression of order one with a switching intercept, with and
+  without a switching variance) report rejection rates of 4.0 to 5.3
+  percent at a nominal 5 for one regime against two, and 3.9 to 7.2
+  percent for two against three. For the mean-adjusted autoregression the
+  evidence is the simulations of Rodriguez-Rondon and Dufour, where the
+  Monte Carlo version of the test has rejection rates close to the nominal
+  level (switching mean, common autoregressive coefficient, no regressors).
+  No simulation in these papers has switching autoregressive coefficients
+  or exogenous regressors.
+* Regime-specific variances. The likelihood is unbounded as a regime
+  variance tends to zero. As Kasahara and Shimotsu do in their simulations
+  (Section 10.1), the models are estimated with the penalty
+  ``-a_n sum_j {s2 / s2_j + log(s2_j / s2) - 1}``, ``a_n = 20 / sqrt(n)``,
+  where ``s2`` is the error variance of the one-regime model, and the
+  statistic is computed from the log-likelihood without the penalty. The
+  penalty also keeps the variances far above their lower bound of
+  ``(0.01)^2 s2``.
+* Transition probabilities. The theory requires them to be bounded away
+  from zero and one. No bound is imposed here; a regime that is (almost)
+  never left is a sign that the condition fails.
 * Regressors are held fixed, which is appropriate only if they are
   strictly exogenous. With a fixed regressor that depends on past values
   of the dependent variable the bootstrap is inconsistent: Qu and Zhuo
-  (2021, Section 7) report 10 percent rejections at a nominal 5.
-  Lagged dependent variables of ``model_type="ar"`` are simulated
-  recursively and are not affected.
-* The test is slow: each of the ``n_bootstrap`` replications estimates two
-  Markov switching models.
-
-Estimation. The likelihood of a model with ``K + 1`` regimes has local
-maxima, and it is at least that of the model with ``K`` regimes, which it
-contains (two regimes with the same parameters). Besides the default and
-the random starting values, the larger model is therefore estimated from
-the estimates of the smaller one with each regime split in two, once
-exactly and once with the two halves moved apart, so that the statistic
-is not negative. On a bootstrap sample the model with ``K`` regimes is
-also estimated from the parameters the sample was drawn from.
+  (2021, Section 7) report 10 percent rejections at a nominal 5. The lags
+  of ``model_type="ar"`` are generated recursively in the bootstrap, not
+  held fixed.
+* The search. The likelihood of a model with three or more regimes has
+  several local maxima, and the statistic is the result of a finite
+  search: the default starting value, ``search_reps`` random ones, and
+  for each regime of the smaller model its estimates with that regime
+  split in two (once exactly, so that the larger model cannot end below
+  the smaller one, and once with the halves moved apart). The same search
+  is run on the data and on every bootstrap sample. For one regime against
+  two the result is stable. For two against three it can depend on
+  ``random_state``: on the reference series of the test suite the
+  statistic is 2.5 or 2.9 depending on the seed. Raise ``search_reps`` if
+  the result changes with the seed.
+* Cost. Each replication estimates every model up to ``K + 1`` regimes
+  from all starting values. With 200 observations and the defaults, one
+  regime against two takes on the order of 15 minutes and two against
+  three a few hours.
 
 References
 ----------
@@ -70,8 +95,10 @@ References
 - Qu and Zhuo (2021), "Likelihood Ratio-Based Tests for Markov Regime
   Switching", Review of Economic Studies 88, 937-968.
 - Rodriguez-Rondon and Dufour (2025), "Monte Carlo Likelihood Ratio Tests
-  for Markov Switching Models", working paper (implemented in the R package
-  MSTest).
+  for Markov Switching Models", working paper (Bank of Canada Staff
+  Working Paper 2026-23; implemented in the R package MSTest, which
+  differs in details: one starting value per sample, simulation with a
+  burn-in period).
 """
 
 from __future__ import annotations
@@ -86,15 +113,16 @@ from scipy import optimize
 from regimes.markov._simulate import (
     RandomState,
     as_generator,
+    can_reject,
     monte_carlo_pvalue,
+    rejects,
+    replications_needed,
     simulate_linear,
     simulate_markov_switching,
     smallest_pvalue,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
     from numpy.typing import NDArray
@@ -159,10 +187,19 @@ class OneRegimeResults:
         return float(-2 * self.llf + 2 * np.log(np.log(self.nobs)) * self.df_model)
 
 
-def _lr(llf_larger: float, llf_smaller: float, k0: int) -> float:
-    """``2 (llf_larger - llf_smaller)``; a shortfall is reported and set to zero."""
+def _lr(
+    llf_larger: float, llf_smaller: float, k0: int, penalized: bool = False
+) -> float:
+    """``2 (llf_larger - llf_smaller)``, at least zero.
+
+    The larger model contains the smaller one, so a shortfall beyond
+    rounding means that it was not maximized; that is reported. With a
+    variance penalty (``penalized``) the estimates maximize the penalized
+    likelihood, the plain log-likelihoods need not be ordered, and a
+    shortfall is not reported.
+    """
     difference = 2.0 * (llf_larger - llf_smaller)
-    if difference < -2e-4:
+    if difference < -2e-4 and not penalized:
         warnings.warn(
             f"the model with {k0 + 1} regimes has a lower log-likelihood "
             f"({llf_larger:.6f}) than the model with {k0} ({llf_smaller:.6f}), "
@@ -172,6 +209,39 @@ def _lr(llf_larger: float, llf_smaller: float, k0: int) -> float:
             stacklevel=3,
         )
     return float(max(0.0, difference))
+
+
+# Kasahara and Shimotsu (2018, Section 10.1): the lower bound on a regime's
+# standard deviation relative to that of the one-regime model, and the
+# constant of the penalty a_n = 20 / sqrt(n).
+_SIGMA_BOUND = 0.01
+_PENALTY_CONSTANT = 20.0
+
+
+def _variance_penalty(sm_model: Any, sigma2_one_regime: float) -> Any:
+    """Penalty on small regime variances, or None with a common variance.
+
+    ``-a_n sum_j {s2 / s2_j + log(s2_j / s2) - 1}`` with ``a_n = 20 /
+    sqrt(n)`` and ``s2`` the error variance of the one-regime model
+    (Kasahara and Shimotsu, 2018, Section 10.1). It is zero when every
+    regime has the variance of the one-regime model and tends to minus
+    infinity as a regime variance tends to zero, where the likelihood of a
+    model with regime-specific variances is unbounded. A variance below the
+    paper's lower bound, ``(0.01)^2 s2``, costs about ``10^4 a_n``.
+    """
+    positions = np.atleast_1d(
+        np.arange(sm_model.k_params)[sm_model.parameters["variance"]]
+    )
+    if len(positions) < 2:
+        return None
+    a_n = _PENALTY_CONSTANT / np.sqrt(float(sm_model.nobs))
+    s2 = float(sigma2_one_regime)
+
+    def penalty(params: Any) -> Any:
+        ratio = s2 / params[positions]
+        return -a_n * np.sum(ratio - np.log(ratio) - 1.0)
+
+    return penalty
 
 
 def _gaussian_llf(ssr: float, nobs: int) -> float:
@@ -340,7 +410,8 @@ def _split_starts(sm_model: Any, lower: Any) -> list[NDArray[np.floating[Any]]]:
         )
         if transition0.ndim == 3:
             transition0 = transition0[..., 0]
-        transition0 = np.clip(transition0, 1e-6, None)
+        # zero probabilities cannot be mapped to the optimizer's parameters
+        transition0 = np.clip(transition0, 1e-10, None)
         transition0 /= transition0.sum(axis=0, keepdims=True)
 
     index = np.arange(sm_model.k_params)[
@@ -411,6 +482,10 @@ class RegimeNumberSelectionResults:
         ``k0``, ``k1``, ``lr_statistic``, ``p_value``, ``critical_value``,
         ``rejected``, ``n_bootstrap`` (replications the p-value rests on),
         ``n_bootstrap_failed`` and ``n_extra_params``.
+    notes : list[str]
+        Anything that qualifies the selection: a model that could not be
+        estimated, or a selected K equal to ``k_max``, which was not tested
+        against a larger model. Printed by ``summary()``.
     """
 
     selected_k: int
@@ -418,6 +493,7 @@ class RegimeNumberSelectionResults:
     ic_table: Any  # pd.DataFrame
     method: str
     sequential_tests: list[dict[str, Any]] | None = None
+    notes: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         """Generate text summary of regime selection."""
@@ -472,6 +548,10 @@ class RegimeNumberSelectionResults:
                         f"    ({test['n_bootstrap_failed']} replications "
                         "could not be computed)"
                     )
+
+        for note in self.notes:
+            lines.append("")
+            lines.append(f"Note: {note}")
 
         lines.append("=" * 65)
         return "\n".join(lines)
@@ -531,12 +611,21 @@ class RegimeNumberSelection:
     order : int
         AR order (for model_type="ar"). Default 1.
     n_bootstrap : int
-        Bootstrap replications of each sequential test. Default 199. Each
-        replication estimates two Markov switching models.
+        Bootstrap replications of each sequential test. Default 199; at
+        least ``1 / significance - 1``. Each replication estimates every
+        model up to ``K + 1`` regimes: expect minutes for one regime
+        against two and hours for two against three with a few hundred
+        observations.
     random_state : int | numpy.random.Generator | None
         Seed or generator. It governs the bootstrap samples and the random
         starting values of every estimation, so that a given seed
         reproduces the result.
+    search_reps : int | None
+        Random starting values of each Markov switching estimation, in
+        addition to the default one and those built from the smaller model.
+        Default 5. With three or more regimes the likelihood has several
+        local maxima; if the result changes with ``random_state``, raise
+        this number.
     **model_kwargs
         Additional arguments passed to the model constructor (``exog``,
         ``trend``, ``switching_variance``, ...). The model with one regime
@@ -567,6 +656,7 @@ class RegimeNumberSelection:
         order: int = 1,
         n_bootstrap: int = 199,
         random_state: RandomState = None,
+        search_reps: int | None = None,
         **model_kwargs: Any,
     ) -> None:
         if method not in _METHODS:
@@ -581,12 +671,19 @@ class RegimeNumberSelection:
             raise ValueError("significance must be between 0 and 1")
         if n_bootstrap < 1:
             raise ValueError("n_bootstrap must be at least 1")
-        if method == "sequential" and smallest_pvalue(n_bootstrap) >= significance:
+        if method == "sequential" and not can_reject(n_bootstrap, significance):
             raise ValueError(
                 f"with n_bootstrap={n_bootstrap} the smallest possible p-value "
                 f"is {smallest_pvalue(n_bootstrap):.4f}, so the tests could "
-                f"never reject at significance={significance}"
+                f"never reject at significance={significance}; use at least "
+                f"{replications_needed(significance)} replications"
             )
+        if model_type == "ar" and (int(order) != order or order < 1):
+            raise ValueError('order must be a positive integer for model_type="ar"')
+        if search_reps is not None and search_reps < 0:
+            raise ValueError("search_reps must not be negative")
+        if search_reps is not None:
+            self._search_reps = int(search_reps)
         self.endog = np.asarray(endog, dtype=np.float64).ravel()
         self.k_max = k_max
         self.model_type = model_type
@@ -597,6 +694,9 @@ class RegimeNumberSelection:
         self.random_state = random_state
         self.model_kwargs = model_kwargs
         self._rng: np.random.Generator | None = None
+        # a misspelled or unsupported model argument is an error here, not
+        # a model that silently cannot be estimated later
+        self._build_model(2, self.endog)
 
     # ------------------------------------------------------------------
     # Estimation
@@ -647,41 +747,47 @@ class RegimeNumberSelection:
             "n_params": results.df_model,
         }
 
+    def _build_model(self, k: int, endog: NDArray[Any]) -> Any:
+        """The Markov switching model with ``k`` regimes."""
+        from regimes.markov import MarkovAR, MarkovRegression
+
+        if self.model_type == "ar":
+            return MarkovAR(endog, k_regimes=k, order=self.order, **self.model_kwargs)
+        return MarkovRegression(endog, k_regimes=k, **self.model_kwargs)
+
     def _fit_k_regimes(
         self,
         k: int,
+        lower: Any,
+        one_regime: OneRegimeResults,
         endog: NDArray[Any] | None = None,
-        lower: Any = None,
-        starts: Sequence[Any] = (),
+        inference: bool = True,
     ) -> dict[str, Any]:
         """Fit a k-regime Markov switching model.
 
-        ``lower`` is the fitted model with ``k - 1`` regimes; the estimation
+        ``lower`` is the fitted model with ``k - 1`` regimes: the estimation
         is also started from its estimates with each regime split in two.
-        ``starts`` are further starting values in the layout of the model.
+        ``one_regime`` is the fitted one-regime model of the same sample,
+        whose variance enters the penalty of a model with regime-specific
+        variances. Without ``inference`` no covariance matrix is computed
+        (bootstrap samples).
         """
-        from regimes.markov import MarkovAR, MarkovRegression
-
         y = self.endog if endog is None else endog
+        penalized = False
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-
-            model: Any
-            if self.model_type == "ar":
-                model = MarkovAR(y, k_regimes=k, order=self.order, **self.model_kwargs)
-            else:
-                model = MarkovRegression(y, k_regimes=k, **self.model_kwargs)
+            model = self._build_model(k, y)
             model._search_rng = self._rng
+            model._extra_starts = lambda sm_model: _split_starts(sm_model, lower)
 
-            def extra_starts(sm_model: Any) -> list[Any]:
-                out: list[Any] = [
-                    np.asarray(start, dtype=np.float64) for start in starts
-                ]
-                if lower is not None:
-                    out.extend(_split_starts(sm_model, lower))
-                return out
+            def objective(sm_model: Any) -> Any:
+                nonlocal penalized
+                penalty = _variance_penalty(sm_model, one_regime.sigma2)
+                penalized = penalty is not None
+                return penalty
 
-            model._extra_starts = extra_starts
+            model._search_objective = objective
+            model._search_inference = inference
             results = model.fit(search_reps=self._search_reps)
 
         if not np.isfinite(results.llf):
@@ -693,18 +799,24 @@ class RegimeNumberSelection:
             "bic": float(results.bic),
             "hqic": float(results.hqic),
             "n_params": int(results.df_model),
+            "penalized": penalized,
         }
 
-    def _fit(
-        self,
-        k: int,
-        endog: NDArray[Any] | None = None,
-        lower: Any = None,
-        starts: Sequence[Any] = (),
-    ) -> dict[str, Any]:
-        if k == 1:
-            return self._fit_k1(endog)
-        return self._fit_k_regimes(k, endog, lower, starts)
+    def _fit_up_to(
+        self, k_top: int, endog: NDArray[Any], inference: bool
+    ) -> dict[int, dict[str, Any]]:
+        """Fit the models with ``1, ..., k_top`` regimes on a sample.
+
+        The one procedure for the data and for every bootstrap sample: each
+        model is estimated from the default, the random and the split
+        starting values built from the model with one regime less.
+        """
+        fitted = {1: self._fit_k1(endog)}
+        for k in range(2, k_top + 1):
+            fitted[k] = self._fit_k_regimes(
+                k, fitted[k - 1]["results"], fitted[1]["results"], endog, inference
+            )
+        return fitted
 
     def _build_ic_table(self, fitted: dict[int, dict[str, Any]]) -> Any:
         """Build the IC comparison table."""
@@ -758,107 +870,110 @@ class RegimeNumberSelection:
             sm_results.model, np.asarray(sm_results.params, dtype=np.float64), rng
         )
 
-    def _lr_statistic(
-        self, k0: int, endog: NDArray[Any], null_results: Any = None
-    ) -> float:
+    def _lr_statistic(self, k0: int, endog: NDArray[Any]) -> float:
         """LR statistic of ``k0`` against ``k0 + 1`` regimes on a sample.
 
-        ``null_results`` is the fitted model the sample was drawn from; the
-        model with ``k0`` regimes is also estimated from its parameters.
+        Every model up to ``k0 + 1`` regimes is estimated on the sample by
+        the procedure used on the data (``_fit_up_to``).
         """
-        starts: list[Any] = []
-        if null_results is not None and not isinstance(null_results, OneRegimeResults):
-            starts.append(np.asarray(null_results._sm_results.params))
-        fit0 = self._fit(k0, endog, starts=starts)
-        fit1 = self._fit(k0 + 1, endog, lower=fit0["results"])
-        return _lr(fit1["llf"], fit0["llf"], k0)
+        fitted = self._fit_up_to(k0 + 1, endog, inference=False)
+        return _lr(
+            fitted[k0 + 1]["llf"],
+            fitted[k0]["llf"],
+            k0,
+            penalized=fitted[k0 + 1]["penalized"],
+        )
 
-    def _select_sequential(
-        self,
-        fitted: dict[int, dict[str, Any]],
-        verbose: bool = False,
-    ) -> tuple[int, list[dict[str, Any]]]:
-        """Select K by sequential bootstrap LR tests.
+    def _bootstrap_test(
+        self, k0: int, fitted: dict[int, dict[str, Any]], verbose: bool
+    ) -> dict[str, Any]:
+        """Bootstrap test of ``k0`` against ``k0 + 1`` regimes."""
+        k1 = k0 + 1
+        lr_stat = _lr(
+            fitted[k1]["llf"], fitted[k0]["llf"], k0, penalized=fitted[k1]["penalized"]
+        )
+        null_results = fitted[k0]["results"]
 
-        Tests K against K + 1: H0 is that K regimes are sufficient. Stops
-        when H0 is not rejected.
-        """
-        tests = []
-        selected_k = 1
-
-        for k0 in range(1, self.k_max):
-            k1 = k0 + 1
-            if k1 not in fitted:
-                break
-
-            lr_stat = _lr(fitted[k1]["llf"], fitted[k0]["llf"], k0)
-            null_results = fitted[k0]["results"]
-
-            if verbose:
-                print(
-                    f"Testing K={k0} against K={k1}: LR = {lr_stat:.4f}, "
-                    f"{self.n_bootstrap} bootstrap replications..."
-                )
-
-            if lr_stat == 0.0:
-                # every simulated statistic is at least zero: p-value one
-                p_value, critical_value = 1.0, float("nan")
-                n_valid = n_failed = 0
-            else:
-
-                def simulate(
-                    rng: np.random.Generator, null: Any = null_results
-                ) -> NDArray[np.floating[Any]]:
-                    return self._simulate(null, rng)
-
-                def statistic(
-                    sample: NDArray[np.floating[Any]],
-                    k: int = k0,
-                    null: Any = null_results,
-                ) -> float:
-                    return self._lr_statistic(k, sample, null)
-
-                outcome = monte_carlo_pvalue(
-                    lr_stat,
-                    simulate,
-                    statistic,
-                    self.n_bootstrap,
-                    as_generator(self._rng),
-                )
-                if outcome.n_valid == 0:
-                    raise RuntimeError(
-                        f"testing {k0} against {k1} regimes: the statistic "
-                        "could not be computed in any bootstrap replication"
-                    ) from outcome.last_error
-                p_value = outcome.p_value
-                critical_value = outcome.critical_value(self.significance)
-                n_valid, n_failed = outcome.n_valid, outcome.n_failed
-
-            rejected = bool(p_value < self.significance)
-
-            tests.append(
-                {
-                    "k0": k0,
-                    "k1": k1,
-                    "lr_statistic": lr_stat,
-                    "p_value": p_value,
-                    "critical_value": critical_value,
-                    "n_extra_params": fitted[k1]["n_params"] - fitted[k0]["n_params"],
-                    "n_bootstrap": n_valid,
-                    "n_bootstrap_failed": n_failed,
-                    "rejected": rejected,
-                }
+        if verbose:
+            print(
+                f"Testing K={k0} against K={k1}: LR = {lr_stat:.4f}, "
+                f"{self.n_bootstrap} bootstrap replications..."
             )
 
-            if rejected:
-                selected_k = k1
-            else:
-                break
+        if lr_stat == 0.0:
+            # every simulated statistic is at least zero: p-value one
+            p_value, critical_value = 1.0, float("nan")
+            n_valid = n_failed = 0
+        else:
+            outcome = monte_carlo_pvalue(
+                lr_stat,
+                lambda rng: self._simulate(null_results, rng),
+                lambda sample: self._lr_statistic(k0, sample),
+                self.n_bootstrap,
+                as_generator(self._rng),
+            )
+            if outcome.n_valid == 0:
+                raise RuntimeError(
+                    f"testing {k0} against {k1} regimes: the statistic "
+                    "could not be computed in any bootstrap replication"
+                ) from outcome.last_error
+            if not can_reject(outcome.n_valid, self.significance):
+                warnings.warn(
+                    f"testing {k0} against {k1} regimes: the statistic could "
+                    f"be computed in {outcome.n_valid} of {self.n_bootstrap} "
+                    "bootstrap replications only, too few for a test at "
+                    f"level {self.significance} to reject",
+                    UserWarning,
+                    stacklevel=4,
+                )
+            p_value = outcome.p_value
+            critical_value = outcome.critical_value(self.significance)
+            n_valid, n_failed = outcome.n_valid, outcome.n_failed
 
-        return selected_k, tests
+        return {
+            "k0": k0,
+            "k1": k1,
+            "lr_statistic": lr_stat,
+            "p_value": p_value,
+            "critical_value": critical_value,
+            "n_extra_params": fitted[k1]["n_params"] - fitted[k0]["n_params"],
+            "n_bootstrap": n_valid,
+            "n_bootstrap_failed": n_failed,
+            "rejected": rejects(p_value, self.significance),
+        }
+
+    def _try_fit(
+        self,
+        k: int,
+        fitted: dict[int, dict[str, Any]],
+        notes: list[str],
+        verbose: bool,
+    ) -> bool:
+        """Fit the model with ``k`` regimes on the data; False if it fails."""
+        if verbose:
+            print(f"Fitting K={k}...")
+        try:
+            fitted[k] = self._fit_k_regimes(
+                k, fitted[k - 1]["results"], fitted[1]["results"]
+            )
+        except Exception as error:
+            note = (
+                f"the model with {k} regimes could not be estimated "
+                f"({type(error).__name__}: {error}); models with {k} or more "
+                "regimes were not considered"
+            )
+            notes.append(note)
+            warnings.warn(note, UserWarning, stacklevel=3)
+            return False
+        return True
 
     def fit(self, verbose: bool = False) -> RegimeNumberSelectionResults:
         """Run regime number selection.
+
+        With an information criterion the models with ``1, ..., k_max``
+        regimes are estimated. With ``method="sequential"`` a model is
+        estimated only when it is needed for a test, so ``results_by_k`` and
+        the table stop one regime above the selected number.
 
         Parameters
         ----------
@@ -868,44 +983,52 @@ class RegimeNumberSelection:
         Returns
         -------
         RegimeNumberSelectionResults
-            Selection results.
+            Selection results. ``notes`` lists a model that could not be
+            estimated (a warning is issued as well) and a selected K equal
+            to ``k_max``.
         """
         self._rng = (
             None if self.random_state is None else as_generator(self.random_state)
         )
+        notes: list[str] = []
         fitted: dict[int, dict[str, Any]] = {}
 
-        # Fit K=1 (no switching)
         if verbose:
             print("Fitting K=1 (no switching)...")
         fitted[1] = self._fit_k1()
 
-        # Fit K=2, ..., k_max, each also from the estimates with one regime less
-        for k in range(2, self.k_max + 1):
-            if verbose:
-                print(f"Fitting K={k}...")
-            try:
-                fitted[k] = self._fit_k_regimes(k, lower=fitted[k - 1]["results"])
-            except Exception as e:
-                if verbose:
-                    print(f"  Failed for K={k}: {e}")
-                break
-
-        ic_table = self._build_ic_table(fitted)
-
         sequential_tests = None
         if self.method == "sequential":
-            selected_k, sequential_tests = self._select_sequential(fitted, verbose)
+            sequential_tests = []
+            selected_k = 1
+            for k0 in range(1, self.k_max):
+                if not self._try_fit(k0 + 1, fitted, notes, verbose):
+                    break
+                test = self._bootstrap_test(k0, fitted, verbose)
+                sequential_tests.append(test)
+                if not test["rejected"]:
+                    break
+                selected_k = k0 + 1
+            if selected_k == self.k_max and self.k_max > 1:
+                notes.append(
+                    f"{self.k_max} regimes is k_max: it was not tested against "
+                    f"{self.k_max + 1}"
+                )
         else:
+            for k in range(2, self.k_max + 1):
+                if not self._try_fit(k, fitted, notes, verbose):
+                    break
+
+        ic_table = self._build_ic_table(fitted)
+        if self.method != "sequential":
             criterion = {"aic": "AIC", "bic": "BIC", "hqic": "HQIC"}[self.method]
             selected_k = self._select_by_ic(ic_table, criterion)
 
-        results_by_k = {k: info["results"] for k, info in fitted.items()}
-
         return RegimeNumberSelectionResults(
             selected_k=selected_k,
-            results_by_k=results_by_k,
+            results_by_k={k: info["results"] for k, info in fitted.items()},
             ic_table=ic_table,
             method=self.method,
             sequential_tests=sequential_tests,
+            notes=notes,
         )

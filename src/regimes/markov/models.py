@@ -124,6 +124,91 @@ def _seeded_search_fit(
     return best_results
 
 
+def _objective_search_fit(
+    sm_model: Any,
+    method: str,
+    maxiter: int,
+    em_iter: int,
+    search_reps: int,
+    rng: np.random.Generator | None,
+    extra_starts: Sequence[Any],
+    penalty: Any,
+    inference: bool,
+    **kwargs: Any,
+) -> Any:
+    """The search of ``_seeded_search_fit`` for a (penalized) objective.
+
+    Two differences. Each starting value is taken to its optimum without
+    building a results object, and the smoother (and, if ``inference``, the
+    covariance matrix) is computed once, for the best one. And if
+    ``penalty`` is given, a function of the parameter vector, the optimizer
+    maximizes the log-likelihood plus that penalty and the starting values
+    are compared on the same objective; the log-likelihood of the results
+    is the plain one.
+    """
+    generator = rng if rng is not None else np.random.default_rng()
+    base = kwargs.pop("start_params", None)
+    plain = sm_model.loglike
+    if penalty is not None:
+
+        def penalized(params: Any, transformed: bool = True) -> Any:
+            constrained = params if transformed else sm_model.transform_params(params)
+            return plain(params, transformed) + penalty(constrained)
+
+        # statsmodels' optimizer, score and Hessian all go through loglike
+        sm_model.loglike = penalized
+
+    best_params = None
+    best_value = -np.inf
+
+    def consider(start: Any, n_em: int) -> None:
+        nonlocal best_params, best_value
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                if start is None:
+                    params = sm_model.fit(
+                        method=method,
+                        maxiter=maxiter,
+                        em_iter=n_em,
+                        return_params=True,
+                        **kwargs,
+                    )
+                else:
+                    params = sm_model.fit(
+                        start_params=np.asarray(start, dtype=float),
+                        transformed=True,
+                        method=method,
+                        maxiter=maxiter,
+                        em_iter=n_em,
+                        return_params=True,
+                        **kwargs,
+                    )
+                value = float(np.real(sm_model.loglike(params)))
+            except Exception:
+                return
+        if np.isfinite(value) and value > best_value:
+            best_params = np.asarray(params, dtype=float)
+            best_value = value
+
+    try:
+        consider(base, em_iter)
+        for _ in range(search_reps):
+            consider(_random_start(sm_model, generator, base), 0)
+        for start in extra_starts:
+            consider(start, 0)
+    finally:
+        if penalty is not None:
+            del sm_model.loglike
+    if best_params is None:
+        raise RuntimeError("the Markov switching model could not be estimated")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return sm_model.smooth(
+            best_params, transformed=True, cov_type="approx" if inference else "none"
+        )
+
+
 class _SMMarkovAutoregression(MarkovAutoregression):  # type: ignore[misc]
     """statsmodels' MarkovAutoregression with the current regime's variance.
 
@@ -606,6 +691,21 @@ class MarkovRegression:
         if callable(extra_starts):
             # starting values that depend on the layout of the model
             extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,
@@ -905,6 +1005,21 @@ class MarkovAR:
         if callable(extra_starts):
             # starting values that depend on the layout of the model
             extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,
@@ -1319,6 +1434,21 @@ class MarkovADL:
         if callable(extra_starts):
             # starting values that depend on the layout of the model
             extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,

@@ -257,7 +257,7 @@ ar_model = rg.AR(y, lags=1)
 ms_ar = ar_model.markov_switching(k_regimes=2)
 ```
 
-Select the number of regimes using information criteria, or sequential likelihood ratio tests of K against K+1 regimes with p-values from a parametric bootstrap (Kasahara and Shimotsu, 2018; Qu and Zhuo, 2021; `method="sequential"`, `n_bootstrap=199`, `random_state=...`; slow, since every replication estimates two models):
+Select the number of regimes using information criteria, or sequential likelihood ratio tests of K against K+1 regimes with p-values from a parametric bootstrap (Kasahara and Shimotsu, 2018; `method="sequential"`, `n_bootstrap=199`, `random_state=...`). The bootstrap is slow, since every replication estimates the models again; the docstring of `regimes.markov.selection` states what is known about the test:
 
 ```python
 # Regime number selection
