@@ -1296,16 +1296,16 @@ class MarkovADL:
         k_exog = self.exog.shape[1]
         result: dict[int, list[int]] = {}
 
-        if isinstance(self.exog_lags_raw, int):
+        if isinstance(self.exog_lags_raw, (int, np.integer)):
             for i in range(k_exog):
                 result[i] = list(range(0, self.exog_lags_raw + 1))
         elif isinstance(self.exog_lags_raw, dict):
             for key, val in self.exog_lags_raw.items():
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     idx = self._exog_names.index(str(key))
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
@@ -1628,7 +1628,7 @@ class MarkovADL:
             New Markov switching ADL model.
         """
         ar_order = max(model.lags) if model.lags else 0
-        return cls(
+        instance = cls(
             endog=model.endog,
             exog=model.exog,
             k_regimes=k_regimes,
@@ -1637,3 +1637,7 @@ class MarkovADL:
             trend=model.trend,
             **kwargs,
         )
+        # the model's names for its regressors (column names of a DataFrame),
+        # which exog_lags may refer to
+        instance._exog_names = list(model._exog_names)
+        return instance

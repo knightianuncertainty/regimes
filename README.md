@@ -610,7 +610,11 @@ All regression models support multiple covariance estimators:
 
 - `"nonrobust"`: Standard OLS covariance
 - `"HC0"`, `"HC1"`, `"HC2"`, `"HC3"`: Heteroskedasticity-robust (White)
-- `"HAC"`: Heteroskedasticity and autocorrelation consistent (Newey-West)
+- `"HAC"`: Heteroskedasticity and autocorrelation consistent (Newey-West, Bartlett kernel). The default number of lags is the fixed rule `floor(4 (T/100)^(2/9))`, not a data-dependent bandwidth; set it with `cov_kwds={"maxlags": ...}`.
+
+Conventions: with breaks the model is one regression with regime-specific columns, so the error variance is pooled across regimes (use `fit_by_regime()` for separate regressions); p-values and confidence intervals use the t distribution with `n - k` degrees of freedom for every covariance type; R-squared is centered, also without a constant.
+
+Rolling and recursive estimation supports `"nonrobust"` and `"HC0"` only.
 
 ## Testing
 
