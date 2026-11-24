@@ -31,11 +31,17 @@ jobs:
           name: dist
           path: dist/
 
+  # Publishing to PyPI is switched off until a trusted publisher is configured
+  # for the repository (PyPI names the owner and the repository, so this waits
+  # for the decision on where the repository lives). To switch it on, set the
+  # repository variable PUBLISH_TO_PYPI to "true" (Settings > Secrets and
+  # variables > Actions > Variables).
   publish-test:
     name: Publish to Test PyPI
+    if: vars.PUBLISH_TO_PYPI == 'true'
     needs: build
     runs-on: ubuntu-latest
-    continue-on-error: true  # Non-blocking until trusted publisher configured (v0.5.0)
+    continue-on-error: true
     environment: test-pypi
     permissions:
       id-token: write
@@ -53,6 +59,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
+    if: vars.PUBLISH_TO_PYPI == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
@@ -68,9 +75,10 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  # The release page on GitHub does not depend on PyPI: it needs the build only.
   github-release:
     name: Create GitHub Release
-    needs: publish
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
