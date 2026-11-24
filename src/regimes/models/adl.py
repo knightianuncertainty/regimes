@@ -474,8 +474,12 @@ class ADL(RegimesModelBase):
         uses specific lag indices. Default is 1.
     exog_lags : int | dict[str | int, int | Sequence[int]]
         Distributed lags (q) for exogenous variables:
+
         - If int: Same lag structure for all exog variables (e.g., 2 -> L0, L1, L2)
-        - If dict: Variable-specific lags (e.g., {"x1": 2, "x2": 1})
+        - If dict: Variable-specific lags by name or column number (e.g.,
+          {"x0": 2, "x1": 1}; columns of an array are named x0, x1, ...,
+          columns of a DataFrame keep their names)
+
         Default is 0 (contemporaneous only).
     breaks : Sequence[int] | None
         Known break points (observation indices). All variables share
@@ -947,6 +951,7 @@ class ADL(RegimesModelBase):
         ----------
         cov_type : CovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
@@ -1201,6 +1206,7 @@ class ADL(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         max_breaks : int
@@ -1251,6 +1257,7 @@ class ADL(RegimesModelBase):
             model's data (the first observation of the second regime).
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         significance : float
@@ -1349,6 +1356,7 @@ class ADL(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         trimming : float

@@ -417,6 +417,7 @@ class RegimesModelBase(ABC):
         ----------
         cov_type : CovType
             Type of covariance estimator. Options include:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent

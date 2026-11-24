@@ -195,6 +195,7 @@ class ChowTest(BreakTestBase):
     Notes
     -----
     The Chow test assumes:
+
     - Normally distributed errors (for exact F distribution)
     - Homoskedastic errors across regimes
     - Independent errors
@@ -241,6 +242,7 @@ class ChowTest(BreakTestBase):
             Model to test for structural breaks.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
 

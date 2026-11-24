@@ -10,22 +10,36 @@ analyzing regime changes.
    :caption: Contents:
 
    quickstart
+   conventions
+   validation
    api
 
 Features
 --------
 
-- **Structural Break Tests**: Bai-Perron test for multiple structural breaks
-- **Time-Series Models**: AR, OLS with HAC standard errors and known break support
-- **Model Selection**: BIC, LWZ criteria for selecting the number of breaks
-- **Visualization**: Plot time series with break lines and confidence intervals
+- **Structural break tests**: the Bai-Perron procedure for multiple breaks,
+  the Chow test, CUSUM and CUSUM-of-squares, and the Andrews-Ploberger tests
+- **Models with known breaks**: OLS, AR and ADL with regime-specific
+  coefficients and robust standard errors
+- **Rolling and recursive estimation** of the same models
+- **Markov switching**: regressions, autoregressions and ADL models,
+  restricted (non-recurring) transitions, tests of the restrictions and
+  selection of the number of regimes
+- **Visualization**: break dates, regime means, coefficient paths,
+  diagnostics, smoothed probabilities
+
+What a break date is, how the statistics are scaled and which estimators
+are used is set out in :doc:`conventions`. What each method was checked
+against, with the numbers, is in :doc:`validation`.
 
 Installation
 ------------
 
+The package is not on PyPI yet. Install it from GitHub:
+
 .. code-block:: bash
 
-   pip install regimes
+   pip install git+https://github.com/knightianuncertainty/regimes.git
 
 Quick Example
 -------------

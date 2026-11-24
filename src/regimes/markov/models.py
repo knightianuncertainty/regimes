@@ -607,6 +607,7 @@ class MarkovRegression:
         Whether the error variance switches. Default False.
     ordering : str | None
         How to order regimes after estimation:
+
         - "first_appearance" (default): Regime 0 appears first chronologically.
         - "intercept": Regime 0 has the lowest constant (needs a constant
           that switches across regimes).

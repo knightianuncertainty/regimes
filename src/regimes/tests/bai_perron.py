@@ -190,6 +190,7 @@ class BaiPerronResults(BreakTestResultsBase):
         ----------
         cov_type : CovType
             Covariance type for the OLS estimation. Options are:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
@@ -572,6 +573,7 @@ class BaiPerronTest(BreakTestBase):
             Model to test for structural breaks.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
 
