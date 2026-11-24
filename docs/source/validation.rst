@@ -273,22 +273,24 @@ distribution is right):
      - At 5 percent
      - At 10 percent
    * - Null: one regime, independent normal data
-     - 59
-     - 1
-     - 2
+     - 100
+     - 5
+     - 6
    * - Null: one regime, ``y = 1 + 2x + e`` with a fixed regressor
-     - 28
-     - 1
-     - 2
+     - 60
+     - 4
+     - 5
    * - Alternative: two recurring regimes (probabilities 0.95 and 0.90 of
        staying, means 2 apart)
      - 30
      - 27
      - 28
 
-The test is slow, so the samples are few: the counts show that nothing is
-grossly wrong (the test this replaces rejected a true null about 20 percent
-of the time), not that the size is exact. Two regimes against three,
+With 100 samples the standard error of a rejection rate of 5 percent is
+about 2 percentage points (3 with 60), so the counts are consistent with
+the nominal levels and rule out a gross error (the test this replaces
+rejected a true null about 20 percent of the time); they do not establish
+the size to the last percentage point. Two regimes against three,
 autoregressions and regime-specific variances were not simulated here.
 
 .. regime-number-simulation-end
