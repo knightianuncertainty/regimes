@@ -109,11 +109,14 @@ Chow, CUSUM and Andrews-Ploberger
        residuals equals the residual sum of squares, also for regressors
        that grow by nine orders of magnitude over the sample; the
        observations without a residual are those at which the rank rises
-       in exact rational arithmetic, for about a hundred designs with
-       exact linear dependencies in part of the sample (test, same file,
-       ``TestDependenciesAgainstExactArithmetic``); a cubic in calendar
+       in exact rational arithmetic, for about two hundred designs with
+       exact linear dependencies in part of the sample, first observations
+       that are almost equal, kinked regressors, and one very large value
+       (tests, same file: ``TestDependenciesAgainstExactArithmetic``,
+       ``TestDesignsFromTheSecondReview``); agreement with the computation
+       of version 0.5.0 on ordinary designs to 1e-11; a cubic in calendar
        years against the same trend measured from the start of the sample:
-       differences below 2e-3, with the warning about accuracy
+       differences below 2e-3
    * - CUSUM-of-squares path and bounds
      - statsmodels ``RecursiveLS`` (test, same file)
    * - Sequence of F statistics, SupF, AveF, ExpF and their p-values

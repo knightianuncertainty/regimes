@@ -426,9 +426,12 @@ class TestRegimeEstimatesAndMessages:
             results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
         test = results._test
         reference = test.get_regime_estimates([200])
-        for same in ([200.0], np.array([200.0]), 200, np.int64(200)):
+        for same in ([200.0], np.array([200.0]), 200, np.int64(200), 200.0):
             estimates = test.get_regime_estimates(same)
             assert [ssr for _c, ssr in estimates] == [ssr for _c, ssr in reference]
+        for wrong in (True, [True], [np.True_], 200.5, ["200"]):
+            with pytest.raises(TypeError, match="break dates must be integers"):
+                test.get_regime_estimates(wrong)
 
     def test_exact_fit_message_of_andrews_ploberger(self) -> None:
         """A series that steps from 0 to 1 at observation 50 is fitted exactly

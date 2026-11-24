@@ -1121,13 +1121,15 @@ class BaiPerronTest(BreakTestBase):
         y, z, x = self._data()
         q = self.q
         supplied: Any = break_indices
-        if isinstance(supplied, (int, np.integer)):
+        if isinstance(supplied, (int, float, np.integer, np.floating)):
             supplied = [supplied]  # a single date
         given = []
         for b in supplied:
             if isinstance(b, (float, np.floating)) and float(b).is_integer():
                 b = int(b)  # 100.0 is the date 100
             try:
+                if isinstance(b, (bool, np.bool_)):
+                    raise TypeError
                 given.append(operator.index(b))
             except TypeError:
                 raise TypeError(

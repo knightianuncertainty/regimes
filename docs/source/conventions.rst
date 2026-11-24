@@ -167,15 +167,20 @@ CUSUM tests
   rank is decided from the linear dependencies that hold among the columns
   in all earlier observations (a column that is zero so far, two columns
   that are equal so far), with a relative tolerance of 1e-13; the decision
-  does not change when a regressor is rescaled. The accuracy of the
-  residuals is limited by how close to collinear the regressors are in the
-  first observations. A quadratic or cubic trend in calendar years or date
-  numbers is accurate to about four digits, and a warning gives the
-  estimate; the same trend measured from the start of the sample is
-  accurate to twelve digits. A design for which the residuals do not
-  reproduce the residual sum of squares to a relative 1e-6 (a quartic in
-  calendar years), a regression that fits the data exactly, and data with
-  NaN or infinite values raise an error.
+  does not change when a regressor is rescaled.
+* The recursive residuals are checked: their sum of squares must equal the
+  residual sum of squares of the regression. When it does not to a relative
+  1e-9, they are computed again by two other methods (the last is that of
+  version 0.5.0), and the computation that comes closest is used. If none
+  comes within a relative 1e-6, an error is raised; this happens for a
+  cubic trend in monthly calendar years and a quartic trend in quarterly
+  calendar years. A regression that fits the data exactly, and data with
+  NaN or infinite values, also raise an error.
+* The check does not show that each residual is accurate to many digits.
+  A polynomial trend in calendar time gives about eight digits (quadratic,
+  quarterly calendar years), four (cubic) or three (quadratic in daily date
+  numbers); the same trend measured from the start of the sample gives
+  twelve or more. Measure trends from the start of the sample.
 * The Chow and Andrews-Ploberger tests compute their sums of squared
   residuals from regressors scaled to unit length, so the statistics do not
   depend on the units of the regressors.
