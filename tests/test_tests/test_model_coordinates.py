@@ -414,10 +414,21 @@ class TestRegimeEstimatesAndMessages:
         results = rg.BaiPerronTest(y).fit(max_breaks=2)
         index = pd.period_range("2000-01", periods=120, freq="M")
         assert "2005-01" in results.summary(index=index)
-        with pytest.raises(
-            ValueError, match="index has 50 entries for a sample of 120"
-        ):
+        # an index that covers the dates that are printed is enough
+        assert "2005-01" in results.summary(index=index[:100])
+        with pytest.raises(ValueError, match="too few for the dates of this summary"):
             results.summary(index=index[:50])
+
+    def test_regime_estimates_accept_whole_numbers(self) -> None:
+        y = _ar_break_data(seed=30)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
+        test = results._test
+        reference = test.get_regime_estimates([200])
+        for same in ([200.0], np.array([200.0]), 200, np.int64(200)):
+            estimates = test.get_regime_estimates(same)
+            assert [ssr for _c, ssr in estimates] == [ssr for _c, ssr in reference]
 
     def test_exact_fit_message_of_andrews_ploberger(self) -> None:
         """A series that steps from 0 to 1 at observation 50 is fitted exactly

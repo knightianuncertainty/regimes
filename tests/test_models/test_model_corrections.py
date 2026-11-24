@@ -1039,3 +1039,17 @@ class TestIntegerTypesAndNames:
             assert ("write [50] for a single break" in str(info.value)) is hint
         with pytest.raises(TypeError, match="list of integers"):
             normalize_breaks(np.array(50), 200)  # type: ignore[arg-type]
+
+    def test_break_dates_from_any_iterable(self) -> None:
+        """Sets and generators were accepted in 0.5.0 and still are."""
+        assert normalize_breaks({120, 40}, 200) == [40, 120]
+        assert normalize_breaks((b for b in (120, 40)), 200) == [40, 120]
+        assert normalize_breaks(np.array([120, 40]), 200) == [40, 120]
+
+    def test_two_columns_with_the_same_name(self) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(60)
+        frame = pd.DataFrame(rng.standard_normal((80, 2)), columns=["rate", "rate"])
+        with pytest.raises(ValueError, match="Two regressors have the same name"):
+            rg.ADL(rng.standard_normal(80), frame, lags=1, exog_lags=0).fit()

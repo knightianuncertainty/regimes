@@ -166,10 +166,19 @@ CUSUM tests
   observation of each point of a path. Whether an observation adds to the
   rank is decided from the linear dependencies that hold among the columns
   in all earlier observations (a column that is zero so far, two columns
-  that are equal so far); the decision does not change when a regressor is
-  rescaled. A design that double precision cannot resolve (a cubic in
-  calendar years) raises an error: measure the trend from the start of the
-  sample.
+  that are equal so far), with a relative tolerance of 1e-13; the decision
+  does not change when a regressor is rescaled. The accuracy of the
+  residuals is limited by how close to collinear the regressors are in the
+  first observations. A quadratic or cubic trend in calendar years or date
+  numbers is accurate to about four digits, and a warning gives the
+  estimate; the same trend measured from the start of the sample is
+  accurate to twelve digits. A design for which the residuals do not
+  reproduce the residual sum of squares to a relative 1e-6 (a quartic in
+  calendar years), a regression that fits the data exactly, and data with
+  NaN or infinite values raise an error.
+* The Chow and Andrews-Ploberger tests compute their sums of squared
+  residuals from regressors scaled to unit length, so the statistics do not
+  depend on the units of the regressors.
 * The CUSUM scale estimate is ``sqrt(sum w^2 / (T - k))`` (uncentered).
 * CUSUM bounds: the lines of Brown, Durbin and Evans (1975) with
   ``a = 1.143, 0.948, 0.850`` for 1, 5 and 10 percent.

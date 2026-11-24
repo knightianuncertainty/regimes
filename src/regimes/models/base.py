@@ -84,7 +84,9 @@ def normalize_breaks(
     """
     if breaks is None:
         return []
-    if isinstance(breaks, (int, float, str, np.number)) or np.ndim(breaks) == 0:
+    if isinstance(breaks, (int, float, str, np.number)) or (
+        isinstance(breaks, np.ndarray) and breaks.ndim == 0
+    ):
         hint = (
             f"; write [{int(breaks)}] for a single break"
             if isinstance(breaks, (int, np.integer)) and not isinstance(breaks, bool)
@@ -182,9 +184,9 @@ def check_unique_names(param_names: Sequence[str]) -> None:
         seen.add(name)
     if duplicates:
         raise ValueError(
-            f"parameter names are not unique: {duplicates}. A regressor has "
-            "the name the model gives to its constant, trend or a lag; "
-            "rename the column"
+            f"parameter names are not unique: {duplicates}. Two regressors "
+            "have the same name, or a regressor has the name the model gives "
+            "to its constant, trend or a lag; rename the column"
         )
 
 

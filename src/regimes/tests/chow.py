@@ -20,7 +20,12 @@ import numpy as np
 from scipy import stats
 
 from regimes.tests._bp_core import independent_columns
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+from regimes.tests.base import (
+    BreakTestBase,
+    BreakTestResultsBase,
+    ols_ssr,
+    split_constant,
+)
 
 
 def _scaled_rank(X: NDArray[np.floating[Any]]) -> int:
@@ -362,11 +367,7 @@ class ChowTest(BreakTestBase):
             Sum of squared residuals.
         """
         try:
-            beta, residuals, _rank, _s = np.linalg.lstsq(X, y, rcond=None)
-            if len(residuals) > 0:
-                return float(residuals[0])
-            else:
-                return float(np.sum((y - X @ beta) ** 2))
+            return ols_ssr(y, X)
         except np.linalg.LinAlgError:
             return np.inf
 
@@ -518,7 +519,9 @@ class ChowTest(BreakTestBase):
                         "the others in one of the sub-samples (an impulse or "
                         "step dummy, for example). Pass such a regressor as "
                         "`exog`, with a coefficient that does not break, and "
-                        "the regressors that break as `exog_break`"
+                        "the regressors that break as `exog_break` (build "
+                        "the test from the arrays; `from_model` lets either "
+                        "all coefficients or the constant break)"
                     )
                 ssr1 = self._compute_ssr(y1, X1)
                 ssr2 = self._compute_ssr(y2, X2)
@@ -610,9 +613,8 @@ class ChowTest(BreakTestBase):
         ):
             break_points = [int(break_points)]
         else:
-            if (
-                isinstance(break_points, (bool, float, str))
-                or np.ndim(break_points) == 0
+            if isinstance(break_points, (bool, float, str)) or (
+                isinstance(break_points, np.ndarray) and break_points.ndim == 0
             ):
                 raise TypeError(f"break points must be integers, got {break_points!r}")
             points = []
