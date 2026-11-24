@@ -6,6 +6,7 @@ models in the regimes package inherit from.
 
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -61,6 +62,98 @@ def _ensure_array(
         raise ValueError(f"{name} must be {ndim}-dimensional, got {arr.ndim}")
 
     return arr
+
+
+def normalize_breaks(
+    breaks: Sequence[int] | None, nobs: int, what: str = "Break index"
+) -> list[int]:
+    """Break dates as a sorted list of distinct integers in ``1, ..., nobs - 1``.
+
+    A break date is the first observation of the regime that follows it, so
+    a break at 0 would leave the first regime empty.
+
+    Raises
+    ------
+    ValueError
+        If a date is outside ``1, ..., nobs - 1`` or appears twice.
+    """
+    if breaks is None:
+        return []
+    dates = sorted(int(b) for b in breaks)
+    for b in dates:
+        if b <= 0 or b >= nobs:
+            raise ValueError(f"{what} {b} is out of bounds [1, {nobs - 1}]")
+    if len(set(dates)) != len(dates):
+        raise ValueError(f"{what}: break dates must be distinct, got {dates}")
+    return dates
+
+
+def check_break_design(
+    X: NDArray[np.floating[Any]], param_names: Sequence[str]
+) -> None:
+    """Check that a design matrix with regime-specific columns is estimable.
+
+    With breaks, each regime (or each stretch of a variable with its own
+    breaks) needs at least as many observations as it has coefficients, and
+    its regressors must not be collinear. Otherwise coefficients are not
+    identified, and least squares would return arbitrary numbers for them.
+
+    Raises
+    ------
+    ValueError
+        Naming the columns that are identically zero, or stating that the
+        design is rank deficient.
+    """
+    empty = [
+        str(name) for j, name in enumerate(param_names) if not np.any(X[:, j] != 0.0)
+    ]
+    if empty:
+        raise ValueError(
+            "the breaks leave no observations for the coefficient(s) "
+            f"{', '.join(empty)}: a regime is empty (for AR and ADL models "
+            "the initial observations lost to the lags do not count)"
+        )
+    rank = int(np.linalg.matrix_rank(X))
+    if rank < X.shape[1]:
+        raise ValueError(
+            f"the model with breaks is not identified: {X.shape[1]} "
+            f"coefficients but the regressors have rank {rank}. A regime has "
+            "fewer observations than coefficients, or its regressors are "
+            "collinear within the regime"
+        )
+
+
+def fit_with_covariance(
+    sm_model: Any,
+    cov_type: str,
+    cov_kwds: dict[str, Any] | None,
+    nobs: int,
+) -> Any:
+    """Fit a statsmodels OLS model with the requested covariance estimator.
+
+    ``cov_kwds`` is used with ``cov_type="HAC"`` only: ``maxlags`` defaults
+    to the fixed rule ``floor(4 (nobs / 100)^(2/9))`` and ``use_correction``
+    to True; other keywords are passed to statsmodels. With any other
+    covariance type ``cov_kwds`` has no effect, and a warning says so.
+    """
+    cov_kwds = dict(cov_kwds or {})
+    if cov_type == "HAC":
+        if cov_kwds.get("maxlags") is None:
+            cov_kwds["maxlags"] = int(np.floor(4 * (nobs / 100) ** (2 / 9)))
+        cov_kwds.setdefault("use_correction", True)
+        return sm_model.fit(cov_type="HAC", cov_kwds=cov_kwds)
+    if cov_kwds:
+        warnings.warn(
+            f"cov_kwds is only used with cov_type='HAC'; it is ignored for "
+            f"cov_type={cov_type!r}",
+            UserWarning,
+            stacklevel=3,
+        )
+    if cov_type == "nonrobust":
+        return sm_model.fit()
+    if cov_type in ("HC0", "HC1", "HC2", "HC3"):
+        return sm_model.fit(cov_type=cov_type)
+    raise ValueError(f"Unknown cov_type: {cov_type}")
 
 
 class RegimesModelBase(ABC):
@@ -147,8 +240,8 @@ class RegimesModelBase(ABC):
         elif isinstance(exog, pd.DataFrame):
             self._exog_names = [str(c) for c in exog.columns]
 
-        # Store breaks
-        self.breaks: Sequence[int] = list(breaks) if breaks is not None else []
+        # Store breaks, in increasing order
+        self.breaks: Sequence[int] = normalize_breaks(breaks, len(self.endog))
 
         # Validate
         self._validate_data()
@@ -171,13 +264,6 @@ class RegimesModelBase(ABC):
                 raise ValueError(
                     f"endog and exog must have same length, "
                     f"got {len(self.endog)} and {len(self.exog)}"
-                )
-
-        # Validate break indices
-        for b in self.breaks:
-            if b < 0 or b >= self.nobs:
-                raise ValueError(
-                    f"Break index {b} is out of bounds [0, {self.nobs - 1}]"
                 )
 
     @property

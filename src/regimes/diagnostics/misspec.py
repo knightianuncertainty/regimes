@@ -1,10 +1,17 @@
-"""PcGive-style misspecification tests for regression residuals.
+"""Misspecification tests for regression residuals.
 
 This module implements four standard diagnostic tests:
 1. Autocorrelation test - Breusch-Godfrey LM test
 2. ARCH test - Engle's ARCH-LM test
 3. Normality test - Jarque-Bera test
-4. Heteroskedasticity test - White's test
+4. Heteroskedasticity test - White's test (with cross products)
+
+They cover the same four questions as the diagnostic tests that PcGive
+reports, but they are not the statistics PcGive prints: PcGive reports F
+forms of the first, second and fourth test and the Doornik-Hansen normality
+test, and the numbers can differ noticeably in a given sample. Here the
+tests are in their LM (chi-squared) forms; the autocorrelation test drops
+the first ``nlags`` observations of the auxiliary regression.
 """
 
 from __future__ import annotations
@@ -83,7 +90,7 @@ class DiagnosticsResults:
             self.normality,
             self.heteroskedasticity,
         ]
-        return all(t is None or t.pvalue >= 0.05 for t in tests)
+        return all(t is None or np.isnan(t.pvalue) or t.pvalue >= 0.05 for t in tests)
 
     def summary(self) -> str:
         """Generate a text summary of diagnostic tests.
@@ -108,7 +115,11 @@ class DiagnosticsResults:
         ]
 
         for test in tests:
-            if test is not None:
+            if test is None:
+                continue
+            if np.isnan(test.statistic):
+                lines.append(f"{test.test_name:<35} {'n/a':>12} {'n/a':>12}")
+            else:
                 lines.append(
                     f"{test.test_name:<35} {test.statistic:>12.4f} {test.pvalue:>12.4f}"
                 )
@@ -237,6 +248,17 @@ def heteroskedasticity_test(
         exog_for_test = exog
     else:
         exog_for_test = np.column_stack([np.ones(len(resid)), exog])
+
+    if exog_for_test.shape[1] < 2:
+        # a constant-only model: there is no regressor for the variance to
+        # depend on, so the test is not defined
+        return DiagnosticTestResult(
+            test_name="Hetero test (White)",
+            null_hypothesis="Homoskedasticity",
+            statistic=float("nan"),
+            pvalue=float("nan"),
+            df=None,
+        )
 
     lm_stat, lm_pvalue, _f_stat, _f_pvalue = het_white(resid, exog_for_test)
     return DiagnosticTestResult(

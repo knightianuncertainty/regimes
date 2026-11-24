@@ -16,6 +16,8 @@ from regimes.rolling.base import (
     RollingCovType,
     RollingEstimatorBase,
     RollingResultsBase,
+    check_rolling_cov_type,
+    warn_if_breaks,
 )
 
 if TYPE_CHECKING:
@@ -438,6 +440,7 @@ class RollingADL(RollingEstimatorBase):
         >>> rolling = RollingADL.from_model(model, window=60)
         >>> results = rolling.fit()
         """
+        warn_if_breaks(model)
         return cls(
             endog=model.endog,
             exog=model.exog,
@@ -462,6 +465,7 @@ class RollingADL(RollingEstimatorBase):
         RollingADLResults
             Results object with rolling estimates.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
         window = self.window
@@ -777,6 +781,7 @@ class RecursiveADL(RollingEstimatorBase):
         >>> recursive = RecursiveADL.from_model(model, min_nobs=30)
         >>> results = recursive.fit()
         """
+        warn_if_breaks(model)
         return cls(
             endog=model.endog,
             exog=model.exog,
@@ -801,6 +806,7 @@ class RecursiveADL(RollingEstimatorBase):
         RecursiveADLResults
             Results object with recursive estimates.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
 

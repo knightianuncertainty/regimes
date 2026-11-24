@@ -16,6 +16,8 @@ from regimes.rolling.base import (
     RollingCovType,
     RollingEstimatorBase,
     RollingResultsBase,
+    check_rolling_cov_type,
+    warn_if_breaks,
 )
 
 if TYPE_CHECKING:
@@ -346,6 +348,7 @@ class RollingAR(RollingEstimatorBase):
         >>> rolling = RollingAR.from_model(model, window=60)
         >>> results = rolling.fit()
         """
+        warn_if_breaks(model)
         return cls(
             endog=model.endog,
             lags=model.lags,
@@ -374,6 +377,7 @@ class RollingAR(RollingEstimatorBase):
         Estimates are NaN-padded for observations where there are not
         enough data points for the rolling window.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
         window = self.window
@@ -611,6 +615,7 @@ class RecursiveAR(RollingEstimatorBase):
         >>> recursive = RecursiveAR.from_model(model, min_nobs=30)
         >>> results = recursive.fit()
         """
+        warn_if_breaks(model)
         return cls(
             endog=model.endog,
             lags=model.lags,
@@ -639,6 +644,7 @@ class RecursiveAR(RollingEstimatorBase):
         Estimates are NaN-padded for observations where there are not
         enough data points for estimation.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
 
