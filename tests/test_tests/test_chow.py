@@ -432,11 +432,11 @@ class TestARChowMethod:
         y, true_break = ar1_data_with_break
 
         model = AR(y, lags=1)
-        # Break is in full-sample coords; effective sample coords = true_break - maxlag
-        effective_break = true_break - 1  # maxlag=1 for AR(1)
-        results = model.chow_test(break_points=effective_break)
+        # Break dates are observation numbers of the model's data
+        results = model.chow_test(break_points=true_break)
 
         assert isinstance(results, ChowTestResults)
+        assert results.tested_break_points == [true_break]
 
     def test_ar_chow_detects_break(
         self,
@@ -446,8 +446,7 @@ class TestARChowMethod:
         y, true_break = ar1_data_with_break
 
         model = AR(y, lags=1)
-        effective_break = true_break - 1
-        results = model.chow_test(break_points=effective_break)
+        results = model.chow_test(break_points=true_break)
 
         # With phi changing from 0.3 to 0.8, should detect
         assert results.n_breaks >= 1
@@ -466,9 +465,8 @@ class TestADLChowMethod:
         y, x, true_break = adl_data_with_break
 
         model = ADL(y, x, lags=1, exog_lags=1)
-        # Effective sample coordinates
-        effective_break = true_break - 1  # maxlag=1
-        results = model.chow_test(break_points=effective_break)
+        # Break dates are observation numbers of the model's data
+        results = model.chow_test(break_points=true_break)
 
         assert isinstance(results, ChowTestResults)
 
@@ -482,9 +480,7 @@ class TestADLChowMethod:
         y, x, true_break = adl_data_with_break
 
         model = ADL(y, x, lags=1, exog_lags=0)
-        # ADL(1,0): maxlag = 1
-        effective_break = true_break - 1
-        results = model.chow_test(break_points=effective_break)
+        results = model.chow_test(break_points=true_break)
 
         # With phi changing from 0.3 to 0.8, should likely detect
         assert results.n_breaks >= 0  # Conservative — depends on noise

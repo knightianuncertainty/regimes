@@ -177,6 +177,15 @@ class BaiPerronResults(BreakTestResultsBase):
         Returns a fitted OLS model using the break dates selected
         by this test.
 
+        The regression is the one the test was computed on. For a test
+        built from an AR or ADL model that is the estimation sample, without
+        the initial observations for the lags, and the break dates of the
+        returned results are positions in that sample (``break_indices``
+        less ``index_offset``): pass ``index[index_offset:]`` to its
+        ``summary``, or estimate the model itself with
+        ``AR(y, ..., breaks=results.break_indices)`` for results in the
+        observations of the data.
+
         Parameters
         ----------
         cov_type : CovType
@@ -239,7 +248,9 @@ class BaiPerronResults(BreakTestResultsBase):
             n_break_cols = self._test.exog_break.shape[1]
             # Add breaks for these columns
             for i in range(n_break_cols):
-                variable_breaks[col_idx + i] = list(self.break_indices)
+                variable_breaks[col_idx + i] = [
+                    int(b) - self.index_offset for b in self.break_indices
+                ]
             col_idx += n_break_cols
 
         if exog_list:
@@ -277,6 +288,14 @@ class BaiPerronResults(BreakTestResultsBase):
         cv = self.critical_values
         opt = self.options
         width = 78
+        expected = self.nobs + self.index_offset
+        if index is not None and self.index_offset and len(index) != expected:
+            raise ValueError(
+                f"index has {len(index)} entries; this test was built from a "
+                f"model with {self.index_offset} initial observation(s) for "
+                f"the lags and reports dates in the model's data, so it needs "
+                f"the index of that data ({expected} entries)"
+            )
 
         def dates(breaks: Sequence[int]) -> str:
             return ", ".join(_obs_label(int(b), index) for b in breaks)
@@ -286,6 +305,10 @@ class BaiPerronResults(BreakTestResultsBase):
         lines.append(f"{'Bai-Perron Multiple Structural Break Test':^{width}}")
         lines.append("=" * width)
         lines.append(f"Number of observations:   {self.nobs:>10}")
+        if self.index_offset:
+            first = _obs_label(self.index_offset, index)
+            last = _obs_label(self.index_offset + self.nobs - 1, index)
+            lines.append(f"Sample:                   {first} to {last}")
         lines.append(
             f"Trimming parameter:       {self.trimming:>10.2f}  (h = {self.h})"
         )
@@ -413,6 +436,36 @@ class BaiPerronResults(BreakTestResultsBase):
 
         lines.append("=" * width)
         return "\n".join(lines)
+
+
+def _shift_break_dates(results: BaiPerronResults, offset: int) -> BaiPerronResults:
+    """Express every break date of the results in the model's observations.
+
+    A test built from an AR or ADL model is computed on the sample that
+    remains after the initial observations for the lags; its break dates are
+    reported as observation numbers of the model's data, ``offset`` later.
+    """
+    if offset == 0:
+        return results
+    results.index_offset = offset
+    results.break_indices = [int(b) + offset for b in results.break_indices]
+    results.sequential_breaks = [int(b) + offset for b in results.sequential_breaks]
+    results.breaks_by_m = {
+        m: [int(b) + offset for b in dates] for m, dates in results.breaks_by_m.items()
+    }
+    results.seqf_break = {
+        ell: (int(b) + offset if b >= 0 else int(b))
+        for ell, b in results.seqf_break.items()
+    }
+    results.break_ci = {
+        int(b) + offset: (lo + offset, hi + offset)
+        for b, (lo, hi) in results.break_ci.items()
+    }
+    results.break_ci_90 = {
+        int(b) + offset: (lo + offset, hi + offset)
+        for b, (lo, hi) in results.break_ci_90.items()
+    }
+    return results
 
 
 class BaiPerronTest(BreakTestBase):
@@ -544,7 +597,9 @@ class BaiPerronTest(BreakTestBase):
         For AR and ADL models, the test uses the effective sample (after
         dropping initial observations for lags) and tests for breaks in all
         coefficients including the constant, AR parameters, and distributed
-        lag parameters.
+        lag parameters. The dates it reports are observations of the model's
+        data (the positions in the effective sample plus ``index_offset``,
+        the number of initial observations).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR
@@ -554,14 +609,17 @@ class BaiPerronTest(BreakTestBase):
         if isinstance(model, AR):
             # For AR, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, ADLModel):
             # For ADL, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog_all = model.exog
         else:
@@ -574,7 +632,7 @@ class BaiPerronTest(BreakTestBase):
 
         if break_vars == "all":
             # All regressors can break
-            return cls(endog, exog_break=exog_all)
+            return cls._create(offset, endog, exog_break=exog_all)
         elif break_vars == "const":
             # Only constant breaks (mean-shift model)
             # exog contains all regressors (non-breaking)
@@ -604,11 +662,13 @@ class BaiPerronTest(BreakTestBase):
                 # exog_break will be a single constant column
                 exog_break = np.ones((len(endog), 1))
 
-                return cls(endog, exog=exog_non_break, exog_break=exog_break)
+                return cls._create(
+                    offset, endog, exog=exog_non_break, exog_break=exog_break
+                )
             else:
                 # No constant found, so we just use exog_all as non-breaking
                 # and let __init__ add a constant as exog_break
-                return cls(endog, exog=exog_all)
+                return cls._create(offset, endog, exog=exog_all)
         else:
             raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
@@ -976,7 +1036,7 @@ class BaiPerronTest(BreakTestBase):
                     break_ci[b_idx] = (lo95, hi95)
                     break_ci_90[b_idx] = (lo90, hi90)
 
-        return BaiPerronResults(
+        results = BaiPerronResults(
             test_name="Bai-Perron",
             nobs=nobs,
             n_breaks=n_breaks,
@@ -1016,6 +1076,7 @@ class BaiPerronTest(BreakTestBase):
             repartition=repartition,
             _test=self,
         )
+        return _shift_break_dates(results, self.index_offset)
 
     def get_regime_estimates(
         self, break_indices: Sequence[int]
@@ -1029,7 +1090,9 @@ class BaiPerronTest(BreakTestBase):
         Parameters
         ----------
         break_indices : Sequence[int]
-            Break dates (first observation of each new regime).
+            Break dates (first observation of each new regime), as the
+            results report them: for a test built from an AR or ADL model,
+            observations of the model's data.
 
         Returns
         -------
@@ -1040,7 +1103,14 @@ class BaiPerronTest(BreakTestBase):
         """
         y, z, x = self._data()
         q = self.q
-        vb = np.asarray(list(break_indices), dtype=np.int64) - 1
+        dates = np.asarray(list(break_indices), dtype=np.int64) - self.index_offset
+        if np.any(dates < 1) or np.any(dates >= self.nobs):
+            first, last = 1 + self.index_offset, self.nobs - 1 + self.index_offset
+            raise ValueError(
+                f"break dates must lie in {first}, ..., {last}, "
+                f"got {list(break_indices)}"
+            )
+        vb = dates - 1
         delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)
         bd = _bp.bounds(vb, self.nobs)
         results = []

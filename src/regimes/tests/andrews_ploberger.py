@@ -123,7 +123,8 @@ class AndrewsPlobergerResults(BreakTestResultsBase):
         module docstring).
     candidate_indices : NDArray[np.intp]
         Candidate break dates: ``tau`` is the first observation of the
-        second regime.
+        second regime. For a test built from an AR or ADL model these are
+        observation numbers of the model's data.
     sup_f_break_index : int
         The date that maximizes ``F(tau)``, whether or not the test
         rejects.
@@ -372,8 +373,10 @@ class AndrewsPlobergerTest(BreakTestBase):
 
         Notes
         -----
-        For AR and ADL models, the test uses the effective sample (after
-        dropping initial observations for lags).
+        For AR and ADL models, the test is computed on the effective
+        sample (after dropping the initial observations for lags).
+        Break dates and other observation numbers in the results are
+        those of the model's data (see ``index_offset``).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR as ARModel
@@ -381,9 +384,11 @@ class AndrewsPlobergerTest(BreakTestBase):
 
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog_all = model.exog
         else:
@@ -395,9 +400,10 @@ class AndrewsPlobergerTest(BreakTestBase):
             exog_all = np.ones((len(endog), 1))
 
         if break_vars == "all":
-            return cls(endog, exog_break=exog_all)
+            return cls._create(offset, endog, exog_break=exog_all)
         elif break_vars == "const":
-            return cls(
+            return cls._create(
+                offset,
                 endog,
                 exog=split_constant(np.asarray(exog_all, dtype=np.float64)),
                 exog_break=np.ones((len(endog), 1)),
@@ -534,7 +540,8 @@ class AndrewsPlobergerTest(BreakTestBase):
             if ssr_unrestricted <= _EXACT_FIT * float(self.endog @ self.endog):
                 raise ValueError(
                     "the model fits the data exactly with a break at "
-                    f"observation {tau}; the test statistic is not defined"
+                    f"observation {tau + self.index_offset}; the test "
+                    "statistic is not defined"
                 )
             # q times the classical F statistic (Wald scale)
             f_val = (ssr_full - ssr_unrestricted) / (ssr_unrestricted / df_denom)
@@ -631,6 +638,10 @@ class AndrewsPlobergerTest(BreakTestBase):
         exp_f_cv = {a: hansen_critical_value(a, q, pi0, "exp") for a in levels}
         ave_f_cv = {a: hansen_critical_value(a, q, pi0, "ave") for a in levels}
 
+        # Observation numbers of the underlying data
+        candidate_indices = candidate_indices + self.index_offset
+        sup_f_break_index += self.index_offset
+
         # A break date is reported when the SupF test rejects
         sup_rejects = bool(sup_f_pv < significance)
         break_indices: list[int] = [sup_f_break_index] if sup_rejects else []
@@ -658,5 +669,6 @@ class AndrewsPlobergerTest(BreakTestBase):
             q=q,
             p=p,
             significance_level=significance,
+            index_offset=self.index_offset,
             _test=self,
         )
