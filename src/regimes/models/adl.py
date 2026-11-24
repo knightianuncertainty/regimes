@@ -153,7 +153,8 @@ class ADLResults(RegressionResultsBase):
         """Bayesian Information Criterion."""
         if self.llf is None:
             return np.nan
-        return -2 * self.llf + np.log(self.nobs) * self.df_model
+        bic: float = -2 * self.llf + np.log(self.nobs) * self.df_model
+        return bic
 
     @property
     def sigma_squared(self) -> float:
@@ -163,7 +164,8 @@ class ADLResults(RegressionResultsBase):
     @property
     def sigma(self) -> float:
         """Residual standard error (sigma)."""
-        return np.sqrt(self.sigma_squared)
+        sigma: float = np.sqrt(self.sigma_squared)
+        return sigma
 
     @property
     def effects_by_regime(self) -> list[tuple[int, dict[str, tuple[float, float]]]]:
@@ -743,7 +745,7 @@ class ADL(RegimesModelBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -865,7 +867,7 @@ class ADL(RegimesModelBase):
         n_eff = len(y)
         k = X.shape[1]
 
-        columns = []
+        columns: list[NDArray[np.floating[Any]]] = []
         new_param_names = []
 
         for var_idx in range(k):

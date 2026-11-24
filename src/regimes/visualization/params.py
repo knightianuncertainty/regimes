@@ -7,7 +7,7 @@ parameter estimates as step functions over the sample period.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -142,7 +142,8 @@ def _get_nobs(result: Any) -> int:
     """
     # For regression results with breaks, use original nobs if available
     if hasattr(result, "_nobs_original") and result._nobs_original is not None:
-        return result._nobs_original
+        nobs_original: int = result._nobs_original
+        return nobs_original
     return getattr(result, "nobs", 0)
 
 
@@ -568,7 +569,7 @@ def plot_params_over_time(
             else:
                 # Single axes provided
                 axes = np.array([[ax]])
-                fig = ax.get_figure()
+                fig = cast("Figure", cast("Axes", ax).get_figure())
 
         # Flatten axes for easy iteration
         axes_flat = axes.flatten()

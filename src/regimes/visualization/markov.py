@@ -6,7 +6,7 @@ plus an IC plot for regime number selection.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -164,7 +164,7 @@ def plot_regime_shading(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()
+            fig = cast("Figure", ax.get_figure())
 
         # Plot the time series
         if series_color is None:
@@ -233,6 +233,7 @@ def plot_transition_matrix(
     tuple[Figure, Axes]
         Figure and axes.
     """
+    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
     k = results.k_regimes
@@ -246,7 +247,7 @@ def plot_transition_matrix(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()
+            fig = cast("Figure", ax.get_figure())
 
         im = ax.imshow(P, cmap=cmap, vmin=0, vmax=1, aspect="equal")
 
@@ -277,7 +278,7 @@ def plot_transition_matrix(
             for (i, j), val in results.restricted_transitions.items():
                 if val == 0.0:
                     ax.add_patch(
-                        plt.Rectangle(
+                        mpatches.Rectangle(
                             (j - 0.5, i - 0.5),
                             1,
                             1,
@@ -365,7 +366,7 @@ def plot_parameter_time_series(
         param_names = [param_name]
     else:
         # Find all parameters that vary across regimes
-        all_params = set()
+        all_params: set[str] = set()
         for params in results.regime_params.values():
             all_params.update(params.keys())
 
@@ -526,7 +527,7 @@ def plot_ic(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()
+            fig = cast("Figure", ax.get_figure())
 
         colors = [REGIMES_COLORS["blue"], REGIMES_COLORS["red"], REGIMES_COLORS["teal"]]
 

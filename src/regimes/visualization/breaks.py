@@ -6,7 +6,7 @@ with structural breaks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -129,7 +129,7 @@ def plot_breaks(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot time series
         x = np.arange(n)
@@ -251,7 +251,7 @@ def plot_regime_means(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot data
         x = np.arange(n)
@@ -277,7 +277,7 @@ def plot_regime_means(
                 end - 1,
                 colors=mean_color,
                 linewidth=mean_linewidth,
-                label=label,
+                label=cast("Any", label),  # None: no legend entry
             )
 
         # Plot break lines

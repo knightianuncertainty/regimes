@@ -135,7 +135,8 @@ class ARResults(RegressionResultsBase):
         """Bayesian Information Criterion."""
         if self.llf is None:
             return np.nan
-        return -2 * self.llf + np.log(self.nobs) * self.df_model
+        bic: float = -2 * self.llf + np.log(self.nobs) * self.df_model
+        return bic
 
     @property
     def sigma_squared(self) -> float:
@@ -145,7 +146,8 @@ class ARResults(RegressionResultsBase):
     @property
     def sigma(self) -> float:
         """Residual standard error (sigma)."""
-        return np.sqrt(self.sigma_squared)
+        sigma: float = np.sqrt(self.sigma_squared)
+        return sigma
 
     def diagnostics(
         self, lags_autocorr: int = 2, lags_arch: int = 1
@@ -490,7 +492,7 @@ class AR(TimeSeriesModelBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -648,7 +650,7 @@ class AR(TimeSeriesModelBase):
         k = X.shape[1]
 
         # Build columns for each variable
-        columns = []
+        columns: list[NDArray[np.floating[Any]]] = []
         new_param_names = []
 
         for var_idx in range(k):
