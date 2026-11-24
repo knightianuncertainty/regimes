@@ -603,6 +603,9 @@ class MarkovRegression:
         """Fit with optional random starting value search."""
         rng = getattr(self, "_search_rng", None)
         extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,
@@ -899,6 +902,9 @@ class MarkovAR:
         """Fit with optional random starting value search."""
         rng = getattr(self, "_search_rng", None)
         extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,
@@ -1310,6 +1316,9 @@ class MarkovADL:
         """Fit with optional random starting value search."""
         rng = getattr(self, "_search_rng", None)
         extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
         if rng is not None or extra_starts:
             return _seeded_search_fit(
                 sm_model,
