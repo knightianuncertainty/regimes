@@ -177,6 +177,15 @@ class BaiPerronResults(BreakTestResultsBase):
         Returns a fitted OLS model using the break dates selected
         by this test.
 
+        The regression is the one the test was computed on. For a test
+        built from an AR or ADL model that is the estimation sample, without
+        the initial observations for the lags, and the break dates of the
+        returned results are positions in that sample (``break_indices``
+        less ``index_offset``): pass ``index[index_offset:]`` to its
+        ``summary``, or estimate the model itself with
+        ``AR(y, ..., breaks=results.break_indices)`` for results in the
+        observations of the data.
+
         Parameters
         ----------
         cov_type : CovType
@@ -279,6 +288,14 @@ class BaiPerronResults(BreakTestResultsBase):
         cv = self.critical_values
         opt = self.options
         width = 78
+        expected = self.nobs + self.index_offset
+        if index is not None and self.index_offset and len(index) != expected:
+            raise ValueError(
+                f"index has {len(index)} entries; this test was built from a "
+                f"model with {self.index_offset} initial observation(s) for "
+                f"the lags and reports dates in the model's data, so it needs "
+                f"the index of that data ({expected} entries)"
+            )
 
         def dates(breaks: Sequence[int]) -> str:
             return ", ".join(_obs_label(int(b), index) for b in breaks)
@@ -580,7 +597,9 @@ class BaiPerronTest(BreakTestBase):
         For AR and ADL models, the test uses the effective sample (after
         dropping initial observations for lags) and tests for breaks in all
         coefficients including the constant, AR parameters, and distributed
-        lag parameters.
+        lag parameters. The dates it reports are observations of the model's
+        data (the positions in the effective sample plus ``index_offset``,
+        the number of initial observations).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR
@@ -1071,7 +1090,9 @@ class BaiPerronTest(BreakTestBase):
         Parameters
         ----------
         break_indices : Sequence[int]
-            Break dates (first observation of each new regime).
+            Break dates (first observation of each new regime), as the
+            results report them: for a test built from an AR or ADL model,
+            observations of the model's data.
 
         Returns
         -------
@@ -1082,7 +1103,14 @@ class BaiPerronTest(BreakTestBase):
         """
         y, z, x = self._data()
         q = self.q
-        vb = np.asarray(list(break_indices), dtype=np.int64) - 1
+        dates = np.asarray(list(break_indices), dtype=np.int64) - self.index_offset
+        if np.any(dates < 1) or np.any(dates >= self.nobs):
+            first, last = 1 + self.index_offset, self.nobs - 1 + self.index_offset
+            raise ValueError(
+                f"break dates must lie in {first}, ..., {last}, "
+                f"got {list(break_indices)}"
+            )
+        vb = dates - 1
         delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)
         bd = _bp.bounds(vb, self.nobs)
         results = []

@@ -1077,9 +1077,10 @@ class AR(TimeSeriesModelBase):
 
         Convenience method that creates a CUSUMTest from this AR model
         and runs it. The test is computed on the effective sample
-        (after dropping the initial observations for lags); break dates and
-        other observation numbers in the results are those of the model's
-        data, so a break date can be passed back as ``breaks``.
+        (after dropping the initial observations for lags); the observation
+        numbers in the results (``observations``, ``first_crossing``) are
+        those of the model's data. A crossing is not an estimate of a break
+        date.
 
         Parameters
         ----------
@@ -1106,9 +1107,10 @@ class AR(TimeSeriesModelBase):
 
         Convenience method that creates a CUSUMSQTest from this AR model
         and runs it. The test is computed on the effective sample
-        (after dropping the initial observations for lags); break dates and
-        other observation numbers in the results are those of the model's
-        data, so a break date can be passed back as ``breaks``.
+        (after dropping the initial observations for lags); the observation
+        numbers in the results (``observations``, ``first_crossing``) are
+        those of the model's data. A crossing is not an estimate of a break
+        date.
 
         Parameters
         ----------

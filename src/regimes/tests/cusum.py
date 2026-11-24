@@ -300,7 +300,8 @@ class CUSUMResults(BreakTestResultsBase):
     break_indices : Sequence[int]
         Always empty; see ``first_crossing``.
     first_crossing : int | None
-        Observation (0-based, in the sample the test was given) at which
+        Observation (0-based; of the model's data for a test built from an
+        AR or ADL model, else of the sample the test was given) at which
         the path first leaves the bounds, or None. This shows when the
         evidence against stability became significant, not when the
         coefficients changed.
@@ -472,7 +473,8 @@ class CUSUMSQResults(BreakTestResultsBase):
     break_indices : Sequence[int]
         Always empty; see ``first_crossing``.
     first_crossing : int | None
-        Observation (0-based, in the sample the test was given) at which
+        Observation (0-based; of the model's data for a test built from an
+        AR or ADL model, else of the sample the test was given) at which
         the path first leaves the bounds, or None. It is not an estimate of
         the date at which the variance changed.
     observations : NDArray

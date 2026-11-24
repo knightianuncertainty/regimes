@@ -227,19 +227,20 @@ class TestCusum:
                     i + 2 for i in from_arrays.crossing_indices
                 ]
 
-    def test_late_start_of_the_recursion(self) -> None:
-        """A series that starts at zero: the first two observations of the
-        estimation sample do not identify a constant and a slope."""
+    def test_series_that_starts_at_zero(self) -> None:
+        """The first two observations of the estimation sample are one design
+        point (a constant and a lag of zero): the second has a residual and
+        the third completes the rank."""
         rng = np.random.default_rng(12)
         y = np.zeros(140)
         for t in range(2, 140):
             y[t] = 0.5 + 0.5 * y[t - 1] + rng.standard_normal()
         results = rg.AR(y, lags=1).cusum_test()
-        # recursion on observations 1, 2, 3 of the series; the first
-        # recursive residual belongs to observation 4
-        assert results.observations[0] == 4
+        # estimation sample: observations 1, ..., 139 of the series; no
+        # residual for observations 1 and 3
+        np.testing.assert_array_equal(results.observations[:3], [2, 4, 5])
         assert results.observations[-1] == 139
-        assert len(results.statistic_path) == 136
+        assert len(results.statistic_path) == 137
 
     def test_mean_shift_is_detected(self) -> None:
         model = rg.AR(_ar_break_data(seed=11), lags=2)
@@ -247,3 +248,126 @@ class TestCusum:
         assert results.reject
         assert results.first_crossing is not None
         assert results.first_crossing >= 130
+
+
+def _adl_long_x_lag(
+    seed: int = 20, n: int = 260, break_at: int = 150
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal(n)
+    y = np.zeros(n)
+    for t in range(3, n):
+        const = 0.0 if t < break_at else 3.0
+        y[t] = (
+            const + 0.3 * y[t - 1] + 0.5 * x[t] + 0.4 * x[t - 3] + rng.standard_normal()
+        )
+    return y, x
+
+
+class TestEveryPathUsesTheOffset:
+    """Paths that the first version of these tests did not reach."""
+
+    def test_break_in_the_constant_only(self) -> None:
+        y = _ar_break_data(seed=21)
+        model = rg.AR(y, lags=2)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            bai_perron = model.bai_perron(break_vars="const", max_breaks=2)
+            andrews = model.andrews_ploberger(break_vars="const")
+            chow = model.chow_test(130, break_vars="const")
+        assert bai_perron.index_offset == andrews.index_offset == 2
+        assert abs(bai_perron.break_indices[0] - 130) <= 3
+        assert abs(andrews.sup_f_break_index - 130) <= 3
+        assert andrews.candidate_indices[0] >= 2 + 1
+        assert list(chow.f_stats) == [130]
+        # the statistic is that of the split of the series at 130
+        arrays_y, arrays_X, _ = _arrays(model)
+        direct = rg.ChowTest(
+            arrays_y, exog=arrays_X[:, 1:], exog_break=arrays_X[:, :1]
+        ).fit(break_points=128)
+        assert chow.f_stats[130] == pytest.approx(direct.f_stats[128])
+
+    def test_offset_is_the_longest_lag_for_every_test(self) -> None:
+        """An ADL whose lag of x (3) is longer than its lag of y (1)."""
+        y, x = _adl_long_x_lag()
+        model = rg.ADL(y, x, lags=1, exog_lags=3)
+        assert model.maxlag == 3
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = {
+                "bai_perron": model.bai_perron(max_breaks=2),
+                "andrews": model.andrews_ploberger(),
+                "chow": model.chow_test(150),
+                "cusum": model.cusum_test(),
+                "cusum_sq": model.cusum_sq_test(),
+            }
+        for name, result in results.items():
+            assert result.index_offset == 3, name
+        assert abs(results["bai_perron"].break_indices[0] - 150) <= 4
+        assert abs(results["andrews"].sup_f_break_index - 150) <= 4
+        arrays_y, arrays_X, _ = _arrays(model)
+        direct = rg.ChowTest(arrays_y, exog_break=arrays_X).fit(break_points=147)
+        assert results["chow"].f_stats[150] == pytest.approx(direct.f_stats[147])
+        assert results["cusum"].observations[-1] == len(y) - 1
+        assert results["cusum"].observations[0] == 3 + arrays_X.shape[1]
+
+    def test_regime_estimates_take_the_reported_dates(self) -> None:
+        y = _ar_break_data(seed=22)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
+        test = results._test
+        estimates = test.get_regime_estimates(results.break_indices)
+        m = len(results.break_indices)
+        assert sum(ssr for _coefficients, ssr in estimates) == pytest.approx(
+            results.ssr[m], rel=1e-10
+        )
+        with pytest.raises(ValueError, match="break dates must lie in 3"):
+            test.get_regime_estimates([2])
+
+    def test_no_break_marker_is_not_shifted(self) -> None:
+        from regimes.tests.bai_perron import _shift_break_dates
+
+        y = _ar_break_data(seed=23)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
+        results.index_offset = 0
+        results.seqf_break = {1: -1, 2: 57}
+        shifted = _shift_break_dates(results, 2)
+        assert shifted.seqf_break == {1: -1, 2: 59}
+
+    def test_summary_needs_the_index_of_the_data(self) -> None:
+        y = _ar_break_data(seed=24)
+        index = pd.period_range("2000-01", periods=len(y), freq="M")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
+        assert str(index[results.break_indices[0]]) in results.summary(index=index)
+        with pytest.raises(ValueError, match="index of that data .240 entries."):
+            results.summary(index=index[2:])
+
+    def test_error_messages_name_observations_of_the_data(self) -> None:
+        y = _ar_break_data(seed=25)
+        step = (np.arange(len(y)) >= 130).astype(float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises(ValueError, match="break point 130:"):
+                rg.AR(y, lags=2, exog=step).chow_test(130, break_vars="const")
+
+    def test_plot_segments_are_in_the_observations_of_the_data(self) -> None:
+        from regimes.visualization.params import (
+            _extract_baiperron_results_param_data,
+        )
+
+        y = _ar_break_data(seed=26)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=1)
+        data = _extract_baiperron_results_param_data(results)
+        segments = next(iter(data.values()))
+        break_date = results.break_indices[0]
+        assert [(seg["start"], seg["end"]) for seg in segments] == [
+            (2, break_date),
+            (break_date, len(y)),
+        ]

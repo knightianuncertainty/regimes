@@ -121,7 +121,9 @@ class BreakTestBase(ABC):
     #: (``from_model``). Every observation number in the results (break
     #: dates, candidate dates, crossings) and every break date passed to
     #: ``fit`` is an observation number of the underlying data: the position
-    #: in the arrays of the test plus this offset.
+    #: in the arrays of the test plus this offset. One exception:
+    #: ``BaiPerronResults.to_ols()`` returns the regression on the arrays of
+    #: the test, with break dates as positions in them.
     index_offset: int = 0
 
     @classmethod

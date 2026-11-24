@@ -396,7 +396,9 @@ class ChowTest(BreakTestBase):
 
         n1 = break_point
         n2 = T - break_point
-        label = break_point  # the break point as error messages name it
+        # the break point as the caller gave it (an observation of the
+        # model's data for a test built from an AR or ADL model)
+        label = break_point + self.index_offset
 
         # Build full-sample regressor matrix and compute SSR_full
         X_full = self._build_regressor_matrix(0, T)

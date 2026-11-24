@@ -540,7 +540,8 @@ class AndrewsPlobergerTest(BreakTestBase):
             if ssr_unrestricted <= _EXACT_FIT * float(self.endog @ self.endog):
                 raise ValueError(
                     "the model fits the data exactly with a break at "
-                    f"observation {tau}; the test statistic is not defined"
+                    f"observation {tau + self.index_offset}; the test "
+                    "statistic is not defined"
                 )
             # q times the classical F statistic (Wald scale)
             f_val = (ssr_full - ssr_unrestricted) / (ssr_unrestricted / df_denom)
