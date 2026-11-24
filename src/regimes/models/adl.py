@@ -1304,7 +1304,7 @@ class ADL(RegimesModelBase):
         Parameters
         ----------
         significance : float
-            Significance level for KS critical value. Any value in (0, 1).
+            Significance level: 0.20, 0.10, 0.05, 0.02 or 0.01.
 
         Returns
         -------

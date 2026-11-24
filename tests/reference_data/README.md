@@ -35,6 +35,36 @@ oxl -i<packages> generate_bai_perron_ox_reference.ox
 
 The critical values in `src/regimes/tests/_bp_critical_values.py` were dumped from the OxRegimes tables and agree entry by entry with those in the R package `mbreaks`.
 
+## Chow, CUSUM and Andrews-Ploberger tests
+
+| File | Description |
+|------|-------------|
+| `generate_andrews_ploberger_reference.R` | R script that runs `strucchange::Fstats` and `sctest` on `dgp1_mean_shift.csv` and `dgp2_regression_break.csv` (whole sample and first half, several trimmings) |
+| `ap_strucchange_reference.json` | Its output: the sequence of F statistics, the sup, ave and exp statistics and their p-values, compared in `tests/test_tests/test_break_test_references.py` |
+| `generate_hansen_pvalues.R` | R script that evaluates the p-value functions of Hansen (1997) (`pv_sup.R`, `pv_exp.R`, `pv_ave.R` from https://users.ssc.wisc.edu/~bhansen/progs/jbes_97r.zip, not redistributed here) on a grid |
+| `hansen1997_pvalues.csv` | Its output (1,680 rows), compared in the same test file |
+| `make_hansen_tables.py` | Python script that converted the coefficient tables in Hansen's R files into `src/regimes/tests/_hansen_tables.py` (reads the files as text) |
+
+```bash
+cd tests/reference_data
+Rscript generate_andrews_ploberger_reference.R
+Rscript generate_hansen_pvalues.R <folder with Hansen's R files>
+python make_hansen_tables.py <folder with Hansen's R files> ../../src/regimes/tests/_hansen_tables.py
+## Markov switching: number of regimes (R package MSTest)
+
+| File | Description |
+|------|-------------|
+| `ms_two_regime_series.csv` | A series with two recurring regimes that differ in mean (n = 300; Markov chain with staying probabilities 0.95 and 0.90, means 0 and 2.5, unit variance), generated once with numpy (`default_rng(20261124)`) |
+| `generate_markov_number_of_regimes_reference.R` | R script that estimates the models with 1, 2 and 3 regimes on that series with MSTest (`Nmdl`, `HMmdl`), with a common and with a switching variance |
+| `ms_mstest_reference.json` | Its output: log-likelihoods, likelihood ratio statistics and the estimates with 2 and 3 regimes, compared in `tests/test_markov/test_number_of_regimes.py` |
+
+The comparison is of the likelihood function: at MSTest's estimates the likelihood of this package equals the value MSTest reports. The maxima differ slightly because MSTest's EM algorithm stops a little short of the maximum (with 2 regimes) and because the likelihood with 3 regimes has several local maxima.
+
+```bash
+cd tests/reference_data
+Rscript generate_markov_number_of_regimes_reference.R
+```
+
 ## Data Generating Processes
 
 ### DGP 1 — Mean Shift
