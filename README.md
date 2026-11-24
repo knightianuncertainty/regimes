@@ -259,7 +259,7 @@ ar_model = rg.AR(y, lags=1)
 ms_ar = ar_model.markov_switching(k_regimes=2)
 ```
 
-Select the number of regimes using information criteria or sequential likelihood ratio tests:
+Select the number of regimes using information criteria, or sequential likelihood ratio tests of K against K+1 regimes with p-values from a parametric bootstrap (Kasahara and Shimotsu, 2018; `method="sequential"`, `n_bootstrap=199`, `random_state=...`). The bootstrap is slow, since every replication estimates the models again; the docstring of `regimes.markov.selection` states what is known about the test:
 
 ```python
 # Regime number selection
@@ -556,7 +556,7 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `AndrewsPlobergerTest` | Andrews-Ploberger SupF/ExpF/AveF test for break at unknown date |
 | `NonRecurringRegimeTest` | LR test: non-recurring (structural break) vs unrestricted Markov transitions |
 | `SequentialRestrictionTest` | GETS-style sequential restriction of transition probabilities |
-| `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential LRT |
+| `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential bootstrap LR tests |
 
 **Key methods:**
 - `BaiPerronTest.from_model(model)` - Create test from OLS or AR model

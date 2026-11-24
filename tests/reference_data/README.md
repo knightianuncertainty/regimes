@@ -50,6 +50,19 @@ cd tests/reference_data
 Rscript generate_andrews_ploberger_reference.R
 Rscript generate_hansen_pvalues.R <folder with Hansen's R files>
 python make_hansen_tables.py <folder with Hansen's R files> ../../src/regimes/tests/_hansen_tables.py
+## Markov switching: number of regimes (R package MSTest)
+
+| File | Description |
+|------|-------------|
+| `ms_two_regime_series.csv` | A series with two recurring regimes that differ in mean (n = 300; Markov chain with staying probabilities 0.95 and 0.90, means 0 and 2.5, unit variance), generated once with numpy (`default_rng(20261124)`) |
+| `generate_markov_number_of_regimes_reference.R` | R script that estimates the models with 1, 2 and 3 regimes on that series with MSTest (`Nmdl`, `HMmdl`), with a common and with a switching variance |
+| `ms_mstest_reference.json` | Its output: log-likelihoods, likelihood ratio statistics and the estimates with 2 and 3 regimes, compared in `tests/test_markov/test_number_of_regimes.py` |
+
+The comparison is of the likelihood function: at MSTest's estimates the likelihood of this package equals the value MSTest reports. The maxima differ slightly because MSTest's EM algorithm stops a little short of the maximum (with 2 regimes) and because the likelihood with 3 regimes has several local maxima.
+
+```bash
+cd tests/reference_data
+Rscript generate_markov_number_of_regimes_reference.R
 ```
 
 ## Data Generating Processes
