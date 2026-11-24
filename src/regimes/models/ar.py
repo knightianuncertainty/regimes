@@ -13,7 +13,18 @@ import numpy as np
 import statsmodels.api as sm
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
-from regimes.models.base import CovType, TimeSeriesModelBase
+from regimes.models._dynamics import (
+    ar_coefficients_by_segment,
+    ar_roots,
+)
+from regimes.models.base import (
+    CovType,
+    TimeSeriesModelBase,
+    check_break_design,
+    check_regime_sample,
+    fit_with_covariance,
+    normalize_breaks,
+)
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
 if TYPE_CHECKING:
@@ -65,33 +76,53 @@ class ARResults(RegressionResultsBase):
     )
     _nobs_original: int | None = field(default=None, repr=False)
 
+    def _ar_segments(self) -> list[tuple[int, dict[int, float]]]:
+        """Autoregressive coefficients by lag, for each stretch of the sample
+        between break dates of the autoregressive coefficients."""
+        names = list(self.param_names) if self.param_names is not None else []
+        if not names:
+            return []
+        return ar_coefficients_by_segment(
+            names, self.params, self._breaks, self._variable_breaks
+        )
+
+    @property
+    def roots_by_regime(self) -> list[NDArray[np.complexfloating[Any, Any]]]:
+        """Roots of the AR characteristic polynomial in each regime.
+
+        One array for each stretch of the sample in which the autoregressive
+        coefficients are constant (a single array without breaks). The
+        polynomial is ``1 - sum_L phi_L z^L`` over the lags ``L`` in the
+        model, so non-consecutive lags are placed at their own powers.
+        """
+        return [ar_roots(coefficients) for _start, coefficients in self._ar_segments()]
+
     @property
     def roots(self) -> NDArray[np.complexfloating[Any, Any]]:
-        """Roots of the AR characteristic polynomial.
+        """Roots of the AR characteristic polynomial (first regime).
 
         Returns
         -------
         NDArray[np.complexfloating]
-            Roots of 1 - phi_1*z - phi_2*z^2 - ... - phi_p*z^p.
-            For stationarity, all roots should be outside the unit circle.
+            Roots of ``1 - sum_L phi_L z^L``. With breaks these are the
+            roots of the first regime; see ``roots_by_regime``.
         """
-        if self.ar_params is None or len(self.ar_params) == 0:
+        by_regime = self.roots_by_regime
+        if not by_regime:
             return np.array([], dtype=np.complex128)
-
-        # Characteristic polynomial: 1 - phi_1*z - phi_2*z^2 - ...
-        # numpy.roots expects coefficients in descending order
-        coeffs = np.concatenate([[1], -self.ar_params])[::-1]
-        return np.roots(coeffs)
+        return by_regime[0]
 
     @property
     def is_stationary(self) -> bool:
-        """Check if the AR process is stationary.
+        """Check if the AR process is stationary in every regime.
 
-        Returns True if all roots are outside the unit circle.
+        Returns True if all roots of every regime are outside the unit
+        circle.
         """
-        if len(self.roots) == 0:
-            return True
-        return bool(np.all(np.abs(self.roots) > 1))
+        return all(
+            len(roots) == 0 or bool(np.all(np.abs(roots) > 1))
+            for roots in self.roots_by_regime
+        )
 
     @property
     def aic(self) -> float:
@@ -133,6 +164,7 @@ class ARResults(RegressionResultsBase):
         -------
         DiagnosticsResults
             Collection of diagnostic test results including:
+
             - AR test (Breusch-Godfrey LM)
             - ARCH test (Engle's LM)
             - Normality test (Jarque-Bera)
@@ -218,7 +250,8 @@ class ARResults(RegressionResultsBase):
             lines.append("Variable-Specific Structural Breaks")
             lines.append("-" * 81)
 
-            for var_name, breaks in self._variable_breaks.items():
+            for var_name, unsorted_breaks in self._variable_breaks.items():
+                breaks = sorted(unsorted_breaks)
                 break_str = ", ".join(_obs_label(bp, index) for bp in breaks)
                 if len(breaks) == 1:
                     lines.append(f"{var_name}: break at {break_str}")
@@ -324,8 +357,9 @@ class ARResults(RegressionResultsBase):
 
         # Stationarity check
         if self.ar_params is not None and len(self.ar_params) > 0:
+            where = " in every regime" if len(self.roots_by_regime) > 1 else ""
             if self.is_stationary:
-                lines.append("Roots are outside the unit circle (stationary).")
+                lines.append(f"Roots are outside the unit circle{where} (stationary).")
             else:
                 lines.append(
                     "WARNING: Some roots are inside the unit circle (non-stationary)."
@@ -404,8 +438,9 @@ class AR(TimeSeriesModelBase):
 
     Notes
     -----
-    The model is estimated using OLS on the equation:
-        y_t = c + phi_1 * y_{t-1} + ... + phi_p * y_{t-p} + X_t'*beta + e_t
+    The model is estimated using OLS on the equation::
+
+        y_t = c + phi_1 * y_{t-1} + ... + phi_p * y_{t-p} + X_t' beta + e_t
 
     When breaks are specified, all coefficients (including the constant
     and AR parameters) are allowed to differ across regimes.
@@ -514,13 +549,18 @@ class AR(TimeSeriesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for design "
                         f"matrix with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 # key is a string, find it in param_names
                 if key not in param_names:
@@ -530,19 +570,21 @@ class AR(TimeSeriesModelBase):
                     )
                 idx = param_names.index(key)
 
-            # Validate and sort break points (in original sample coordinates)
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
+            # sorted, distinct integers inside the sample (original
+            # observation numbers)
+            breaks_list = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
             # Adjust for effective sample (subtract maxlag)
-            adjusted_breaks = [
-                bp - self.maxlag for bp in breaks_list if bp > self.maxlag
-            ]
+            for bp in breaks_list:
+                if bp <= self.maxlag:
+                    raise ValueError(
+                        f"Break point {bp} for variable '{key}' leaves no "
+                        f"observations before it: the first {self.maxlag} "
+                        "observations are used as initial values for the lags"
+                    )
+            adjusted_breaks = [bp - self.maxlag for bp in breaks_list]
             if adjusted_breaks:
                 normalized[idx] = adjusted_breaks
 
@@ -663,10 +705,14 @@ class AR(TimeSeriesModelBase):
             return X, param_names
 
         # Adjust break indices for effective sample
-        adjusted_breaks = [b - self.maxlag for b in self.breaks if b >= self.maxlag]
-
-        if not adjusted_breaks:
-            return X, param_names
+        for b in self.breaks:
+            if b <= self.maxlag:
+                raise ValueError(
+                    f"Break index {b} leaves no observations before it: the "
+                    f"first {self.maxlag} observations are used as initial "
+                    "values for the lags"
+                )
+        adjusted_breaks = [b - self.maxlag for b in self.breaks]
 
         # Create regime indices for effective sample
         n_eff = len(y)
@@ -706,12 +752,16 @@ class AR(TimeSeriesModelBase):
         ----------
         cov_type : CovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
         cov_kwds : dict | None
-            Additional keywords for covariance estimation. For HAC, can
-            include 'maxlags'.
+            Additional keywords for covariance estimation, used with
+            ``cov_type="HAC"`` only: ``maxlags`` (default the fixed rule
+            ``floor(4 (T / 100)^(2/9))`` on the effective sample) and other
+            keywords of statsmodels' HAC covariance. See ``OLS.fit`` for the
+            conventions (pooled error variance with breaks, t distribution).
         **kwargs
             Additional arguments (reserved for future use).
 
@@ -727,25 +777,12 @@ class AR(TimeSeriesModelBase):
 
         # Handle breaks
         X, param_names = self._create_break_design(y, X, param_names)
+        if self.breaks or self._variable_breaks:
+            check_break_design(X, param_names)
 
         # Use statsmodels for estimation
         sm_model = sm.OLS(y, X)
-
-        # Map cov_type to statsmodels format
-        if cov_type == "nonrobust":
-            sm_results = sm_model.fit()
-        elif cov_type.startswith("HC"):
-            sm_results = sm_model.fit(cov_type=cov_type)
-        elif cov_type == "HAC":
-            maxlags = cov_kwds.get("maxlags")
-            if maxlags is None:
-                maxlags = int(np.floor(4 * (len(y) / 100) ** (2 / 9)))
-            sm_results = sm_model.fit(
-                cov_type="HAC",
-                cov_kwds={"maxlags": maxlags, "use_correction": True},
-            )
-        else:
-            raise ValueError(f"Unknown cov_type: {cov_type}")
+        sm_results = fit_with_covariance(sm_model, cov_type, cov_kwds, len(y))
 
         # Extract results
         params = np.asarray(sm_results.params)
@@ -879,6 +916,12 @@ class AR(TimeSeriesModelBase):
         this method estimates each regime completely independently. Each
         regime loses `maxlag` observations at its start for lag initialization.
         """
+        if self._variable_breaks:
+            raise ValueError(
+                "fit_by_regime needs common breaks: with variable_breaks the "
+                "variables change at different dates and there is no single "
+                "set of regimes to estimate separately"
+            )
         if not self.breaks:
             return [self.fit(cov_type=cov_type, cov_kwds=cov_kwds)]
 
@@ -889,6 +932,11 @@ class AR(TimeSeriesModelBase):
             y_regime = self.endog[start:end]
             exog_regime = self.exog[start:end] if self.exog is not None else None
 
+            if end - start <= self.maxlag:
+                raise ValueError(
+                    f"regime {_regime + 1} has {end - start} observations, and "
+                    f"{self.maxlag} are needed as initial values for the lags"
+                )
             regime_model = AR(
                 y_regime,
                 lags=self.lags,
@@ -896,6 +944,7 @@ class AR(TimeSeriesModelBase):
                 breaks=None,
                 trend=self.trend,
             )
+            check_regime_sample(regime_model._build_design_matrix()[1], _regime)
             regime_results = regime_model.fit(cov_type=cov_type, cov_kwds=cov_kwds)
             results.append(regime_results)
 
@@ -912,13 +961,16 @@ class AR(TimeSeriesModelBase):
         """Test for structural breaks using Bai-Perron procedure.
 
         Convenience method that creates a BaiPerronTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default), including constant
               and AR parameters
             - "const": Only intercept can break (mean-shift model)
@@ -929,6 +981,7 @@ class AR(TimeSeriesModelBase):
             (``h = floor(trimming * T)``, at least ``q + 1``). Default is 0.15.
         selection : str
             Break selection criterion:
+
             - "bic": Bayesian Information Criterion (default)
             - "lwz": Liu-Wu-Zidek modified Schwarz criterion
             - "sequential": Sequential testing procedure
@@ -973,8 +1026,8 @@ class AR(TimeSeriesModelBase):
         -----
         The Bai-Perron test is applied to the AR design matrix, which includes
         the constant, lagged dependent variables, and any exogenous regressors.
-        Break indices are reported in effective sample coordinates (after
-        dropping initial observations for lags).
+        Break dates are reported as observation numbers of the model's data
+        and can be passed to the model as ``breaks``.
         """
         from regimes.tests.bai_perron import BaiPerronTest
 
@@ -992,16 +1045,19 @@ class AR(TimeSeriesModelBase):
         """Test for structural breaks at known break points using the Chow test.
 
         Convenience method that creates a ChowTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
         break_points : int | Sequence[int]
-            One or more break point indices to test (in effective sample
-            coordinates, after lag trimming).
+            One or more break dates to test, as observation numbers of the
+            model's data (the first observation of the second regime).
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default), including constant
               and AR parameters
             - "const": Only intercept can break (mean-shift model)
@@ -1027,8 +1083,11 @@ class AR(TimeSeriesModelBase):
         """Test for parameter instability using the CUSUM test.
 
         Convenience method that creates a CUSUMTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); the observation
+        numbers in the results (``observations``, ``first_crossing``) are
+        those of the model's data. A crossing is not an estimate of a break
+        date.
 
         Parameters
         ----------
@@ -1054,13 +1113,16 @@ class AR(TimeSeriesModelBase):
         """Test for variance instability using the CUSUM-SQ test.
 
         Convenience method that creates a CUSUMSQTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); the observation
+        numbers in the results (``observations``, ``first_crossing``) are
+        those of the model's data. A crossing is not an estimate of a break
+        date.
 
         Parameters
         ----------
         significance : float
-            Significance level for KS critical value. Any value in (0, 1).
+            Significance level: 0.20, 0.10, 0.05, 0.02 or 0.01.
 
         Returns
         -------
@@ -1086,13 +1148,16 @@ class AR(TimeSeriesModelBase):
         """Test for a structural break at unknown date using Andrews-Ploberger.
 
         Convenience method that creates an AndrewsPlobergerTest from this
-        AR model and runs it. The test uses the effective sample (after
-        dropping initial observations for lags).
+        AR model and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default), including constant
               and AR parameters
             - "const": Only intercept can break (mean-shift model)

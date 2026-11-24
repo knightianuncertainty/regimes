@@ -182,7 +182,12 @@ class RegressionResultsBase(RegimesResultsBase):
 
     @property
     def pvalues(self) -> NDArray[np.floating[Any]]:
-        """Two-sided p-values for t-statistics."""
+        """Two-sided p-values for t-statistics.
+
+        From the t distribution with ``n - k`` degrees of freedom, for every
+        covariance type (statsmodels uses the normal distribution when the
+        covariance is robust).
+        """
         from scipy import stats
 
         return 2 * (1 - stats.t.cdf(np.abs(self.tvalues), self.df_resid))
@@ -201,7 +206,12 @@ class RegressionResultsBase(RegimesResultsBase):
 
     @property
     def rsquared(self) -> float:
-        """R-squared (coefficient of determination)."""
+        """R-squared (coefficient of determination).
+
+        Centered: ``1 - SSR / sum((y - mean(y))^2)``, also for a model
+        without a constant, where statsmodels reports the uncentered
+        version. Without a constant it can be negative.
+        """
         if self._tss is None or self._tss == 0:
             return np.nan
         return 1 - self.ssr / self._tss
@@ -322,6 +332,7 @@ class RegressionResultsBase(RegimesResultsBase):
         """Plot PcGive-style misspecification diagnostic panel.
 
         Creates a 2x2 panel with:
+
         - Top left: Actual vs Fitted values
         - Top right: Residual Distribution histogram
         - Bottom left: Scaled Residuals (vertical index plot)

@@ -15,7 +15,14 @@ import statsmodels.api as sm
 from scipy import stats
 
 from regimes.diagnostics import DiagnosticsResults, compute_diagnostics
-from regimes.models.base import CovType, RegimesModelBase
+from regimes.models.base import (
+    CovType,
+    RegimesModelBase,
+    check_break_design,
+    check_regime_sample,
+    fit_with_covariance,
+    normalize_breaks,
+)
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
 if TYPE_CHECKING:
@@ -50,7 +57,8 @@ class OLSResults(RegressionResultsBase):
     llf : float
         Log-likelihood of the model.
     fvalue : float
-        F-statistic for overall model significance.
+        Classical F-statistic for overall model significance (it does not
+        use the covariance estimator).
     f_pvalue : float
         P-value for the F-statistic.
     """
@@ -93,6 +101,46 @@ class OLSResults(RegressionResultsBase):
             return np.nan
         return -2 * self.llf + np.log(self.nobs) * self.df_model
 
+    def _f_test(self) -> tuple[float, int]:
+        """F statistic for overall significance and its numerator df.
+
+        With a constant in the model (or regime-specific constants, which
+        span one) the null is that every coefficient except a common
+        constant is zero: ``k - 1`` restrictions, centered sums of squares.
+        Without a constant the null is that every coefficient is zero: ``k``
+        restrictions, uncentered sums of squares. Both are what statsmodels
+        reports for ``cov_type="nonrobust"``; the statistic does not use the
+        covariance estimator.
+        """
+        k = self.df_model
+        if self.df_resid <= 0 or self.ssr <= 0:
+            return np.nan, 0
+        y = self.fittedvalues + self.resid
+        if self._has_constant():
+            df_num = k - 1
+            explained = float(np.sum((y - np.mean(y)) ** 2)) - self.ssr
+        else:
+            df_num = k
+            explained = float(y @ y) - self.ssr
+        if df_num <= 0:
+            return np.nan, 0
+        return (explained / df_num) / (self.ssr / self.df_resid), df_num
+
+    def _has_constant(self) -> bool:
+        """Whether a constant is in the column space of the regressors.
+
+        The rule of statsmodels: a column that is constant and not zero, or
+        else regressors whose rank does not increase when a column of ones
+        is added (regime-specific constants, a full set of dummies).
+        """
+        X = self._exog
+        if X is None:
+            return True
+        if np.any((np.ptp(X, axis=0) == 0.0) & (X[0] != 0.0)):
+            return True
+        augmented = np.column_stack([np.ones(X.shape[0]), X])
+        return bool(np.linalg.matrix_rank(augmented) == np.linalg.matrix_rank(X))
+
     @property
     def hq(self) -> float:
         """Hannan-Quinn Information Criterion."""
@@ -102,25 +150,28 @@ class OLSResults(RegressionResultsBase):
 
     @property
     def fvalue(self) -> float:
-        """F-statistic for overall significance (excluding intercept)."""
-        if self._tss is None or self._tss == 0:
-            return np.nan
-        # F = (R^2 / k) / ((1 - R^2) / (n - k - 1))
-        # where k is number of regressors excluding constant
-        k = self.df_model - 1  # Assuming one regressor is constant
-        if k <= 0 or self.df_resid <= 0:
-            return np.nan
-        return (self.rsquared / k) / ((1 - self.rsquared) / self.df_resid)
+        """F-statistic for overall significance (classical).
+
+        With a constant: all coefficients except the constant are zero.
+        Without one: all coefficients are zero. NaN for a constant-only
+        model.
+
+        The statistic is computed from the sums of squares and is valid
+        under homoskedastic, serially uncorrelated errors. It is the same
+        whatever ``cov_type`` the model was fitted with: with a robust
+        covariance it is *not* the robust Wald statistic that statsmodels
+        reports as ``fvalue``, and equals statsmodels' value only for
+        ``cov_type="nonrobust"``.
+        """
+        return float(self._f_test()[0])
 
     @property
     def f_pvalue(self) -> float:
-        """P-value for F-statistic."""
-        if np.isnan(self.fvalue):
+        """P-value of the classical F-statistic (see ``fvalue``)."""
+        fvalue, df_num = self._f_test()
+        if np.isnan(fvalue):
             return np.nan
-        k = self.df_model - 1
-        if k <= 0:
-            return np.nan
-        return 1 - stats.f.cdf(self.fvalue, k, self.df_resid)
+        return float(stats.f.sf(fvalue, df_num, self.df_resid))
 
     def diagnostics(
         self, lags_autocorr: int = 2, lags_arch: int = 1
@@ -138,6 +189,7 @@ class OLSResults(RegressionResultsBase):
         -------
         DiagnosticsResults
             Collection of diagnostic test results including:
+
             - AR test (Breusch-Godfrey LM)
             - ARCH test (Engle's LM)
             - Normality test (Jarque-Bera)
@@ -217,7 +269,8 @@ class OLSResults(RegressionResultsBase):
             lines.append("Variable-Specific Structural Breaks")
             lines.append("-" * 81)
 
-            for var_name, breaks in self._variable_breaks.items():
+            for var_name, unsorted_breaks in self._variable_breaks.items():
+                breaks = sorted(unsorted_breaks)
                 break_str = ", ".join(_obs_label(bp, index) for bp in breaks)
                 if len(breaks) == 1:
                     lines.append(f"{var_name}: break at {break_str}")
@@ -326,6 +379,10 @@ class OLSResults(RegressionResultsBase):
         elif self.cov_type.startswith("HC"):
             lines.append(
                 f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust."
+            )
+        if self.cov_type != "nonrobust" and self.llf is not None:
+            lines.append(
+                "      The F-statistic is the classical one, not a robust test."
             )
 
         # Add diagnostics section if requested
@@ -461,12 +518,17 @@ class OLS(RegimesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for exog with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 # key is a string, find it in _exog_names
                 if key not in self._exog_names:
@@ -476,15 +538,10 @@ class OLS(RegimesModelBase):
                     )
                 idx = self._exog_names.index(key)
 
-            # Validate and sort break points
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
-            normalized[idx] = breaks_list
+            # sorted, distinct integers inside the sample
+            normalized[idx] = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
         return normalized
 
@@ -610,12 +667,17 @@ class OLS(RegimesModelBase):
         ----------
         cov_type : CovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
         cov_kwds : dict | None
-            Additional keywords for covariance estimation. For HAC, can
-            include 'maxlags' (default uses Newey-West automatic selection).
+            Additional keywords for covariance estimation, used with
+            ``cov_type="HAC"`` only: ``maxlags`` (the number of lags of the
+            Bartlett kernel; default the fixed rule
+            ``floor(4 (T / 100)^(2/9))``) and any other keyword of
+            statsmodels' HAC covariance, such as ``use_correction`` (default
+            True).
         **kwargs
             Additional arguments (reserved for future use).
 
@@ -623,6 +685,23 @@ class OLS(RegimesModelBase):
         -------
         OLSResults
             Results object containing estimates and inference.
+
+        Notes
+        -----
+        With breaks the model is one regression with regime-specific
+        columns. The error variance is therefore pooled across regimes, and
+        the standard errors differ from those of separate regressions on
+        each regime (``fit_by_regime``). With ``cov_type="HAC"`` the
+        covariances between coefficients of different regimes use
+        autocovariances across the break.
+
+        The default HAC lag is a fixed rule of thumb, not a data-dependent
+        bandwidth: in Newey and West (1994) the same expression is only the
+        first-step lag from which the bandwidth is estimated.
+
+        Inference uses the t distribution with ``n - k`` degrees of freedom
+        for every covariance type (statsmodels uses the normal distribution
+        with robust covariances).
         """
         if self.exog is None:
             raise ValueError("exog is required for OLS estimation")
@@ -631,26 +710,12 @@ class OLS(RegimesModelBase):
 
         # Create design matrix (with regime interactions if breaks specified)
         X, param_names = self._create_break_design()
+        if self.breaks or self._variable_breaks:
+            check_break_design(X, param_names)
 
         # Use statsmodels for estimation
         sm_model = sm.OLS(self.endog, X)
-
-        # Map cov_type to statsmodels format
-        if cov_type == "nonrobust":
-            sm_results = sm_model.fit()
-        elif cov_type.startswith("HC"):
-            sm_results = sm_model.fit(cov_type=cov_type)
-        elif cov_type == "HAC":
-            maxlags = cov_kwds.get("maxlags")
-            if maxlags is None:
-                # Newey-West automatic bandwidth selection
-                maxlags = int(np.floor(4 * (self.nobs / 100) ** (2 / 9)))
-            sm_results = sm_model.fit(
-                cov_type="HAC",
-                cov_kwds={"maxlags": maxlags, "use_correction": True},
-            )
-        else:
-            raise ValueError(f"Unknown cov_type: {cov_type}")
+        sm_results = fit_with_covariance(sm_model, cov_type, cov_kwds, self.nobs)
 
         # Extract results
         params = np.asarray(sm_results.params)
@@ -704,6 +769,12 @@ class OLS(RegimesModelBase):
         list[OLSResults]
             List of results, one per regime.
         """
+        if self._variable_breaks:
+            raise ValueError(
+                "fit_by_regime needs common breaks: with variable_breaks the "
+                "variables change at different dates and there is no single "
+                "set of regimes to estimate separately"
+            )
         if not self.breaks:
             return [self.fit(cov_type=cov_type, cov_kwds=cov_kwds)]
 
@@ -712,6 +783,7 @@ class OLS(RegimesModelBase):
             y_r, X_r = self.get_regime_data(regime)
             if X_r is None:
                 raise ValueError("exog is required for OLS estimation")
+            check_regime_sample(X_r, regime)
 
             regime_model = OLS(y_r, X_r, has_constant=False)
             regime_results = regime_model.fit(cov_type=cov_type, cov_kwds=cov_kwds)
@@ -737,6 +809,7 @@ class OLS(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         max_breaks : int
@@ -746,6 +819,7 @@ class OLS(RegimesModelBase):
             (``h = floor(trimming * T)``, at least ``q + 1``). Default is 0.15.
         selection : str
             Break selection criterion:
+
             - "bic": Bayesian Information Criterion (default)
             - "lwz": Liu-Wu-Zidek modified Schwarz criterion
             - "sequential": Sequential testing procedure
@@ -807,6 +881,7 @@ class OLS(RegimesModelBase):
             One or more break point indices to test.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         significance : float
@@ -878,7 +953,7 @@ class OLS(RegimesModelBase):
         Parameters
         ----------
         significance : float
-            Significance level for KS critical value. Any value in (0, 1).
+            Significance level: 0.20, 0.10, 0.05, 0.02 or 0.01.
 
         Returns
         -------
@@ -910,6 +985,7 @@ class OLS(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         trimming : float

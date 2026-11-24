@@ -399,8 +399,10 @@ def _extract_baiperron_results_param_data(
     else:
         param_names = [f"beta{i}" for i in range(q)]
 
-    # Compute boundaries
-    boundaries = [0] + list(break_indices) + [nobs]
+    # Compute boundaries, in the observations the break dates are in (those
+    # of the model's data for a test built from an AR or ADL model)
+    offset = int(getattr(results, "index_offset", 0))
+    boundaries = [offset] + list(break_indices) + [nobs + offset]
 
     param_data: dict[str, list[dict[str, Any]]] = {name: [] for name in param_names}
 
@@ -475,6 +477,7 @@ def plot_params_over_time(
     ----------
     results : ResultType | list[ResultType] | dict[str, ResultType]
         Results to plot. Can be:
+
         - Single result object (OLSResults, ARResults, or BaiPerronTest)
         - List of results (auto-labeled as "Model 1", "Model 2", etc.)
         - Dict mapping labels to results for custom labels

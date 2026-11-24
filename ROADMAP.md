@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 4: v0.4.0 - Bai-Perron Corrections & Date-Aware Summaries** Complete; Phase 5 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 4: v0.4.0 - Bai-Perron Corrections & Date-Aware Summaries** Complete, followed by a correction round for every other part of the package (unreleased, see below); Phase 5 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -87,6 +87,31 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
   - Accepts `pd.PeriodIndex`, `pd.DatetimeIndex`, or `Sequence[str]`
   - Replaces integer observation numbers with date labels throughout
 - [x] 1030 tests
+
+### Corrections after v0.4.0 (unreleased)
+
+Every part of the package other than Bai-Perron was checked against its
+sources and against other implementations in November 2026. The defects
+found are fixed, each with a permanent test against another package or a
+published number; the details are in the changelog and on the validation
+page of the documentation.
+
+- [x] Markov switching: regime labels, restricted (non-recurring) models,
+  bootstrap for the restriction tests, selection of the number of regimes
+  by a parametric bootstrap likelihood ratio test
+- [x] Chow, CUSUM, CUSUM-of-squares and Andrews-Ploberger tests: scale and
+  p-values (Hansen 1997), bounds (Durbin 1969), recursive residuals
+- [x] Models and rolling estimators: lag selection, validation of break
+  dates, covariance types, F statistic, roots, long-run multipliers
+- [x] One convention for break dates of AR and ADL models and the tests
+  built from them
+- [x] Documentation: API reference for every public class, a conventions
+  page, a validation page; every code example of the README runs
+
+Known limits that remain are listed on the validation page ("Not
+validated") and in the docstrings: the restriction tests of Markov models
+have no published distribution theory, the search for three or more regimes
+can depend on the seed, rolling estimation supports two covariance types.
 
 ## Planned Phases
 

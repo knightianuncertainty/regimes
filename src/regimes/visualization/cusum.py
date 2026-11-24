@@ -56,7 +56,7 @@ def plot_cusum(
     rejection_alpha : float
         Alpha for rejection region shading. Default is 0.10.
     show_crossings : bool
-        Whether to mark boundary crossings. Default is True.
+        Whether to mark the first boundary crossing. Default is True.
     crossing_color : str | None
         Color for crossing markers. Defaults to REGIMES_COLORS["grey"].
     figsize : tuple[float, float]
@@ -83,7 +83,7 @@ def plot_cusum(
             fig = ax.get_figure()  # type: ignore[union-attr]
 
         n = len(results.statistic_path)
-        x = np.arange(n)
+        x = results.observations
 
         # Plot statistic path
         ax.plot(
@@ -128,16 +128,16 @@ def plot_cusum(
                 color=bound_color,
             )
 
-        # Mark boundary crossings
-        if show_crossings and results.crossing_indices:
-            for idx in results.crossing_indices:
-                ax.axvline(
-                    x=idx,
-                    color=crossing_color,
-                    linewidth=0.8,
-                    linestyle=":",
-                    alpha=0.7,
-                )
+        # Mark the first boundary crossing
+        if show_crossings and results.first_crossing is not None:
+            ax.axvline(
+                x=results.first_crossing,
+                color=crossing_color,
+                linewidth=0.8,
+                linestyle=":",
+                alpha=0.7,
+                label=f"First crossing ({results.first_crossing})",
+            )
 
         # Zero line
         ax.axhline(y=0, color=REGIMES_COLORS["near_black"], linewidth=0.5, alpha=0.3)
@@ -191,7 +191,7 @@ def plot_cusum_sq(
     rejection_alpha : float
         Alpha for rejection region shading. Default is 0.10.
     show_crossings : bool
-        Whether to mark boundary crossings. Default is True.
+        Whether to mark the first boundary crossing. Default is True.
     show_expected : bool
         Whether to show the expected diagonal. Default is True.
     crossing_color : str | None
@@ -222,7 +222,7 @@ def plot_cusum_sq(
             fig = ax.get_figure()  # type: ignore[union-attr]
 
         n = len(results.statistic_path)
-        x = np.arange(n)
+        x = results.observations
 
         # Plot expected diagonal
         if show_expected:
@@ -280,16 +280,16 @@ def plot_cusum_sq(
                 where=results.lower_bound > 0,
             )
 
-        # Mark boundary crossings
-        if show_crossings and results.crossing_indices:
-            for idx in results.crossing_indices:
-                ax.axvline(
-                    x=idx,
-                    color=crossing_color,
-                    linewidth=0.8,
-                    linestyle=":",
-                    alpha=0.7,
-                )
+        # Mark the first boundary crossing
+        if show_crossings and results.first_crossing is not None:
+            ax.axvline(
+                x=results.first_crossing,
+                color=crossing_color,
+                linewidth=0.8,
+                linestyle=":",
+                alpha=0.7,
+                label=f"First crossing ({results.first_crossing})",
+            )
 
         ax.set_title(title or "CUSUM-SQ test statistic")
         ax.set_xlabel(xlabel)

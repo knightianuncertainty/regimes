@@ -16,6 +16,8 @@ from regimes.rolling.base import (
     RollingCovType,
     RollingEstimatorBase,
     RollingResultsBase,
+    check_rolling_cov_type,
+    warn_if_breaks,
 )
 
 if TYPE_CHECKING:
@@ -216,6 +218,7 @@ class RollingOLS(RollingEstimatorBase):
         >>> rolling = RollingOLS.from_model(model, window=60)
         >>> results = rolling.fit()
         """
+        warn_if_breaks(model)
         if model.exog is None:
             raise ValueError("Model must have exog for rolling estimation")
 
@@ -233,6 +236,7 @@ class RollingOLS(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 
@@ -246,6 +250,7 @@ class RollingOLS(RollingEstimatorBase):
         The first `window - 1` observations will have NaN estimates since
         there are not enough observations to fill the window.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
         window = self.window
@@ -375,6 +380,7 @@ class RecursiveOLS(RollingEstimatorBase):
         >>> recursive = RecursiveOLS.from_model(model, min_nobs=30)
         >>> results = recursive.fit()
         """
+        warn_if_breaks(model)
         if model.exog is None:
             raise ValueError("Model must have exog for recursive estimation")
 
@@ -392,6 +398,7 @@ class RecursiveOLS(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 
@@ -405,6 +412,7 @@ class RecursiveOLS(RollingEstimatorBase):
         The first `min_nobs - 1` observations will have NaN estimates since
         there are not enough observations for estimation.
         """
+        check_rolling_cov_type(cov_type)
         n = self.nobs
         k = self.n_params
 

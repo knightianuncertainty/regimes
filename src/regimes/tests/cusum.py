@@ -1,12 +1,43 @@
 """CUSUM and CUSUM-SQ tests for parameter instability.
 
-This module implements the CUSUM (Brown, Durbin, Evans, 1975) and CUSUM-of-squares
-tests for detecting parameter instability in linear regression models. Unlike
-Bai-Perron or Chow tests which estimate or test at specific break dates, CUSUM
-tests produce a path of test statistics over time — visualization is the primary
-output.
+This module implements the CUSUM and CUSUM-of-squares tests of Brown, Durbin
+and Evans (1975) for parameter instability in linear regression models. Both
+are built on the recursive residuals. Unlike the Bai-Perron or Chow tests,
+which estimate or test break dates, they produce a path of statistics over
+time, and the plot of the path against its bounds is the primary output.
 
-CUSUM detects mean shifts in parameters; CUSUM-SQ detects variance changes.
+CUSUM is sensitive to changes in the regression coefficients; CUSUM-SQ to
+changes in the error variance.
+
+What the tests report. A path that leaves its bounds rejects the null of
+stability. The observation at which it first does so is reported as
+``first_crossing``; it is *not* an estimate of the date of the change, which
+can lie well before it (CUSUM) or after it (CUSUM-SQ). The tests therefore
+report no break date: ``n_breaks`` is 0 and ``break_indices`` is empty.
+
+Bounds.
+
+* CUSUM: a pair of straight lines through ``(k, +/- a sqrt(T - k))`` and
+  ``(T, +/- 3 a sqrt(T - k))``, with ``a`` chosen so that the probability
+  that a Brownian motion, the limit of the cumulated recursive residuals,
+  crosses either line is the significance level: ``a = 1.143, 0.948, 0.850``
+  for 1, 5 and 10 percent (Brown, Durbin and Evans, 1975, Section 2.3). The
+  test is somewhat conservative.
+* CUSUM-SQ: the lines ``(r - k) / (T - k) +/- c_0``. Under the null and
+  normal errors the path behaves like the ordered values of a uniform
+  sample of size ``n = (T - k) / 2 - 1``, and ``c_0`` is the critical value
+  of the modified Kolmogorov-Smirnov statistic for that ``n`` (Durbin, 1969,
+  Table 1). It is computed with the approximation of Edgerton and Wells
+  (1994), ``c_0 = a_1 / sqrt(n) + a_2 / n + a_3 / n^1.5``, as statsmodels
+  does (``RecursiveLS``), and is available for the two-sided levels 20, 10,
+  5, 2 and 1 percent and for at least 20 recursive residuals. The path is
+  compared with the bounds at every observation, as in statsmodels. In
+  simulations under the null the test at a nominal 5 percent rejected 5.3,
+  5.4 and 4.7 percent of the time with 50, 100 and 200 observations.
+
+The scale estimate of the CUSUM test is ``sqrt(sum w_t^2 / (T - k))``
+(uncentered); statsmodels centers the recursive residuals first, which moves
+the size of the test by a few tenths of a percentage point.
 
 References
 ----------
@@ -14,8 +45,12 @@ Brown, R. L., Durbin, J., & Evans, J. M. (1975). Techniques for testing the
     constancy of regression relationships over time. Journal of the Royal
     Statistical Society: Series B, 37(2), 149-192.
 
-Ploberger, W., & Krämer, W. (1992). The CUSUM test with OLS residuals.
-    Econometrica, 60(2), 271-285.
+Durbin, J. (1969). Tests for serial correlation in regression analysis based
+    on the periodogram of least-squares residuals. Biometrika, 56(1), 1-15.
+
+Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic
+    in medium and large sized samples. Oxford Bulletin of Economics and
+    Statistics, 56(3), 355-365.
 """
 
 from __future__ import annotations
@@ -24,8 +59,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy import stats
 
+from regimes.tests._bp_core import _orthonormal
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase
 
 if TYPE_CHECKING:
@@ -36,20 +71,88 @@ if TYPE_CHECKING:
     from regimes.models.ols import OLS
 
 
-# CUSUM critical values for significance levels 0.01, 0.05, 0.10
-# These come from the Brownian bridge distribution (Table in Brown et al., 1975)
+# Constant a of the CUSUM boundary lines for significance levels 0.01, 0.05,
+# 0.10: the probability that a Brownian motion crosses either line is the
+# significance level (Brown, Durbin and Evans, 1975, Section 2.3).
 _CUSUM_CRITICAL_VALUES: dict[float, float] = {
     0.01: 1.143,
     0.05: 0.948,
     0.10: 0.850,
 }
 
+# Edgerton and Wells (1994): c_0 = a1 / sqrt(n) + a2 / n + a3 / n^1.5 with
+# n = (T - k) / 2 - 1 approximates the critical values of Durbin (1969) for
+# the CUSUM-of-squares test. Keys are two-sided significance levels (twice the
+# one-sided levels 0.10, 0.05, 0.025, 0.01, 0.005 of the table). The
+# coefficients are those in statsmodels' ``RecursiveLS``.
+_CUSUMSQ_COEFFICIENTS: dict[float, tuple[float, float, float]] = {
+    0.20: (1.0729830, -0.6698868, -0.5816458),
+    0.10: (1.2238734, -0.6700069, -0.7351697),
+    0.05: (1.3581015, -0.6701218, -0.8858694),
+    0.02: (1.5174271, -0.6702672, -1.0847745),
+    0.01: (1.6276236, -0.6703724, -1.2365861),
+}
+
+# Below this number of recursive residuals the approximation of Edgerton and
+# Wells is poor: in simulations under the null the test at a nominal 5 percent
+# rejects 8 percent of the time with 16 residuals, 12 with 10, and almost
+# always with 5.
+MIN_CUSUMSQ_RESIDUALS = 20
+
+
+def cusum_sq_critical_value(significance: float, n_residuals: int) -> float:
+    """Half-width ``c_0`` of the CUSUM-of-squares bounds.
+
+    Parameters
+    ----------
+    significance : float
+        Two-sided significance level: 0.20, 0.10, 0.05, 0.02 or 0.01.
+    n_residuals : int
+        Number of recursive residuals, ``T - k``.
+
+    Returns
+    -------
+    float
+        ``c_0`` from the approximation of Edgerton and Wells (1994) to the
+        table of Durbin (1969), with ``n = (T - k) / 2 - 1``.
+
+    Raises
+    ------
+    ValueError
+        For a level that is not tabulated, or fewer than 20 recursive
+        residuals.
+    """
+    key = _match_level(significance, _CUSUMSQ_COEFFICIENTS)
+    if key is None:
+        raise ValueError(
+            "significance must be one of "
+            f"{sorted(_CUSUMSQ_COEFFICIENTS)}, got {significance}"
+        )
+    if n_residuals < MIN_CUSUMSQ_RESIDUALS:
+        raise ValueError(
+            f"the CUSUM-of-squares bounds are an approximation for medium and "
+            f"large samples; with {n_residuals} recursive residuals (fewer "
+            f"than {MIN_CUSUMSQ_RESIDUALS}) it is not accurate and the test "
+            "is not computed"
+        )
+    n = 0.5 * n_residuals - 1.0
+    a1, a2, a3 = _CUSUMSQ_COEFFICIENTS[key]
+    return float(a1 / np.sqrt(n) + a2 / n + a3 / n**1.5)
+
+
+def _match_level(significance: float, table: dict[float, Any]) -> float | None:
+    """The key of ``table`` equal to ``significance``, up to rounding."""
+    for key in table:
+        if abs(key - significance) < 1e-12:
+            return key
+    return None
+
 
 def _compute_recursive_residuals(
     endog: NDArray[np.floating[Any]],
     exog: NDArray[np.floating[Any]],
-) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
-    """Compute recursive residuals using Sherman-Morrison-Woodbury updating.
+) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], NDArray[np.intp]]:
+    """Compute recursive residuals.
 
     Recursive residuals are one-step-ahead prediction errors from a
     recursively estimated regression. Under parameter stability, they
@@ -65,21 +168,44 @@ def _compute_recursive_residuals(
     Returns
     -------
     w : NDArray
-        Recursive residuals of shape (T - k,).
+        The ``T - k`` recursive residuals.
     f : NDArray
-        Scaling factors of shape (T - k,), where
-        f_t = 1 + x_t' (X_{t-1}' X_{t-1})^{-1} x_t.
+        Scaling factors, ``f_t = 1 + x_t' (X_{t-1}' X_{t-1})^+ x_t``.
+    positions : NDArray
+        The observation each residual belongs to (see Notes).
+
+    Raises
+    ------
+    ValueError
+        If the regressors are collinear in the whole sample.
 
     Notes
     -----
-    Uses the matrix inversion lemma (Sherman-Morrison-Woodbury) for
-    efficient O(Tk²) updating rather than O(T²k³) direct inversion.
-    The recursive residual at time t is:
+    The recursive residual at time t is
 
         w_t = (y_t - x_t' β_{t-1}) / sqrt(f_t)
 
-    where β_{t-1} is the OLS estimate using observations 1, ..., t-1,
-    and f_t = 1 + x_t' (X_{t-1}' X_{t-1})^{-1} x_t.
+    where β_{t-1} is the least-squares estimate from observations before t.
+
+    An observation whose regressors are not a combination of those before
+    it adds to the rank of the design: it is fitted exactly and has no
+    residual. There are exactly ``k`` such observations. Usually they are
+    the first ``k``, and the residuals belong to observations ``k, ..., T -
+    1``. When the regressors are collinear at the start of the sample they
+    come later: with a dummy variable that is zero until observation 150,
+    observation 150 has no residual and all the others from the second on
+    do. (Before the rank is complete the prediction ``x_t' β`` is still
+    unique, because ``x_t`` is then a combination of earlier regressors.)
+    The sum of squared recursive residuals equals the residual sum of
+    squares of the regression in every case.
+
+    The computation uses an orthonormal basis of the regressors, which
+    spans the same space and gives the same residuals, and updates a QR
+    decomposition, so that it stays accurate when the regressors differ in
+    scale or vary little around a large mean (a trend in calendar years, a
+    series in levels). Rank is decided with a relative tolerance of 1e-6 on
+    the singular values: first observations that almost coincide count as
+    collinear.
     """
     T, k = exog.shape
 
@@ -89,43 +215,69 @@ def _compute_recursive_residuals(
             "to compute recursive residuals"
         )
 
-    # Initialize with first k observations
-    X_init = exog[:k]
-    y_init = endog[:k]
+    y = np.asarray(endog, dtype=np.float64)
+    basis = _orthonormal(np.asarray(exog, dtype=np.float64))
+    if basis is exog or np.linalg.matrix_rank(basis) < k:
+        raise ValueError(
+            "the regressors are collinear in the sample, so the recursive "
+            "residuals are not defined"
+        )
 
-    # (X'X)^{-1} for the first k observations
-    XtX_inv = np.linalg.inv(X_init.T @ X_init)
-    beta = XtX_inv @ (X_init.T @ y_init)
+    residuals: list[float] = []
+    scales: list[float] = []
+    positions: list[int] = []
 
-    n_residuals = T - k
-    w = np.empty(n_residuals)
-    f = np.empty(n_residuals)
+    # Until the rank is complete: least squares of minimum norm.
+    rank = 0
+    t = 0
+    while rank < k and t < T:
+        singular = np.linalg.svd(basis[: t + 1], compute_uv=False)
+        new_rank = int(np.sum(singular > _RANK_TOLERANCE * singular[0]))
+        if new_rank > rank:
+            rank = new_rank  # fitted exactly: no residual
+        else:
+            if t == 0:
+                prediction, leverage = 0.0, 0.0
+            else:
+                inverse = np.linalg.pinv(basis[:t], rcond=_RANK_TOLERANCE)
+                prediction = float(basis[t] @ (inverse @ y[:t]))
+                leverage = float(np.sum((basis[t] @ inverse) ** 2))
+            f_t = 1.0 + leverage
+            residuals.append((y[t] - prediction) / np.sqrt(f_t))
+            scales.append(f_t)
+            positions.append(t)
+        t += 1
+    if rank < k:
+        raise ValueError(
+            "the regressors are collinear in the sample, so the recursive "
+            "residuals are not defined"
+        )
 
-    for t in range(k, T):
-        x_t = exog[t]  # (k,)
-        y_t = endog[t]
+    # From there on: the triangular factor of [X, y], updated row by row.
+    triangular = np.linalg.qr(np.column_stack([basis[:t], y[:t]]), mode="r")
+    for s in range(t, T):
+        r_xx = triangular[:k, :k]
+        beta = np.linalg.solve(r_xx, triangular[:k, k])
+        x_s = basis[s]
+        v = np.linalg.solve(r_xx.T, x_s)
+        f_s = 1.0 + float(v @ v)
+        residuals.append(float(y[s] - x_s @ beta) / np.sqrt(f_s))
+        scales.append(f_s)
+        positions.append(s)
+        triangular = np.linalg.qr(
+            np.vstack([triangular, np.append(x_s, y[s])]), mode="r"
+        )
 
-        # One-step-ahead prediction error
-        prediction = x_t @ beta
-        error = y_t - prediction
+    return (
+        np.asarray(residuals, dtype=np.float64),
+        np.asarray(scales, dtype=np.float64),
+        np.asarray(positions, dtype=np.intp),
+    )
 
-        # Scaling factor: f_t = 1 + x_t' (X'X)^{-1} x_t
-        f_t = 1.0 + x_t @ XtX_inv @ x_t
-        f[t - k] = f_t
 
-        # Recursive residual (standardized)
-        w[t - k] = error / np.sqrt(f_t)
-
-        # Sherman-Morrison update of (X'X)^{-1}
-        # (X'X + x x')^{-1} = (X'X)^{-1} - (X'X)^{-1} x x' (X'X)^{-1} / f_t
-        v = XtX_inv @ x_t  # (k,)
-        XtX_inv = XtX_inv - np.outer(v, v) / f_t
-
-        # Update beta: β_t = β_{t-1} + (X'X)^{-1}_t * x_t * w_t * sqrt(f_t)
-        # Equivalently: β_t = β_{t-1} + (X'X)_t^{-1} x_t (y_t - x_t' β_{t-1})
-        beta = beta + XtX_inv @ x_t * error
-
-    return w, f
+# Singular values below this fraction of the largest count as zero when the
+# rank of the first observations is decided.
+_RANK_TOLERANCE = 1e-6
 
 
 @dataclass
@@ -134,8 +286,8 @@ class CUSUMResults(BreakTestResultsBase):
 
     The CUSUM test computes the cumulative sum of recursive residuals,
     normalized by the estimated standard deviation. Under the null of
-    parameter stability, the statistic stays within expanding boundaries
-    derived from the Brownian bridge distribution.
+    parameter stability, the statistic stays within a pair of diverging
+    straight lines with the chosen probability (see the module docstring).
 
     Attributes
     ----------
@@ -144,9 +296,21 @@ class CUSUMResults(BreakTestResultsBase):
     nobs : int
         Number of observations.
     n_breaks : int
-        Number of boundary crossings (0 if stable, 1+ if unstable).
+        Always 0: the test does not estimate a break date.
     break_indices : Sequence[int]
-        Indices where statistic first crosses the boundary.
+        Always empty; see ``first_crossing``.
+    first_crossing : int | None
+        Observation (0-based; of the model's data for a test built from an
+        AR or ADL model, else of the sample the test was given) at which
+        the path first leaves the bounds, or None. This shows when the
+        evidence against stability became significant, not when the
+        coefficients changed.
+    observations : NDArray
+        Observation number of each point of the path. Usually ``k, ..., T -
+        1``; in general every observation except the ``k`` at which the
+        rank of the regressors rises (see ``residual_positions``).
+        For a test built from an AR or ADL model these are observations
+        of the model's data (``index_offset`` is added).
     statistic_path : NDArray
         The CUSUM statistic W_r at each time point, shape (T - k,).
     upper_bound : NDArray
@@ -163,6 +327,11 @@ class CUSUMResults(BreakTestResultsBase):
         Whether the null of parameter stability is rejected.
     n_params : int
         Number of regressors (k).
+    residual_positions : NDArray | None
+        The observation of each recursive residual. An observation whose
+        regressors are not a combination of the earlier ones (the first
+        ``k`` observations, or the date of an impulse dummy) is fitted
+        exactly and has no residual.
     _test : CUSUMTest | None
         Back-reference to the test object.
     """
@@ -179,12 +348,23 @@ class CUSUMResults(BreakTestResultsBase):
     significance: float = 0.05
     reject: bool = False
     n_params: int = 0
+    first_crossing: int | None = None
+    residual_positions: NDArray[np.intp] | None = field(default=None, repr=False)
     _test: CUSUMTest | None = field(default=None, repr=False)
 
     @property
     def is_stable(self) -> bool:
         """Whether the null of parameter stability is not rejected."""
         return not self.reject
+
+    @property
+    def observations(self) -> NDArray[np.intp]:
+        """Observation number of each point of the path."""
+        if self.residual_positions is not None:
+            positions = np.asarray(self.residual_positions, dtype=np.intp)
+            return positions + self.index_offset
+        start = self.nobs - len(self.statistic_path) + self.index_offset
+        return np.arange(start, start + len(self.statistic_path), dtype=np.intp)
 
     @property
     def max_statistic(self) -> float:
@@ -194,14 +374,21 @@ class CUSUMResults(BreakTestResultsBase):
         return float(np.max(np.abs(self.statistic_path)))
 
     @property
+    def max_ratio(self) -> float:
+        """Largest ratio of the path to its bound; above 1 the test rejects."""
+        if len(self.statistic_path) == 0:
+            return 0.0
+        return float(np.max(np.abs(self.statistic_path) / self.upper_bound))
+
+    @property
     def crossing_indices(self) -> list[int]:
-        """Indices where the statistic crosses the critical boundary."""
+        """Observations at which the statistic is outside the bounds."""
         if len(self.statistic_path) == 0:
             return []
         above = self.statistic_path > self.upper_bound
         below = self.statistic_path < self.lower_bound
-        crossed = np.where(above | below)[0]
-        return crossed.tolist()
+        crossed = self.observations[np.where(above | below)[0]]
+        return [int(i) for i in crossed]
 
     def plot(
         self,
@@ -245,19 +432,22 @@ class CUSUMResults(BreakTestResultsBase):
         lines.append(f"Sigma hat:                {self.sigma_hat:>10.4f}")
         lines.append("-" * 78)
         lines.append(f"Max |CUSUM statistic|:    {self.max_statistic:>10.4f}")
+        lines.append(f"Max |CUSUM| / bound:      {self.max_ratio:>10.4f}")
+        lines.append("  (the test rejects if the ratio exceeds 1)")
 
-        if self.significance in _CUSUM_CRITICAL_VALUES:
-            cv = _CUSUM_CRITICAL_VALUES[self.significance]
-            lines.append(f"Critical value (a):       {cv:>10.4f}")
+        key = _match_level(self.significance, _CUSUM_CRITICAL_VALUES)
+        if key is not None:
+            cv = _CUSUM_CRITICAL_VALUES[key]
+            lines.append(f"Boundary constant (a):    {cv:>10.4f}")
 
         decision = "REJECT" if self.reject else "Do not reject"
         lines.append(f"\nDecision:  {decision} the null of parameter stability")
 
-        if self.reject and self.break_indices:
+        if self.reject and self.first_crossing is not None:
             lines.append(
-                f"First boundary crossing at recursive residual index: "
-                f"{self.break_indices[0]}"
+                f"First boundary crossing at observation {self.first_crossing}"
             )
+            lines.append("  (not an estimate of the date of the change)")
 
         lines.append("=" * 78)
         return "\n".join(lines)
@@ -269,8 +459,8 @@ class CUSUMSQResults(BreakTestResultsBase):
 
     The CUSUM-SQ test computes the cumulative sum of squared recursive
     residuals, normalized to [0, 1]. Under the null, this path tracks
-    the diagonal. Critical bounds come from the Kolmogorov-Smirnov
-    distribution.
+    the diagonal, within bounds from the table of Durbin (1969) (see the
+    module docstring).
 
     Attributes
     ----------
@@ -279,9 +469,22 @@ class CUSUMSQResults(BreakTestResultsBase):
     nobs : int
         Number of observations.
     n_breaks : int
-        Number of boundary crossings.
+        Always 0: the test does not estimate a break date.
     break_indices : Sequence[int]
-        Indices where statistic first crosses the boundary.
+        Always empty; see ``first_crossing``.
+    first_crossing : int | None
+        Observation (0-based; of the model's data for a test built from an
+        AR or ADL model, else of the sample the test was given) at which
+        the path first leaves the bounds, or None. It is not an estimate of
+        the date at which the variance changed.
+    observations : NDArray
+        Observation number of each point of the path. Usually ``k, ..., T -
+        1``; in general every observation except the ``k`` at which the
+        rank of the regressors rises (see ``residual_positions``).
+        For a test built from an AR or ADL model these are observations
+        of the model's data (``index_offset`` is added).
+    critical_value : float
+        Half-width ``c_0`` of the bounds.
     statistic_path : NDArray
         The CUSUM-SQ statistic S_r at each time point, shape (T - k,).
     expected_path : NDArray
@@ -298,6 +501,8 @@ class CUSUMSQResults(BreakTestResultsBase):
         Whether the null of stability is rejected.
     n_params : int
         Number of regressors (k).
+    residual_positions : NDArray | None
+        The observation of each recursive residual (see ``CUSUMResults``).
     _test : CUSUMSQTest | None
         Back-reference to the test object.
     """
@@ -316,12 +521,24 @@ class CUSUMSQResults(BreakTestResultsBase):
     significance: float = 0.05
     reject: bool = False
     n_params: int = 0
+    first_crossing: int | None = None
+    residual_positions: NDArray[np.intp] | None = field(default=None, repr=False)
+    critical_value: float = np.nan
     _test: CUSUMSQTest | None = field(default=None, repr=False)
 
     @property
     def is_stable(self) -> bool:
         """Whether the null of parameter stability is not rejected."""
         return not self.reject
+
+    @property
+    def observations(self) -> NDArray[np.intp]:
+        """Observation number of each point of the path."""
+        if self.residual_positions is not None:
+            positions = np.asarray(self.residual_positions, dtype=np.intp)
+            return positions + self.index_offset
+        start = self.nobs - len(self.statistic_path) + self.index_offset
+        return np.arange(start, start + len(self.statistic_path), dtype=np.intp)
 
     @property
     def max_deviation(self) -> float:
@@ -332,13 +549,13 @@ class CUSUMSQResults(BreakTestResultsBase):
 
     @property
     def crossing_indices(self) -> list[int]:
-        """Indices where the statistic crosses the critical boundary."""
+        """Observations at which the statistic is outside the bounds."""
         if len(self.statistic_path) == 0:
             return []
         above = self.statistic_path > self.upper_bound
         below = self.statistic_path < self.lower_bound
-        crossed = np.where(above | below)[0]
-        return crossed.tolist()
+        crossed = self.observations[np.where(above | below)[0]]
+        return [int(i) for i in crossed]
 
     def plot(
         self,
@@ -382,20 +599,16 @@ class CUSUMSQResults(BreakTestResultsBase):
         lines.append("-" * 78)
         lines.append(f"Max |S_r - E[S_r]|:       {self.max_deviation:>10.4f}")
 
-        # KS critical value
-        n = len(self.recursive_residuals)
-        if n > 0:
-            cv = stats.ksone.ppf(1.0 - self.significance / 2, n)
-            lines.append(f"KS critical value:        {cv:>10.4f}")
+        lines.append(f"Critical value (c_0):     {self.critical_value:>10.4f}")
 
         decision = "REJECT" if self.reject else "Do not reject"
         lines.append(f"\nDecision:  {decision} the null of variance stability")
 
-        if self.reject and self.break_indices:
+        if self.reject and self.first_crossing is not None:
             lines.append(
-                f"First boundary crossing at recursive residual index: "
-                f"{self.break_indices[0]}"
+                f"First boundary crossing at observation {self.first_crossing}"
             )
+            lines.append("  (not an estimate of the date of the change)")
 
         lines.append("=" * 78)
         return "\n".join(lines)
@@ -406,8 +619,9 @@ class CUSUMTest(BreakTestBase):
 
     Tests the null hypothesis of parameter stability by examining the
     cumulative sum of recursive residuals. Under H0, the cumulated sum
-    stays within expanding boundaries derived from the Brownian bridge
-    distribution. If the path crosses the boundary, we reject stability.
+    behaves like a Brownian motion and stays within a pair of diverging
+    straight lines with probability one minus the significance level. If
+    the path crosses a line, stability is rejected.
 
     Parameters
     ----------
@@ -434,12 +648,17 @@ class CUSUMTest(BreakTestBase):
         W_r = (1 / sigma_hat) * sum_{t=k+1}^{r} w_t
 
     where w_t are the recursive residuals and sigma_hat is their estimated
-    standard deviation. The critical boundaries are:
+    standard deviation (uncentered: ``sqrt(sum w_t^2 / (T - k))``). The
+    critical boundaries are:
 
         ±a * sqrt(T - k) ± 2a * (r - k) / sqrt(T - k)
 
-    where a is the critical value from the Brownian bridge distribution
-    at the chosen significance level.
+    where a is 1.143, 0.948 or 0.850 for a significance level of 1, 5 or 10
+    percent. The test is somewhat conservative.
+
+    The first crossing of a boundary is reported as ``first_crossing``. It
+    is not an estimate of the date of the change, and the test reports no
+    break date.
 
     References
     ----------
@@ -499,8 +718,10 @@ class CUSUMTest(BreakTestBase):
 
         Notes
         -----
-        For AR and ADL models, the test uses the effective sample (after
-        dropping initial observations for lags).
+        For AR and ADL models, the test is computed on the effective
+        sample (after dropping the initial observations for lags).
+        Break dates and other observation numbers in the results are
+        those of the model's data (see ``index_offset``).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR as ARModel
@@ -508,11 +729,13 @@ class CUSUMTest(BreakTestBase):
 
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
-            return cls(y, exog=X)
+            offset = int(model.maxlag)
+            return cls._create(offset, y, exog=X)
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog = model.exog
-            return cls(endog, exog=exog)
+            return cls._create(offset, endog, exog=exog)
         else:
             raise TypeError(
                 f"model must be OLS, AR, or ADL, got {type(model).__name__}"
@@ -546,7 +769,8 @@ class CUSUMTest(BreakTestBase):
         ValueError
             If significance is not one of the supported levels.
         """
-        if significance not in _CUSUM_CRITICAL_VALUES:
+        level = _match_level(significance, _CUSUM_CRITICAL_VALUES)
+        if level is None:
             raise ValueError(
                 f"significance must be one of {sorted(_CUSUM_CRITICAL_VALUES.keys())}, "
                 f"got {significance}"
@@ -556,7 +780,7 @@ class CUSUMTest(BreakTestBase):
         k = self.n_params
 
         # Compute recursive residuals
-        w, _f = _compute_recursive_residuals(self.endog, self._exog)
+        w, _f, positions = _compute_recursive_residuals(self.endog, self._exog)
         n = len(w)  # T - k
 
         # Estimate sigma from recursive residuals
@@ -568,8 +792,8 @@ class CUSUMTest(BreakTestBase):
         else:
             statistic_path = np.zeros(n)
 
-        # Critical boundaries (diverging lines from Brownian bridge)
-        a = _CUSUM_CRITICAL_VALUES[significance]
+        # Critical boundaries (a pair of diverging straight lines)
+        a = _CUSUM_CRITICAL_VALUES[level]
         r = np.arange(1, n + 1)  # r = 1, 2, ..., T-k
         sqrt_n = np.sqrt(n)
         upper_bound = a * sqrt_n + 2 * a * r / sqrt_n
@@ -581,16 +805,19 @@ class CUSUMTest(BreakTestBase):
         crossed = np.where(above | below)[0]
         reject = len(crossed) > 0
 
-        # Break indices: first crossing point
-        break_indices: list[int] = []
-        if reject:
-            break_indices = [int(crossed[0])]
+        # First crossing, as an observation of the sample. It is not an
+        # estimate of a break date, so no break is reported.
+        first_crossing = (
+            int(positions[crossed[0]]) + self.index_offset if reject else None
+        )
 
         return CUSUMResults(
             test_name="CUSUM",
             nobs=T,
-            n_breaks=len(break_indices),
-            break_indices=break_indices,
+            n_breaks=0,
+            break_indices=[],
+            first_crossing=first_crossing,
+            index_offset=self.index_offset,
             statistic_path=statistic_path,
             upper_bound=upper_bound,
             lower_bound=lower_bound,
@@ -599,6 +826,7 @@ class CUSUMTest(BreakTestBase):
             significance=significance,
             reject=reject,
             n_params=k,
+            residual_positions=positions,
             _test=self,
         )
 
@@ -608,8 +836,9 @@ class CUSUMSQTest(BreakTestBase):
 
     Tests the null hypothesis of constant variance by examining the
     cumulative sum of squared recursive residuals. Under H0, the
-    normalized path tracks the diagonal line. Critical bounds come
-    from the Kolmogorov-Smirnov distribution.
+    normalized path tracks the diagonal line, within bounds taken from the
+    table of Durbin (1969) through the approximation of Edgerton and Wells
+    (1994); see the module docstring.
 
     Parameters
     ----------
@@ -637,15 +866,29 @@ class CUSUMSQTest(BreakTestBase):
     Under H0, E[S_r] = (r - k) / (T - k). The critical boundaries are
     parallel lines around this diagonal:
 
-        E[S_r] +/- c_alpha
+        E[S_r] +/- c_0
 
-    where c_alpha is the critical value from the Kolmogorov-Smirnov
-    distribution.
+    where c_0 is the critical value of the modified Kolmogorov-Smirnov
+    statistic of Durbin (1969) for ``n = (T - k) / 2 - 1``, not for
+    ``T - k``: bounds for ``T - k`` are too narrow by a factor that tends to
+    ``sqrt(2)``.
+
+    The first crossing of a boundary is reported as ``first_crossing``. It
+    is not an estimate of the date of the change, and the test reports no
+    break date.
 
     References
     ----------
     Brown, R. L., Durbin, J., & Evans, J. M. (1975). Techniques for testing
         the constancy of regression relationships over time. JRSS-B, 37(2).
+
+    Durbin, J. (1969). Tests for serial correlation in regression analysis
+        based on the periodogram of least-squares residuals. Biometrika,
+        56(1), 1-15.
+
+    Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ
+        statistic in medium and large sized samples. Oxford Bulletin of
+        Economics and Statistics, 56(3), 355-365.
     """
 
     def __init__(
@@ -703,11 +946,13 @@ class CUSUMSQTest(BreakTestBase):
 
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
-            return cls(y, exog=X)
+            offset = int(model.maxlag)
+            return cls._create(offset, y, exog=X)
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog = model.exog
-            return cls(endog, exog=exog)
+            return cls._create(offset, endog, exog=exog)
         else:
             raise TypeError(
                 f"model must be OLS, AR, or ADL, got {type(model).__name__}"
@@ -728,8 +973,8 @@ class CUSUMSQTest(BreakTestBase):
         Parameters
         ----------
         significance : float
-            Significance level for the Kolmogorov-Smirnov critical value.
-            Any value in (0, 1) is supported.
+            Significance level: 0.20, 0.10, 0.05 (default), 0.02 or 0.01,
+            the levels for which the bounds are tabulated.
 
         Returns
         -------
@@ -740,16 +985,19 @@ class CUSUMSQTest(BreakTestBase):
         Raises
         ------
         ValueError
-            If significance is not in (0, 1).
+            If significance is not one of the tabulated levels.
         """
-        if not (0 < significance < 1):
-            raise ValueError(f"significance must be in (0, 1), got {significance}")
+        if _match_level(significance, _CUSUMSQ_COEFFICIENTS) is None:
+            raise ValueError(
+                "significance must be one of "
+                f"{sorted(_CUSUMSQ_COEFFICIENTS)}, got {significance}"
+            )
 
         T = self.nobs
         k = self.n_params
 
         # Compute recursive residuals
-        w, _f = _compute_recursive_residuals(self.endog, self._exog)
+        w, _f, positions = _compute_recursive_residuals(self.endog, self._exog)
         n = len(w)  # T - k
 
         # CUSUM-SQ statistic: S_r = cumsum(w²) / sum(w²)
@@ -765,8 +1013,8 @@ class CUSUMSQTest(BreakTestBase):
         # (using local indexing where r goes from 1 to n)
         expected_path = np.arange(1, n + 1) / n
 
-        # Critical value from Kolmogorov-Smirnov distribution
-        c_alpha = float(stats.ksone.ppf(1.0 - significance / 2, n))
+        # Critical value: Durbin (1969) through Edgerton and Wells (1994)
+        c_alpha = cusum_sq_critical_value(significance, n)
 
         # Boundaries: expected ± c_alpha
         upper_bound = expected_path + c_alpha
@@ -781,15 +1029,20 @@ class CUSUMSQTest(BreakTestBase):
         crossed = np.where(above | below)[0]
         reject = len(crossed) > 0
 
-        break_indices: list[int] = []
-        if reject:
-            break_indices = [int(crossed[0])]
+        # First crossing, as an observation of the sample. It is not an
+        # estimate of a break date, so no break is reported.
+        first_crossing = (
+            int(positions[crossed[0]]) + self.index_offset if reject else None
+        )
 
         return CUSUMSQResults(
             test_name="CUSUM-SQ",
             nobs=T,
-            n_breaks=len(break_indices),
-            break_indices=break_indices,
+            n_breaks=0,
+            break_indices=[],
+            first_crossing=first_crossing,
+            index_offset=self.index_offset,
+            critical_value=c_alpha,
             statistic_path=statistic_path,
             expected_path=expected_path,
             upper_bound=upper_bound,
@@ -798,5 +1051,6 @@ class CUSUMSQTest(BreakTestBase):
             significance=significance,
             reject=reject,
             n_params=k,
+            residual_positions=positions,
             _test=self,
         )

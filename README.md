@@ -25,15 +25,31 @@ A Python package for structural break detection and estimation in time-series ec
 
 ## Installation
 
-```bash
-pip install regimes
-```
-
-For development:
+The package is not on PyPI yet. Install it from GitHub:
 
 ```bash
-pip install regimes[dev,test]
+pip install git+https://github.com/knightianuncertainty/regimes.git
 ```
+
+or a released version by its tag:
+
+```bash
+pip install git+https://github.com/knightianuncertainty/regimes.git@v0.4.0
+```
+
+For development, clone the repository and install it in editable mode:
+
+```bash
+git clone https://github.com/knightianuncertainty/regimes.git
+cd regimes
+pip install -e ".[dev,test]"
+```
+
+Documentation: the API reference, the conventions the package uses (what a
+break date is, how the statistics are scaled, which covariance estimators
+are used) and a validation page (what each method was checked against) are
+in `docs/source` and are built with Sphinx (`pip install -e ".[docs]"`, then
+`make html` in `docs`).
 
 ## Quick Start
 
@@ -114,6 +130,11 @@ bp_results = rg.BaiPerronTest.from_model(model).fit()
 | `break_ci`, `break_ci_90` | Confidence intervals for the break dates (Bai 1997) |
 
 ```python
+# a partial structural change model: the constant breaks, the slope does not
+rng = np.random.default_rng(0)
+x_fixed = rng.standard_normal(len(y))
+z_breaking = np.ones((len(y), 1))
+
 results = rg.BaiPerronTest(y, exog=x_fixed, exog_break=z_breaking).fit(
     max_breaks=5,
     trimming=0.15,           # minimum regime length h = floor(trimming * T), at least q + 1
@@ -176,7 +197,9 @@ print(cusum_results.summary())
 fig, ax = cusum_results.plot()
 ```
 
-CUSUM-SQ for variance instability:
+A path that leaves its bounds rejects stability. The observation at which it first does so is reported as `first_crossing`; it is not an estimate of the date of the change, and the CUSUM tests report no break date (use `BaiPerronTest` or `AndrewsPlobergerTest` for that).
+
+CUSUM-SQ for variance instability (significance levels 20, 10, 5, 2 and 1 percent, the levels for which the bounds of Durbin, 1969, are tabulated; at least 20 recursive residuals):
 
 ```python
 # Simulate data with a variance change
@@ -200,7 +223,7 @@ fig, ax = cusum_from_model.plot()
 
 ### Testing for a Break at Unknown Date (Andrews-Ploberger)
 
-The **Andrews-Ploberger test** tests for a single structural break at an unknown date, reporting three statistics (SupF, ExpF, AveF) with different power properties:
+The **Andrews-Ploberger tests** test for a single structural break at an unknown date. Three statistics (SupF, ExpF, AveF) with different power properties are reported, each with its own asymptotic p-value (Hansen, 1997). The statistics are built from `q` times the Chow F statistic at each candidate date (`q` breaking coefficients), the scale on which they are defined and tabulated in the literature. A break date is reported when the SupF test rejects:
 
 ```python
 import numpy as np
@@ -258,7 +281,7 @@ ar_model = rg.AR(y, lags=1)
 ms_ar = ar_model.markov_switching(k_regimes=2)
 ```
 
-Select the number of regimes using information criteria or sequential likelihood ratio tests:
+Select the number of regimes using information criteria, or sequential likelihood ratio tests of K against K+1 regimes with p-values from a parametric bootstrap (Kasahara and Shimotsu, 2018; `method="sequential"`, `n_bootstrap=199`, `random_state=...`). The bootstrap is slow, since every replication estimates the models again; the docstring of `regimes.markov.selection` states what is known about the test:
 
 ```python
 # Regime number selection
@@ -439,8 +462,11 @@ print(f"Optimal specification: ADL({optimal_p},{optimal_q})")
 ADL with multiple exogenous variables and different lag structures:
 
 ```python
-# x1: 2 lags (contemporary + L1 + L2), x2: contemporary only
-model = rg.ADL(y, X, lags=1, exog_lags={"x1": 2, "x2": 0})
+# two regressors: the first with two lags (contemporary + L1 + L2), the
+# second contemporary only. Columns of an array are named x0, x1, ...;
+# columns of a DataFrame keep their names.
+X2 = np.column_stack([x, np.random.randn(len(y))])
+model = rg.ADL(y, X2, lags=1, exog_lags={"x0": 2, "x1": 0})
 results = model.fit()
 ```
 
@@ -500,10 +526,11 @@ print(results.param_names)
 import regimes as rg
 
 # Plot data with detected breaks
-fig, ax = rg.plot_breaks(y, breaks=results.break_indices, shade_regimes=True)
+bp_results = rg.BaiPerronTest(y).fit(max_breaks=3)
+fig, ax = rg.plot_breaks(y, breaks=bp_results.break_indices, shade_regimes=True)
 
 # Plot with regime means
-fig, ax = rg.plot_regime_means(y, breaks=results.break_indices)
+fig, ax = rg.plot_regime_means(y, breaks=bp_results.break_indices)
 ```
 
 ### Plotting Style
@@ -597,7 +624,7 @@ All models (`OLS`, `AR`, `ADL`) have:
 | `AndrewsPlobergerTest` | Andrews-Ploberger SupF/ExpF/AveF test for break at unknown date |
 | `NonRecurringRegimeTest` | LR test: non-recurring (structural break) vs unrestricted Markov transitions |
 | `SequentialRestrictionTest` | GETS-style sequential restriction of transition probabilities |
-| `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential LRT |
+| `RegimeNumberSelection` | Select number of regimes by IC (AIC/BIC/HQIC) or sequential bootstrap LR tests |
 
 ### GETS / Indicator Saturation
 
@@ -666,7 +693,11 @@ All regression models support multiple covariance estimators:
 
 - `"nonrobust"`: Standard OLS covariance
 - `"HC0"`, `"HC1"`, `"HC2"`, `"HC3"`: Heteroskedasticity-robust (White)
-- `"HAC"`: Heteroskedasticity and autocorrelation consistent (Newey-West)
+- `"HAC"`: Heteroskedasticity and autocorrelation consistent (Newey-West, Bartlett kernel). The default number of lags is the fixed rule `floor(4 (T/100)^(2/9))`, not a data-dependent bandwidth; set it with `cov_kwds={"maxlags": ...}`.
+
+Conventions: with breaks the model is one regression with regime-specific columns, so the error variance is pooled across regimes (use `fit_by_regime()` for separate regressions); p-values and confidence intervals use the t distribution with `n - k` degrees of freedom for every covariance type; R-squared is centered, also without a constant.
+
+Rolling and recursive estimation supports `"nonrobust"` and `"HC0"` only.
 
 ## Testing
 
@@ -702,6 +733,9 @@ regimes uses [Hypothesis](https://hypothesis.readthedocs.io/) for property-based
 - Chow, G. C. (1960). Tests of equality between sets of coefficients in two linear regressions. *Econometrica*, 28(3), 591-605.
 - Andrews, D. W. K. (1993). Tests for parameter instability and structural change with unknown change point. *Econometrica*, 61(4), 821-856.
 - Andrews, D. W. K. & Ploberger, W. (1994). Optimal tests when a nuisance parameter is present only under the alternative. *Econometrica*, 62(6), 1383-1414.
+- Hansen, B. E. (1997). Approximate asymptotic p values for structural-change tests. *Journal of Business and Economic Statistics*, 15(1), 60-67.
+- Durbin, J. (1969). Tests for serial correlation in regression analysis based on the periodogram of least-squares residuals. *Biometrika*, 56(1), 1-15.
+- Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic in medium and large sized samples. *Oxford Bulletin of Economics and Statistics*, 56(3), 355-365.
 - Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary time series and the business cycle. *Econometrica*, 57(2), 357-384.
 - Chib, S. (1998). Estimation and comparison of multiple change-point models. *Journal of Econometrics*, 86(2), 221-241.
 - Andrews, D. W. K. (2001). Testing when a parameter is on the boundary of the maintained hypothesis. *Econometrica*, 69(3), 683-734.

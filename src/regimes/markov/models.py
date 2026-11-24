@@ -41,6 +41,209 @@ if TYPE_CHECKING:
     from regimes.models.ols import OLS
 
 
+def _random_start(
+    sm_model: Any, rng: np.random.Generator, base: Any = None
+) -> NDArray[Any]:
+    """A random starting value, drawn as statsmodels' own search draws it.
+
+    The base starting values are perturbed by uniform draws on (-0.5, 0.5)
+    in the unconstrained parameter space and improved by five EM steps; the
+    proposal is kept if its likelihood is higher than that of the base.
+    statsmodels takes the draws from numpy's global generator (0.14) or from
+    fresh entropy (0.15); here they come from ``rng``.
+    """
+    start = sm_model.start_params if base is None else np.asarray(base, dtype=float)
+    untransformed = np.asarray(sm_model.untransform_params(start))
+    proposal = untransformed + rng.uniform(-0.5, 0.5, size=sm_model.k_params)
+    best: NDArray[Any] = np.asarray(sm_model.transform_params(untransformed))
+    try:
+        proposed = np.asarray(
+            sm_model._fit_em(proposal, transformed=False, maxiter=5, return_params=True)
+        )
+        if sm_model.loglike(proposed) > sm_model.loglike(best):
+            best = proposed
+    except Exception:
+        pass
+    return best
+
+
+def _seeded_search_fit(
+    sm_model: Any,
+    method: str,
+    maxiter: int,
+    em_iter: int,
+    search_reps: int,
+    rng: np.random.Generator | None,
+    extra_starts: Sequence[Any],
+    **kwargs: Any,
+) -> Any:
+    """Fit from the default, ``search_reps`` random and any given starting values.
+
+    The same search as ``_fit_with_search``, with two differences: the
+    random starting values are drawn from ``rng``, so that the result is
+    reproducible, and the model is also fitted from each vector in
+    ``extra_starts`` (parameters of a nested model, for example), so that
+    the likelihood reached is at least the likelihood at those vectors.
+    """
+    generator = rng if rng is not None else np.random.default_rng()
+    base = kwargs.pop("start_params", None)
+    best_results = None
+    best_llf = -np.inf
+
+    def consider(start: Any, n_em: int) -> None:
+        nonlocal best_results, best_llf
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                if start is None:
+                    results = sm_model.fit(
+                        method=method, maxiter=maxiter, em_iter=n_em, **kwargs
+                    )
+                else:
+                    results = sm_model.fit(
+                        start_params=np.asarray(start, dtype=float),
+                        transformed=True,
+                        method=method,
+                        maxiter=maxiter,
+                        em_iter=n_em,
+                        **kwargs,
+                    )
+            except Exception:
+                return
+        if np.isfinite(results.llf) and results.llf > best_llf:
+            best_results = results
+            best_llf = results.llf
+
+    consider(base, em_iter)
+    for _ in range(search_reps):
+        consider(_random_start(sm_model, generator, base), 0)
+    for start in extra_starts:
+        consider(start, 0)
+    if best_results is None:
+        raise RuntimeError("the Markov switching model could not be estimated")
+    return best_results
+
+
+def _objective_search_fit(
+    sm_model: Any,
+    method: str,
+    maxiter: int,
+    em_iter: int,
+    search_reps: int,
+    rng: np.random.Generator | None,
+    extra_starts: Sequence[Any],
+    penalty: Any,
+    inference: bool,
+    **kwargs: Any,
+) -> Any:
+    """The search of ``_seeded_search_fit`` for a (penalized) objective.
+
+    Three differences. The covariance matrix is computed once, for the best
+    starting value, and only if ``inference``. If ``penalty`` is given, a
+    function of the parameter vector, the optimizer maximizes the
+    log-likelihood plus that penalty and the starting values are compared
+    on the same objective; the log-likelihood of the results is the plain
+    one, and so is the Hessian behind their standard errors (computed at
+    the penalized estimates). And if the optimizer stops at ``maxiter``
+    from the best starting value, it is continued from there once with five
+    times as many iterations; ``mle_retvals`` of the results says whether
+    it converged.
+    """
+    generator = rng if rng is not None else np.random.default_rng()
+    base = kwargs.pop("start_params", None)
+    plain = sm_model.loglike
+    if penalty is not None:
+
+        def penalized(params: Any, transformed: bool = True) -> Any:
+            constrained = params if transformed else sm_model.transform_params(params)
+            return plain(params, transformed) + penalty(constrained)
+
+        # statsmodels' optimizer and its numerical score go through loglike
+        sm_model.loglike = penalized
+
+    best_params = None
+    best_value = -np.inf
+    best_retvals: Any = None
+
+    def consider(start: Any, n_em: int, iterations: int) -> None:
+        nonlocal best_params, best_value, best_retvals
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                if start is None:
+                    fitted = sm_model.fit(
+                        method=method,
+                        maxiter=iterations,
+                        em_iter=n_em,
+                        cov_type="none",
+                        **kwargs,
+                    )
+                else:
+                    fitted = sm_model.fit(
+                        start_params=np.asarray(start, dtype=float),
+                        transformed=True,
+                        method=method,
+                        maxiter=iterations,
+                        em_iter=n_em,
+                        cov_type="none",
+                        **kwargs,
+                    )
+                params = np.asarray(fitted.params, dtype=float)
+                value = float(np.real(sm_model.loglike(params)))
+            except Exception:
+                return
+        if np.isfinite(value) and value > best_value:
+            best_params = params
+            best_value = value
+            best_retvals = getattr(fitted, "mle_retvals", None)
+
+    try:
+        consider(base, em_iter, maxiter)
+        for _ in range(search_reps):
+            consider(_random_start(sm_model, generator, base), 0, maxiter)
+        for start in extra_starts:
+            consider(start, 0, maxiter)
+        if (
+            best_params is not None
+            and isinstance(best_retvals, dict)
+            and not best_retvals.get("converged", True)
+        ):
+            consider(best_params, 0, 5 * maxiter)
+    finally:
+        if penalty is not None:
+            del sm_model.loglike
+    if best_params is None:
+        raise RuntimeError("the Markov switching model could not be estimated")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        results = sm_model.smooth(
+            best_params, transformed=True, cov_type="approx" if inference else "none"
+        )
+    if best_retvals is not None:
+        results.mle_retvals = best_retvals
+    return results
+
+
+class _SMMarkovAutoregression(MarkovAutoregression):  # type: ignore[misc]
+    """statsmodels' MarkovAutoregression with the current regime's variance.
+
+    With ``switching_variance=True`` statsmodels (0.14, 0.15) reshapes the
+    regime variances to ``(k_regimes, 1, 1)`` and broadcasts them against
+    residuals of shape ``(k_regimes,) * (order + 1) + (nobs,)``. For
+    ``order = 1`` the variance then follows the current regime ``S_t``, as it
+    should; for ``order >= 2`` it follows ``S_{t - order + 1}``, the regime of
+    an earlier period, so the likelihood is that of a different model. Here
+    the variance always follows ``S_t``.
+    """
+
+    def _conditional_loglikelihoods(self, params: Any) -> Any:
+        resid = self._resid(params)
+        variance = params[self.parameters["variance"]].squeeze()
+        if self.switching_variance:
+            variance = np.reshape(variance, (self.k_regimes,) + (1,) * (self.order + 1))
+        return -0.5 * resid**2 / variance - 0.5 * np.log(2 * np.pi * variance)
+
+
 def _ensure_1d(y: ArrayLike | pd.Series[Any] | pd.DataFrame) -> NDArray[Any]:
     """Convert endog to 1D numpy array."""
     arr = np.asarray(y, dtype=np.float64)
@@ -404,6 +607,7 @@ class MarkovRegression:
         Whether the error variance switches. Default False.
     ordering : str | None
         How to order regimes after estimation:
+
         - "first_appearance" (default): Regime 0 appears first chronologically.
         - "intercept": Regime 0 has the lowest constant (needs a constant
           that switches across regimes).
@@ -498,6 +702,38 @@ class MarkovRegression:
         **kwargs: Any,
     ) -> Any:
         """Fit with optional random starting value search."""
+        rng = getattr(self, "_search_rng", None)
+        extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
+        if rng is not None or extra_starts:
+            return _seeded_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                **kwargs,
+            )
+
         best_results = None
         best_llf = -np.inf
 
@@ -753,7 +989,7 @@ class MarkovAR:
         MarkovARResults
             Fitted model results.
         """
-        sm_model = MarkovAutoregression(
+        sm_model = _SMMarkovAutoregression(
             endog=self.endog,
             k_regimes=self.k_regimes,
             order=self.order,
@@ -780,6 +1016,38 @@ class MarkovAR:
         **kwargs: Any,
     ) -> Any:
         """Fit with optional random starting value search."""
+        rng = getattr(self, "_search_rng", None)
+        extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
+        if rng is not None or extra_starts:
+            return _seeded_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                **kwargs,
+            )
+
         best_results = None
         best_llf = -np.inf
 
@@ -1029,16 +1297,16 @@ class MarkovADL:
         k_exog = self.exog.shape[1]
         result: dict[int, list[int]] = {}
 
-        if isinstance(self.exog_lags_raw, int):
+        if isinstance(self.exog_lags_raw, (int, np.integer)):
             for i in range(k_exog):
                 result[i] = list(range(0, self.exog_lags_raw + 1))
         elif isinstance(self.exog_lags_raw, dict):
             for key, val in self.exog_lags_raw.items():
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     idx = self._exog_names.index(str(key))
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
@@ -1177,6 +1445,38 @@ class MarkovADL:
         **kwargs: Any,
     ) -> Any:
         """Fit with optional random starting value search."""
+        rng = getattr(self, "_search_rng", None)
+        extra_starts = getattr(self, "_extra_starts", None)
+        if callable(extra_starts):
+            # starting values that depend on the layout of the model
+            extra_starts = extra_starts(sm_model)
+        objective = getattr(self, "_search_objective", None)
+        if objective is not None:
+            # used by RegimeNumberSelection: see _objective_search_fit
+            return _objective_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                objective(sm_model),
+                bool(getattr(self, "_search_inference", True)),
+                **kwargs,
+            )
+        if rng is not None or extra_starts:
+            return _seeded_search_fit(
+                sm_model,
+                method,
+                maxiter,
+                em_iter,
+                search_reps,
+                rng,
+                extra_starts or (),
+                **kwargs,
+            )
+
         best_results = None
         best_llf = -np.inf
 
@@ -1329,7 +1629,7 @@ class MarkovADL:
             New Markov switching ADL model.
         """
         ar_order = max(model.lags) if model.lags else 0
-        return cls(
+        instance = cls(
             endog=model.endog,
             exog=model.exog,
             k_regimes=k_regimes,
@@ -1338,3 +1638,7 @@ class MarkovADL:
             trend=model.trend,
             **kwargs,
         )
+        # the model's names for its regressors (column names of a DataFrame),
+        # which exog_lags may refer to
+        instance._exog_names = list(model._exog_names)
+        return instance

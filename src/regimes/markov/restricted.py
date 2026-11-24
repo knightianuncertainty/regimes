@@ -21,9 +21,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from statsmodels.tools.numdiff import approx_hess_cs
-from statsmodels.tsa.regime_switching.markov_autoregression import (
-    MarkovAutoregression,
-)
 from statsmodels.tsa.regime_switching.markov_regression import (
     MarkovRegression as SMMarkovRegression,
 )
@@ -36,6 +33,7 @@ from statsmodels.tsa.statespace.tools import find_best_blas_type
 from regimes.markov.models import (
     MarkovAR,
     MarkovRegression,
+    _SMMarkovAutoregression,
 )
 
 if TYPE_CHECKING:
@@ -435,7 +433,9 @@ class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
         super().__init__(endog, k_regimes, **kwargs)
 
 
-class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregression):
+class _RestrictedSMMarkovAutoregression(
+    _RestrictedFilterMixin, _SMMarkovAutoregression
+):
     """statsmodels MarkovAutoregression with restricted transition probabilities."""
 
     def __init__(
@@ -649,9 +649,16 @@ def _restricted_inference(
 
 
 def _finish_restricted_results(
-    results: Any, sm_results: Any, restrictions: dict[tuple[int, int], float]
+    results: Any,
+    sm_results: Any,
+    restrictions: dict[tuple[int, int], float],
+    inference: bool = True,
 ) -> None:
-    """Checks and inference common to the two restricted model classes."""
+    """Checks and inference common to the two restricted model classes.
+
+    With ``inference=False`` the standard errors are not computed (they need
+    a numerical Hessian); the tests that only compare likelihoods use this.
+    """
     for (i, j), value in restrictions.items():
         if abs(float(results.regime_transition[i, j]) - value) > 1e-8:
             raise RuntimeError(
@@ -659,7 +666,7 @@ def _finish_restricted_results(
                 f"({i}, {j}) = {value}: {results.regime_transition[i, j]}"
             )
     results.restricted_transitions = dict(restrictions)
-    if restrictions:
+    if restrictions and inference:
         results.bse, results.n_free_params = _restricted_inference(sm_results)
 
 
@@ -680,7 +687,11 @@ class RestrictedMarkovRegression(MarkovRegression):
         matrix. Entry (i, j) is P(S_t = i | S_{t-1} = j). Typically
         used to set {(i, j): 0.0} for forbidden transitions.
     initial_probabilities : ArrayLike | None
-        Distribution of the regime in the first period. If None (default)
+        Distribution of the regime before the sample starts: in
+        statsmodels' filter, two periods before the first observation (one
+        period before it in ``RestrictedMarkovAR``). A chain that starts in
+        regime 0 can therefore have left it by the first observation. If
+        None (default)
         and every regime can be reached from every other, the stationary
         distribution of the transition matrix is used, as in statsmodels.
         If the restrictions make some regimes impossible to return to, the
@@ -762,7 +773,12 @@ class RestrictedMarkovRegression(MarkovRegression):
         )
 
         results = self._wrap_results(sm_results)
-        _finish_restricted_results(results, sm_results, self.restrictions)
+        _finish_restricted_results(
+            results,
+            sm_results,
+            self.restrictions,
+            inference=not getattr(self, "_skip_inference", False),
+        )
         return results
 
     @staticmethod
@@ -824,8 +840,8 @@ class RestrictedMarkovAR(MarkovAR):
     restrictions : dict[tuple[int, int], float]
         Transition matrix restrictions.
     initial_probabilities : ArrayLike | None
-        Distribution of the regime at the start of the sample; see
-        ``RestrictedMarkovRegression``.
+        Distribution of the regime one period before the first observation;
+        see ``RestrictedMarkovRegression``.
     **kwargs
         Additional arguments for MarkovAR.
     """
@@ -885,7 +901,12 @@ class RestrictedMarkovAR(MarkovAR):
         )
 
         results = self._wrap_results(sm_results)
-        _finish_restricted_results(results, sm_results, self.restrictions)
+        _finish_restricted_results(
+            results,
+            sm_results,
+            self.restrictions,
+            inference=not getattr(self, "_skip_inference", False),
+        )
         return results
 
     @staticmethod

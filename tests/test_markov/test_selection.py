@@ -6,9 +6,38 @@ import warnings
 from typing import Any
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from regimes.markov.selection import RegimeNumberSelection, RegimeNumberSelectionResults
+
+
+@pytest.fixture(autouse=True)
+def _fewer_restarts(monkeypatch: Any) -> None:
+    """One random restart per estimation instead of five."""
+    monkeypatch.setattr(RegimeNumberSelection, "_search_reps", 1)
+
+
+@pytest.fixture(scope="module")
+def sequential_results() -> RegimeNumberSelectionResults:
+    """One bootstrap test of one regime against two, shared by the tests."""
+    rng = np.random.default_rng(42)
+    y = np.concatenate([rng.normal(1.0, 1.0, 60), rng.normal(4.0, 1.0, 60)])
+    previous = RegimeNumberSelection._search_reps
+    RegimeNumberSelection._search_reps = 1
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return RegimeNumberSelection(
+                y,
+                k_max=2,
+                method="sequential",
+                significance=0.10,
+                n_bootstrap=12,
+                random_state=0,
+            ).fit()
+    finally:
+        RegimeNumberSelection._search_reps = previous
 
 
 class TestRegimeNumberSelection:
@@ -81,17 +110,17 @@ class TestRegimeNumberSelection:
         assert results.selected_k == 2
 
     def test_sequential_method(
-        self, two_regime_data: NDArray[np.floating[Any]]
+        self, sequential_results: RegimeNumberSelectionResults
     ) -> None:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            sel = RegimeNumberSelection(two_regime_data, k_max=3, method="sequential")
-            results = sel.fit()
-
-        assert results.selected_k >= 1
+        results = sequential_results
+        assert results.selected_k == 2
         assert results.method == "sequential"
         assert results.sequential_tests is not None
-        assert len(results.sequential_tests) > 0
+        assert len(results.sequential_tests) == 1
+        test = results.sequential_tests[0]
+        assert test["rejected"]
+        assert test["n_bootstrap"] == 12
+        assert test["p_value"] == pytest.approx(1 / 13)
 
     def test_summary(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         with warnings.catch_warnings():
@@ -135,15 +164,10 @@ class TestRegimeNumberSelectionVerbose:
         assert "K=2" in captured.out
 
     def test_sequential_summary(
-        self, two_regime_data: NDArray[np.floating[Any]]
+        self, sequential_results: RegimeNumberSelectionResults
     ) -> None:
         """Summary with sequential tests should include test results."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            sel = RegimeNumberSelection(two_regime_data, k_max=3, method="sequential")
-            results = sel.fit()
-
-        s = results.summary()
+        s = sequential_results.summary()
         assert "Sequential Tests" in s
         # Should have REJECTED or NOT REJECTED
         assert "REJECTED" in s

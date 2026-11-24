@@ -12,13 +12,30 @@ Chow, G. C. (1960). Tests of equality between sets of coefficients in two
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy import stats
 
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase
+from regimes.tests._bp_core import independent_columns
+from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+
+
+def _scaled_rank(X: NDArray[np.floating[Any]]) -> int:
+    """Rank of ``X`` with its columns scaled to unit length (zero columns kept)."""
+    if X.shape[1] == 0:
+        return 0
+    norms = np.linalg.norm(X, axis=0)
+    return int(np.linalg.matrix_rank(X / np.where(norms > 0, norms, 1.0)))
+
+
+# A sum of squared residuals this small relative to y'y is rounding error:
+# the model fits exactly and the statistic is not defined. (The threshold
+# is far below the residual variance of any series with noise, also when
+# its mean is large.)
+_EXACT_FIT = 1e-24
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -178,6 +195,7 @@ class ChowTest(BreakTestBase):
     Notes
     -----
     The Chow test assumes:
+
     - Normally distributed errors (for exact F distribution)
     - Homoskedastic errors across regimes
     - Independent errors
@@ -203,6 +221,13 @@ class ChowTest(BreakTestBase):
 
         super().__init__(endog, exog, exog_break)
 
+        # A fixed regressor that the breaking regressors span (a constant
+        # when the constant breaks) is not identified: leave it out.
+        fixed = self.exog
+        if fixed is not None and self.exog_break is not None:
+            keep = independent_columns(self.exog_break, fixed)
+            self.exog = fixed[:, keep] if keep else None
+
     @classmethod
     def from_model(
         cls,
@@ -217,6 +242,7 @@ class ChowTest(BreakTestBase):
             Model to test for structural breaks.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
 
@@ -227,8 +253,10 @@ class ChowTest(BreakTestBase):
 
         Notes
         -----
-        For AR and ADL models, the test uses the effective sample (after
-        dropping initial observations for lags).
+        For AR and ADL models, the test is computed on the effective
+        sample (after dropping the initial observations for lags).
+        Break dates and other observation numbers in the results are
+        those of the model's data (see ``index_offset``).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR
@@ -237,9 +265,11 @@ class ChowTest(BreakTestBase):
         # Extract endog and exog from model
         if isinstance(model, (AR, ADLModel)):
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog_all = model.exog
         else:
@@ -251,9 +281,14 @@ class ChowTest(BreakTestBase):
             exog_all = np.ones((len(endog), 1))
 
         if break_vars == "all":
-            return cls(endog, exog_break=exog_all)
+            return cls._create(offset, endog, exog_break=exog_all)
         elif break_vars == "const":
-            return cls(endog, exog=exog_all)
+            return cls._create(
+                offset,
+                endog,
+                exog=split_constant(np.asarray(exog_all, dtype=np.float64)),
+                exog_break=np.ones((len(endog), 1)),
+            )
         else:
             raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
@@ -363,6 +398,9 @@ class ChowTest(BreakTestBase):
 
         n1 = break_point
         n2 = T - break_point
+        # the break point as the caller gave it (an observation of the
+        # model's data for a test built from an AR or ADL model)
+        label = break_point + self.index_offset
 
         # Build full-sample regressor matrix and compute SSR_full
         X_full = self._build_regressor_matrix(0, T)
@@ -393,19 +431,37 @@ class ChowTest(BreakTestBase):
                 n_large = n2
                 ssr_large = ssr2
 
+            # A regressor that varies only in the small sub-sample (an
+            # impulse dummy there) fits those observations: nothing to test.
+            large = (
+                slice(0, break_point)
+                if n1 >= total_params_per_sub
+                else slice(break_point, T)
+            )
+            if _scaled_rank(X_full[large]) < _scaled_rank(X_full):
+                raise ValueError(
+                    f"break point {label}: a regressor is zero or collinear "
+                    "with the others outside the sub-sample that is predicted "
+                    "(an impulse dummy in it, for example), so it fits those "
+                    "observations and there is nothing to test"
+                )
+
             # F = ((SSR_full - SSR_large) / n_small) / (SSR_large / (n_large - k - p))
             df_num = n_small
             df_denom = n_large - total_params_per_sub
 
-            if df_denom <= 0 or ssr_large <= 0:
-                return {
-                    "f_stat": 0.0,
-                    "p_value": 1.0,
-                    "df_num": df_num,
-                    "df_denom": max(df_denom, 1),
-                    "ssr_unrestricted": ssr_large,
-                    "is_predictive": True,
-                }
+            if df_denom <= 0:
+                raise ValueError(
+                    f"break point {label}: neither sub-sample has more "
+                    f"observations ({n1} and {n2}) than the model has "
+                    f"coefficients ({total_params_per_sub}), so the test "
+                    "cannot be computed"
+                )
+            if ssr_large <= _EXACT_FIT * float(y_full @ y_full):
+                raise ValueError(
+                    f"break point {label}: the model fits the larger "
+                    "sub-sample exactly, so the test statistic is not defined"
+                )
 
             f_stat = ((ssr_full - ssr_large) / df_num) / (ssr_large / df_denom)
             f_stat = max(0.0, f_stat)
@@ -455,15 +511,30 @@ class ChowTest(BreakTestBase):
             df_num = k
             df_denom = T - 2 * k - p
 
-            if df_denom <= 0 or ssr_unrestricted <= 0:
-                return {
-                    "f_stat": 0.0,
-                    "p_value": 1.0,
-                    "df_num": df_num,
-                    "df_denom": max(df_denom, 1),
-                    "ssr_unrestricted": ssr_unrestricted,
-                    "is_predictive": False,
-                }
+            if (
+                self.exog is not None
+                and self.exog_break is not None
+                and _scaled_rank(X_unrestricted) < X_unrestricted.shape[1]
+            ):
+                raise ValueError(
+                    f"break point {label}: the model with a break is not "
+                    "identified. A regressor that breaks is zero or collinear "
+                    "with the others in one of the sub-samples, or the "
+                    "regressors that do not break already contain this break "
+                    "(a step dummy at the same date, for example), so there "
+                    "is nothing to test"
+                )
+            if df_denom <= 0:
+                raise ValueError(
+                    f"break point {label}: the sample has {T} "
+                    f"observations and the model with a break {2 * k + p} "
+                    "coefficients, so the test cannot be computed"
+                )
+            if ssr_unrestricted <= _EXACT_FIT * float(y_full @ y_full):
+                raise ValueError(
+                    f"break point {label}: the model with a break fits "
+                    "the data exactly, so the test statistic is not defined"
+                )
 
             f_stat = ((ssr_full - ssr_unrestricted) / df_num) / (
                 ssr_unrestricted / df_denom
@@ -495,8 +566,11 @@ class ChowTest(BreakTestBase):
         Parameters
         ----------
         break_points : int | Sequence[int]
-            One or more break point indices to test. Each index τ splits
-            the sample into [0, τ) and [τ, T).
+            One or more break dates to test. A date τ is the first
+            observation of the second sub-sample. For a test built from an
+            AR or ADL model it is an observation number of the model's data
+            (see ``index_offset``); the results are keyed by the same
+            numbers.
         significance : float
             Significance level for rejection decisions. Default is 0.05.
         **kwargs
@@ -513,19 +587,35 @@ class ChowTest(BreakTestBase):
         ValueError
             If a break point is outside the valid range [1, T-1].
         """
-        # Normalize to list
-        if isinstance(break_points, (int, np.integer)):
+        # Normalize to list; a break point is an observation number
+        if isinstance(break_points, (int, np.integer)) and not isinstance(
+            break_points, bool
+        ):
             break_points = [int(break_points)]
         else:
-            break_points = [int(bp) for bp in break_points]
+            if isinstance(break_points, (bool, float, str)):
+                raise TypeError(f"break points must be integers, got {break_points!r}")
+            points = []
+            for bp in break_points:
+                if isinstance(bp, (bool, np.bool_)):
+                    raise TypeError(f"break points must be integers, got {bp!r}")
+                try:
+                    points.append(operator.index(bp))
+                except TypeError:
+                    raise TypeError(
+                        f"break points must be integers, got {bp!r}"
+                    ) from None
+            break_points = points
 
         T = self.nobs
+        offset = self.index_offset
 
         # Validate break points
         for bp in break_points:
-            if bp < 1 or bp >= T:
+            if bp - offset < 1 or bp - offset >= T:
                 raise ValueError(
-                    f"Break point {bp} is outside the valid range [1, {T - 1}]"
+                    f"Break point {bp} is outside the valid range "
+                    f"[{offset + 1}, {offset + T - 1}]"
                 )
 
         # Compute full-sample SSR
@@ -541,7 +631,7 @@ class ChowTest(BreakTestBase):
         is_predictive: dict[int, bool] = {}
 
         for bp in break_points:
-            result = self._test_single_break(bp)
+            result = self._test_single_break(bp - offset)
             f_stats[bp] = result["f_stat"]
             p_values[bp] = result["p_value"]
             df_num[bp] = result["df_num"]
@@ -568,5 +658,6 @@ class ChowTest(BreakTestBase):
             is_predictive=is_predictive,
             n_params=self.n_break_params,
             significance_level=significance,
+            index_offset=offset,
             _test=self,
         )
