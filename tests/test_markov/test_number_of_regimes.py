@@ -20,7 +20,7 @@ from statsmodels.tsa.regime_switching.markov_regression import (
 
 import regimes.markov.selection as module
 from regimes.markov._simulate import MonteCarloPValue, simulate_linear
-from regimes.markov.models import _SMMarkovAutoregression
+from regimes.markov.models import _objective_search_fit, _SMMarkovAutoregression
 from regimes.markov.selection import (
     OneRegimeResults,
     RegimeNumberSelection,
@@ -442,6 +442,177 @@ class TestAgainstMSTest:
         assert table.loc[3, "llf"] >= table.loc[2, "llf"] - 1e-6
         assert table.loc[3, "llf"] == pytest.approx(case["llf"]["k3"], abs=0.25)
         assert table.loc[3, "n_params"] == 10
+
+
+class _StubResults:
+    def __init__(self, params: Any, converged: bool = True) -> None:
+        self.params = np.asarray(params, dtype=float)
+        self.mle_retvals = {"converged": converged}
+
+
+class _StubModel:
+    """A model with two candidate optima, for the search alone."""
+
+    k_params = 1
+    start_params = np.array([0.0])
+
+    def __init__(self, converged_at: dict[float, bool] | None = None) -> None:
+        self.calls: list[tuple[float, int, str]] = []
+        self.converged_at = converged_at or {}
+
+    def loglike(self, params: Any, transformed: bool = True) -> float:
+        # the plain likelihood prefers the point 0, by one unit
+        return -10.0 if float(np.real(params[0])) == 0.0 else -11.0
+
+    def transform_params(self, params: Any) -> Any:
+        return params
+
+    def fit(self, start_params: Any = None, **kwargs: Any) -> _StubResults:
+        point = 0.0 if start_params is None else float(start_params[0])
+        self.calls.append((point, kwargs["maxiter"], kwargs["cov_type"]))
+        return _StubResults([point], self.converged_at.get(point, True))
+
+    def smooth(self, params: Any, transformed: bool, cov_type: str) -> _StubResults:
+        self.calls.append((float(params[0]), -1, cov_type))
+        return _StubResults(params)
+
+
+class TestObjectiveSearch:
+    def test_starting_values_are_compared_on_the_penalized_objective(self) -> None:
+        model = _StubModel()
+        # the penalty reverses the order: 5 units against the point 0
+        results = _objective_search_fit(
+            model,
+            "bfgs",
+            100,
+            5,
+            0,
+            None,
+            [np.array([1.0])],
+            lambda params: -5.0 if float(np.real(params[0])) == 0.0 else 0.0,
+            True,
+        )
+        assert results.params[0] == 1.0
+        assert "loglike" not in vars(model)  # the override is removed
+        without = _objective_search_fit(
+            _StubModel(), "bfgs", 100, 5, 0, None, [np.array([1.0])], None, True
+        )
+        assert without.params[0] == 0.0
+
+    def test_covariance_once_and_only_when_asked(self) -> None:
+        for inference, expected in ((True, "approx"), (False, "none")):
+            model = _StubModel()
+            _objective_search_fit(
+                model, "bfgs", 100, 5, 0, None, [np.array([1.0])], None, inference
+            )
+            assert [c[2] for c in model.calls] == ["none", "none", expected]
+
+    def test_a_fit_that_stops_at_the_iteration_limit_is_continued(self) -> None:
+        model = _StubModel(converged_at={0.0: False})
+        results = _objective_search_fit(
+            model, "bfgs", 100, 5, 0, None, [np.array([1.0])], None, True
+        )
+        # continued once from the best point, with five times the iterations
+        assert (0.0, 500, "none") in model.calls
+        assert results.mle_retvals == {"converged": False}
+
+    def test_convergence_flag_reaches_the_results(self) -> None:
+        """It was lost: every model of a selection reported "converged"."""
+        from regimes.markov import MarkovRegression
+
+        rng = np.random.default_rng(17)
+        y = np.concatenate([rng.normal(0, 1, 60), rng.normal(3, 1, 60)])
+        for maxiter, expected in ((1, False), (200, True)):
+            model = MarkovRegression(y, k_regimes=2, switching_variance=True)
+            model._search_objective = lambda sm_model: None
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                results = model.fit(maxiter=maxiter, em_iter=0)
+            assert results.converged is expected
+
+
+class TestPenaltyInTheFits:
+    @pytest.mark.parametrize("model_type", ["regression", "ar"])
+    def test_every_switching_variance_fit_uses_the_variance_of_its_sample(
+        self, monkeypatch: Any, model_type: str
+    ) -> None:
+        """Also for autoregressions, and with the variance (not the standard
+        deviation) of the one-regime model of the same sample."""
+        rng = np.random.default_rng(18)
+        y = np.concatenate([rng.normal(0, 1, 50), rng.normal(3, 2, 50)])
+        seen: list[tuple[str, float, int]] = []
+        original = module._variance_penalty
+
+        def recording(sm_model: Any, sigma2: float) -> Any:
+            seen.append((type(sm_model).__name__, sigma2, int(sm_model.nobs)))
+            return original(sm_model, sigma2)
+
+        monkeypatch.setattr(module, "_variance_penalty", recording)
+        test = RegimeNumberSelection(
+            y, k_max=2, model_type=model_type, random_state=0, switching_variance=True
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fitted = test._fit_up_to(2, y, inference=True)
+            sample = test._simulate(fitted[1]["results"], np.random.default_rng(3))
+            on_sample = test._fit_up_to(2, sample, inference=False)
+        assert fitted[2]["penalized"] and on_sample[2]["penalized"]
+        assert len(seen) == 2
+        nobs = len(y) - (1 if model_type == "ar" else 0)
+        assert seen[0][1:] == (fitted[1]["results"].sigma2, nobs)
+        assert seen[1][1:] == (on_sample[1]["results"].sigma2, nobs)
+        assert seen[0][1] != seen[1][1]
+        # standard errors for the data, none for a bootstrap sample
+        assert np.isfinite(fitted[2]["results"].bse).sum() >= 4
+        assert not np.isfinite(on_sample[2]["results"].bse).any()
+
+    def test_estimates_maximize_the_penalized_likelihood(self) -> None:
+        rng = np.random.default_rng(19)
+        y = np.concatenate([rng.normal(0, 1, 60), rng.normal(3, 2, 60)])
+        test = RegimeNumberSelection(
+            y, k_max=2, random_state=0, switching_variance=True
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fitted = test._fit_up_to(2, y, inference=False)
+        sm_results = fitted[2]["results"]._sm_results
+        sm_model = sm_results.model
+        penalty = _variance_penalty(sm_model, fitted[1]["results"].sigma2)
+        free = np.asarray(sm_model.untransform_params(sm_results.params), dtype=float)
+
+        def objective(point: np.ndarray, with_penalty: bool) -> float:
+            constrained = sm_model.transform_params(point)
+            value = sm_model.loglike(constrained)
+            return float(value + penalty(constrained)) if with_penalty else float(value)
+
+        def gradient(with_penalty: bool) -> np.ndarray:
+            step = 1e-5
+            out = np.empty(len(free))
+            for i in range(len(free)):
+                up, down = free.copy(), free.copy()
+                up[i] += step
+                down[i] -= step
+                out[i] = (
+                    objective(up, with_penalty) - objective(down, with_penalty)
+                ) / (2 * step)
+            return out
+
+        assert np.max(np.abs(gradient(True))) < 1e-2
+        assert np.max(np.abs(gradient(False))) > 0.1
+        # the log-likelihood reported is the plain one
+        assert fitted[2]["llf"] == pytest.approx(objective(free, False), abs=1e-8)
+
+    def test_k_max_is_flagged_for_a_criterion_too(self, monkeypatch: Any) -> None:
+        test = RegimeNumberSelection(np.zeros(50), k_max=2, method="aic")
+        monkeypatch.setattr(test, "_fit_k1", lambda endog=None: _fake_fit(-100.0, 1))
+        monkeypatch.setattr(
+            test, "_fit_k_regimes", lambda k, lower, one, *a, **kw: _fake_fit(-50.0, k)
+        )
+        monkeypatch.setattr(test, "_select_by_ic", lambda table, criterion: 2)
+        results = test.fit()
+        assert results.notes == [
+            "AIC is smallest at k_max = 2: more regimes were not considered"
+        ]
 
 
 def _fake_fit(llf: float, k: int) -> dict[str, Any]:

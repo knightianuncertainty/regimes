@@ -58,9 +58,16 @@ What supports the test, and where the support ends:
   (Section 10.1), the models are estimated with the penalty
   ``-a_n sum_j {s2 / s2_j + log(s2_j / s2) - 1}``, ``a_n = 20 / sqrt(n)``,
   where ``s2`` is the error variance of the one-regime model, and the
-  statistic is computed from the log-likelihood without the penalty. The
-  penalty also keeps the variances far above their lower bound of
-  ``(0.01)^2 s2``.
+  statistic and the information criteria are computed from the
+  log-likelihood without the penalty. Their lower bound on the standard
+  deviations (0.01 times that of the one-regime model) is not imposed
+  separately; the penalty alone keeps the variances away from zero. The
+  penalty acts on every model with regime-specific variances, not only
+  where a variance would collapse (on the reference series of the test
+  suite the penalty term of the two-regime model is 0.84), so the reported
+  log-likelihood is a little below the unpenalized maximum. Standard
+  errors come from the Hessian of the log-likelihood without the penalty,
+  at the penalized estimates.
 * Transition probabilities. The theory requires them to be bounded away
   from zero and one. No bound is imposed here; a regime that is (almost)
   never left is a sign that the condition fails.
@@ -75,7 +82,12 @@ What supports the test, and where the support ends:
   search: the default starting value, ``search_reps`` random ones, and
   for each regime of the smaller model its estimates with that regime
   split in two (once exactly, so that the larger model cannot end below
-  the smaller one, and once with the halves moved apart). The same search
+  the smaller one, and once with the halves moved apart; with the
+  variance penalty the exact split carries one more penalty term, so the
+  ordering holds for the penalized objective only, and a negative
+  statistic is set to zero). An optimization that stops at its iteration
+  limit is continued once; ``converged`` of each fitted model says whether
+  it converged, and ``notes`` lists the models that did not. The same search
   is run on the data and on every bootstrap sample. For one regime against
   two the result is stable. For two against three it can depend on
   ``random_state``: on the reference series of the test suite the
@@ -211,10 +223,8 @@ def _lr(
     return float(max(0.0, difference))
 
 
-# Kasahara and Shimotsu (2018, Section 10.1): the lower bound on a regime's
-# standard deviation relative to that of the one-regime model, and the
-# constant of the penalty a_n = 20 / sqrt(n).
-_SIGMA_BOUND = 0.01
+# Kasahara and Shimotsu (2018, Section 10.1): the constant of the penalty
+# a_n = 20 / sqrt(n).
 _PENALTY_CONSTANT = 20.0
 
 
@@ -226,8 +236,8 @@ def _variance_penalty(sm_model: Any, sigma2_one_regime: float) -> Any:
     (Kasahara and Shimotsu, 2018, Section 10.1). It is zero when every
     regime has the variance of the one-regime model and tends to minus
     infinity as a regime variance tends to zero, where the likelihood of a
-    model with regime-specific variances is unbounded. A variance below the
-    paper's lower bound, ``(0.01)^2 s2``, costs about ``10^4 a_n``.
+    model with regime-specific variances is unbounded. A variance of
+    ``(0.01)^2 s2``, the lower bound of the paper, costs about ``10^4 a_n``.
     """
     positions = np.atleast_1d(
         np.arange(sm_model.k_params)[sm_model.parameters["variance"]]
@@ -484,8 +494,9 @@ class RegimeNumberSelectionResults:
         ``n_bootstrap_failed`` and ``n_extra_params``.
     notes : list[str]
         Anything that qualifies the selection: a model that could not be
-        estimated, or a selected K equal to ``k_max``, which was not tested
-        against a larger model. Printed by ``summary()``.
+        estimated or did not converge, or a selected K equal to ``k_max``,
+        which was not compared with a larger model. Printed by
+        ``summary()``.
     """
 
     selected_k: int
@@ -694,8 +705,8 @@ class RegimeNumberSelection:
         self.random_state = random_state
         self.model_kwargs = model_kwargs
         self._rng: np.random.Generator | None = None
-        # a misspelled or unsupported model argument is an error here, not
-        # a model that silently cannot be estimated later
+        # an unknown model argument is an error here, not a model that
+        # silently cannot be estimated later
         self._build_model(2, self.endog)
 
     # ------------------------------------------------------------------
@@ -965,6 +976,11 @@ class RegimeNumberSelection:
             notes.append(note)
             warnings.warn(note, UserWarning, stacklevel=3)
             return False
+        if not getattr(fitted[k]["results"], "converged", True):
+            notes.append(
+                f"the optimizer did not converge for the model with {k} "
+                "regimes; its log-likelihood is the highest value reached"
+            )
         return True
 
     def fit(self, verbose: bool = False) -> RegimeNumberSelectionResults:
@@ -984,8 +1000,9 @@ class RegimeNumberSelection:
         -------
         RegimeNumberSelectionResults
             Selection results. ``notes`` lists a model that could not be
-            estimated (a warning is issued as well) and a selected K equal
-            to ``k_max``.
+            estimated (a warning is issued as well), a model whose
+            optimizer did not converge, and a selected K equal to
+            ``k_max``.
         """
         self._rng = (
             None if self.random_state is None else as_generator(self.random_state)
@@ -1023,6 +1040,11 @@ class RegimeNumberSelection:
         if self.method != "sequential":
             criterion = {"aic": "AIC", "bic": "BIC", "hqic": "HQIC"}[self.method]
             selected_k = self._select_by_ic(ic_table, criterion)
+            if selected_k == self.k_max and self.k_max > 1:
+                notes.append(
+                    f"{criterion} is smallest at k_max = {self.k_max}: more "
+                    "regimes were not considered"
+                )
 
         return RegimeNumberSelectionResults(
             selected_k=selected_k,
