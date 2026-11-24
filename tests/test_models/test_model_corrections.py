@@ -450,3 +450,399 @@ class TestAgainstStatsmodels:
             theirs = RecursiveLS(y, X).fit()
         expected = theirs.recursive_coefficients.filtered.T
         np.testing.assert_allclose(ours.params[25:], expected[25:], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Added after the independent review of these corrections
+# ---------------------------------------------------------------------------
+
+
+def _two_regressor_data(seed: int, n: int = 240) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n, 2))
+    y = np.zeros(n)
+    for t in range(2, n):
+        y[t] = (
+            0.3
+            + 0.5 * y[t - 1]
+            - 0.25 * y[t - 2]
+            + 0.9 * X[t, 0]
+            + 0.6 * X[t - 1, 0]
+            - 0.7 * X[t, 1]
+            + 0.5 * X[t - 1, 1]
+            + rng.standard_normal()
+        )
+    return y, X
+
+
+class TestSelectLagsGrid:
+    """The criteria of every candidate equal statsmodels' ARDL on the common
+    sample, also with two regressors and other trends."""
+
+    @pytest.mark.parametrize("trend", ["n", "c", "ct"])
+    @pytest.mark.parametrize("criterion", ["aic", "bic"])
+    def test_choice_equals_a_grid_of_ardl_models(
+        self, trend: str, criterion: str
+    ) -> None:
+        y, X = _two_regressor_data(seed=30)
+        max_p, max_q = 3, 2
+        hold_back = max(max_p, max_q)
+        best, best_ic = None, np.inf
+        for p in range(max_p + 1):
+            for q in range(max_q + 1):
+                fit = ARDL(y, p, X, q, trend=trend, hold_back=hold_back).fit()
+                ic = getattr(fit, criterion)
+                if ic < best_ic:
+                    best, best_ic = (p, q), ic
+        ours = rg.ADL(y, X, lags=1, exog_lags=0, trend=trend).select_lags(
+            max_ar_lags=max_p, max_exog_lags=max_q, criterion=criterion
+        )
+        assert ours == best
+        # the data were generated with two lags of y and one of each x
+        if criterion == "bic":
+            assert ours == (2, 1)
+
+    def test_sample_too_short_raises(self) -> None:
+        rng = np.random.default_rng(31)
+        y, x = rng.standard_normal(12), rng.standard_normal(12)
+        model = rg.ADL(y, x, lags=1, exog_lags=0)
+        # 12 - 4 = 8 observations for 1 + 4 + 5 = 10 coefficients
+        with pytest.raises(ValueError, match="too short"):
+            model.select_lags(max_ar_lags=4, max_exog_lags=4)
+        assert model.select_lags(max_ar_lags=1, max_exog_lags=1) in {
+            (p, q) for p in range(2) for q in range(2)
+        }
+
+
+class TestBreakDatesAreIntegers:
+    def test_non_integers_are_errors(self) -> None:
+        for bad in ([100.7], [True], ["100"], [100.0]):
+            with pytest.raises(TypeError, match="must be integers"):
+                normalize_breaks(bad, 200)  # type: ignore[arg-type]
+        assert normalize_breaks([np.int64(120), np.int32(40)], 200) == [40, 120]
+        rng = np.random.default_rng(33)
+        y = rng.standard_normal(100)
+        X = np.column_stack([np.ones(100), rng.standard_normal(100)])
+        with pytest.raises(TypeError, match="must be integers"):
+            rg.OLS(y, X, has_constant=False, breaks=[50.5])  # type: ignore[list-item]
+        with pytest.raises(TypeError, match="must be integers"):
+            rg.AR(y, lags=1, variable_breaks={"const": [50.5]}).fit()  # type: ignore[list-item]
+
+    def test_variable_breaks_are_validated_like_common_breaks(self) -> None:
+        rng = np.random.default_rng(34)
+        y = rng.standard_normal(100)
+        X = np.column_stack([np.ones(100), rng.standard_normal(100)])
+        for breaks, error in (
+            ([50, 50], "distinct"),
+            ([0], "out of bounds"),
+            ([100], "out of bounds"),
+        ):
+            with pytest.raises(ValueError, match=error):
+                rg.OLS(y, X, has_constant=False, variable_breaks={"x1": breaks}).fit()
+            with pytest.raises(ValueError, match=error):
+                rg.AR(y, lags=1, variable_breaks={"const": breaks}).fit()
+            with pytest.raises(ValueError, match=error):
+                rg.ADL(
+                    y, X[:, 1], lags=1, exog_lags=0, variable_breaks={"const": breaks}
+                ).fit()
+
+    def test_integer_keys(self) -> None:
+        rng = np.random.default_rng(35)
+        y = rng.standard_normal(120)
+        x = rng.standard_normal(120)
+        X = np.column_stack([np.ones(120), x])
+        by_name = rg.OLS(y, X, has_constant=False, variable_breaks={"x1": [70, 30]})
+        for key in (1, np.int64(1)):
+            by_number = rg.OLS(
+                y, X, has_constant=False, variable_breaks={key: [30, 70]}
+            )
+            np.testing.assert_allclose(by_number.fit().params, by_name.fit().params)
+        ar_name = rg.AR(y, lags=1, variable_breaks={"y.L1": [60]}).fit()
+        ar_number = rg.AR(y, lags=1, variable_breaks={1: [60]}).fit()
+        np.testing.assert_allclose(ar_number.params, ar_name.params)
+        adl_name = rg.ADL(y, x, lags=1, exog_lags=0, variable_breaks={"x0": [60]}).fit()
+        adl_number = rg.ADL(y, x, lags=1, exog_lags=0, variable_breaks={2: [60]}).fit()
+        np.testing.assert_allclose(adl_number.params, adl_name.params)
+        with pytest.raises(TypeError, match="names or column"):
+            rg.OLS(y, X, has_constant=False, variable_breaks={True: [60]}).fit()
+
+
+class TestBreakDesignMessagesAndScale:
+    def test_dummy_that_is_zero_in_a_regime(self) -> None:
+        """Not an empty regime: the message points to `variable_breaks`."""
+        rng = np.random.default_rng(36)
+        n = 120
+        impulse = np.zeros(n)
+        impulse[80] = 1.0
+        X = np.column_stack([np.ones(n), rng.standard_normal(n), impulse])
+        y = rng.standard_normal(n)
+        with pytest.raises(ValueError, match="variable_breaks") as info:
+            rg.OLS(y, X, has_constant=False, breaks=[60]).fit()
+        assert "zero in every observation" in str(info.value)
+        # the way out that the message names
+        results = rg.OLS(
+            y, X, has_constant=False, variable_breaks={"x0": [60], "x1": [60]}
+        ).fit()
+        assert len(results.params) == 5
+
+    def test_rank_does_not_depend_on_units(self) -> None:
+        rng = np.random.default_rng(37)
+        n = 120
+        x = rng.standard_normal(n)
+        y = 1.0 + 0.5 * x + rng.standard_normal(n)
+        small = rg.OLS(
+            y, np.column_stack([np.ones(n), x]), has_constant=False, breaks=[60]
+        )
+        large = rg.OLS(
+            y, np.column_stack([np.ones(n), 1e9 * x]), has_constant=False, breaks=[60]
+        )
+        np.testing.assert_allclose(
+            large.fit().params * [1, 1e9, 1, 1e9], small.fit().params, rtol=1e-6
+        )
+        # collinear within the second regime, whatever the units
+        for scale in (1.0, 1e9):
+            z = scale * x.copy()
+            z[60:] = scale * 2.0
+            with pytest.raises(ValueError, match="not identified"):
+                rg.OLS(
+                    y, np.column_stack([np.ones(n), z]), has_constant=False, breaks=[60]
+                ).fit()
+
+
+class TestFitByRegimeChecks:
+    def test_ols(self) -> None:
+        rng = np.random.default_rng(38)
+        n = 100
+        X = np.column_stack([np.ones(n), rng.standard_normal((n, 2))])
+        y = rng.standard_normal(n)
+        with pytest.raises(ValueError, match="regime 1 has 3 observations"):
+            rg.OLS(y, X, has_constant=False, breaks=[97]).fit_by_regime()
+        X[50:, 2] = 4.0
+        with pytest.raises(ValueError, match="regime 1: the regressors are collinear"):
+            rg.OLS(y, X, has_constant=False, breaks=[50]).fit_by_regime()
+        results = rg.OLS(y, X[:, :2], has_constant=False, breaks=[50]).fit_by_regime()
+        assert [r.nobs for r in results] == [50, 50]
+
+    def test_ar(self) -> None:
+        rng = np.random.default_rng(39)
+        y = rng.standard_normal(100)
+        # 4 observations in the last regime: 2 initial values, 2 left for 3
+        # coefficients
+        with pytest.raises(ValueError, match="regime 1 has 2 observations"):
+            rg.AR(y, lags=2, breaks=[96]).fit_by_regime()
+        with pytest.raises(ValueError, match="initial values"):
+            rg.AR(y, lags=4, breaks=[97]).fit_by_regime()
+        results = rg.AR(y, lags=2, breaks=[50]).fit_by_regime()
+        assert [r.nobs for r in results] == [48, 48]
+
+
+class TestClassicalFStatistic:
+    @pytest.mark.parametrize("cov_type", ["HC1", "HAC"])
+    def test_does_not_use_the_covariance_estimator(self, cov_type: str) -> None:
+        rng = np.random.default_rng(40)
+        n = 150
+        X = np.column_stack([np.ones(n), rng.standard_normal((n, 2))])
+        y = X @ [1.0, 0.4, 0.0] + rng.standard_normal(n) * (1 + np.abs(X[:, 1]))
+        classical = sm.OLS(y, X).fit()
+        robust = rg.OLS(y, X, has_constant=False).fit(cov_type=cov_type)
+        assert robust.fvalue == pytest.approx(classical.fvalue, rel=1e-10)
+        assert robust.f_pvalue == pytest.approx(classical.f_pvalue, rel=1e-8)
+        assert "classical one, not a robust test" in robust.summary(diagnostics=False)
+        plain = rg.OLS(y, X, has_constant=False).fit()
+        assert "classical one" not in plain.summary(diagnostics=False)
+
+    def test_constant_detection_follows_statsmodels(self) -> None:
+        rng = np.random.default_rng(41)
+        n = 90
+        x = rng.standard_normal(n)
+        y = 0.5 * x + rng.standard_normal(n)
+        level = 1e6 + rng.standard_normal(n)
+        dummies = np.column_stack(
+            [(np.arange(n) % 3 == j).astype(float) for j in range(3)]
+        )
+        designs = {
+            "a constant that is not one": np.column_stack([np.full(n, 2.0), x]),
+            "a regressor far from zero, no constant": np.column_stack([level, x]),
+            "a full set of dummies": np.column_stack([dummies, x]),
+            "no constant": np.column_stack([x, x**2]),
+        }
+        for label, X in designs.items():
+            theirs = sm.OLS(y, X).fit()
+            ours = rg.OLS(y, X, has_constant=False).fit()
+            assert ours.fvalue == pytest.approx(theirs.fvalue, rel=1e-6), label
+            assert ours.f_pvalue == pytest.approx(theirs.f_pvalue, rel=1e-6), label
+
+
+class TestWarningsPointAtTheCaller:
+    def test_all_from_model_paths(self) -> None:
+        y, x = _adl_data(seed=42, n=120)
+        X = np.column_stack([np.ones(120), x])
+        ols = rg.OLS(y, X, has_constant=False, breaks=[60])
+        ar = rg.AR(y, lags=1, breaks=[60])
+        adl = rg.ADL(y, x, lags=1, exog_lags=1, breaks=[60])
+        calls = [
+            lambda: rg.RollingOLS.from_model(ols, window=40),
+            lambda: rg.RecursiveOLS.from_model(ols, min_nobs=20),
+            lambda: rg.RollingAR.from_model(ar, window=40),
+            lambda: rg.RecursiveAR.from_model(ar, min_nobs=20),
+            lambda: rg.RollingADL.from_model(adl, window=40),
+            lambda: rg.RecursiveADL.from_model(adl, min_nobs=20),
+            lambda: ols.rolling(window=40),
+            lambda: ar.recursive(min_nobs=20),
+            lambda: adl.rolling(window=40),
+        ]
+        for call in calls:
+            with pytest.warns(UserWarning, match="ignores the breaks") as record:
+                call()
+            assert len(record) == 1
+            assert record[0].filename == __file__
+
+    def test_cov_kwds_warning(self) -> None:
+        y, x = _adl_data(seed=43, n=100)
+        for model in (
+            rg.OLS(y, np.column_stack([np.ones(100), x]), has_constant=False),
+            rg.AR(y, lags=1),
+            rg.ADL(y, x, lags=1, exog_lags=0),
+        ):
+            with pytest.warns(UserWarning, match="only used with") as record:
+                model.fit(cov_type="HC0", cov_kwds={"maxlags": 2})
+            assert record[0].filename == __file__
+
+
+class TestHacDefaultLag:
+    """The default lag is the fixed rule on the estimation sample."""
+
+    def test_ar_and_adl(self) -> None:
+        y, x = _adl_data(seed=44, n=260)
+        n_eff = 260 - 2
+        maxlags = int(np.floor(4 * (n_eff / 100) ** (2 / 9)))
+        assert maxlags == 4
+        ar = rg.AR(y, lags=2).fit(cov_type="HAC")
+        theirs = AutoReg(y, lags=2, trend="c").fit(
+            cov_type="HAC", cov_kwds={"maxlags": maxlags, "use_correction": True}
+        )
+        np.testing.assert_allclose(ar.bse, theirs.bse, rtol=1e-8)
+        other = AutoReg(y, lags=2, trend="c").fit(
+            cov_type="HAC", cov_kwds={"maxlags": maxlags + 1, "use_correction": True}
+        )
+        assert not np.allclose(ar.bse, other.bse, rtol=1e-6)
+        adl = rg.ADL(y, x, lags=2, exog_lags=1).fit(cov_type="HAC")
+        theirs = ARDL(y, 2, x.reshape(-1, 1), 1, trend="c").fit(
+            cov_type="HAC", cov_kwds={"maxlags": maxlags, "use_correction": True}
+        )
+        np.testing.assert_allclose(adl.bse, theirs.bse, rtol=1e-8)
+
+
+class TestDynamicsValues:
+    def test_roots_of_a_known_polynomial(self) -> None:
+        """Roots computed from the estimates, regime by regime."""
+        rng = np.random.default_rng(45)
+        n = 400
+        y = np.zeros(n)
+        for t in range(2, n):
+            if t < 200:
+                y[t] = 0.5 * y[t - 1] + 0.2 * y[t - 2] + rng.standard_normal()
+            else:
+                y[t] = -0.4 * y[t - 1] + 0.3 * y[t - 2] + rng.standard_normal()
+        results = rg.AR(y, lags=2, breaks=[200]).fit()
+        names = list(results.param_names)
+        for regime, roots in enumerate(results.roots_by_regime):
+            phi1 = results.params[names.index(f"y.L1_regime{regime + 1}")]
+            phi2 = results.params[names.index(f"y.L2_regime{regime + 1}")]
+            expected = np.roots([-phi2, -phi1, 1.0])
+            np.testing.assert_allclose(
+                np.sort_complex(roots), np.sort_complex(expected), rtol=1e-10
+            )
+        assert np.asarray(results.roots).dtype == np.complex128
+
+    def test_adl_roots_equal_ar_polynomial_roots(self) -> None:
+        y, x = _adl_data(seed=46)
+        results = rg.ADL(y, x, lags=2, exog_lags=1).fit()
+        names = list(results.param_names)
+        phi1 = results.params[names.index("y.L1")]
+        phi2 = results.params[names.index("y.L2")]
+        np.testing.assert_allclose(
+            np.sort_complex(results.roots),
+            np.sort_complex(np.roots([-phi2, -phi1, 1.0])),
+            rtol=1e-10,
+        )
+
+    def test_effects_with_variable_specific_breaks(self) -> None:
+        """Only the coefficient on x breaks: the stretches are those of x."""
+        rng = np.random.default_rng(47)
+        n = 400
+        x = rng.standard_normal(n)
+        y = np.zeros(n)
+        for t in range(1, n):
+            beta = 1.0 if t < 200 else 3.0
+            y[t] = 0.5 * y[t - 1] + beta * x[t] + 0.5 * rng.standard_normal()
+        results = rg.ADL(y, x, lags=1, exog_lags=0, variable_breaks={"x0": [200]}).fit()
+        effects = results.effects_by_regime
+        assert [start for start, _ in effects] == [0, 200]
+        names = list(results.param_names)
+        phi = results.params[names.index("y.L1")]
+        for (_start, by_variable), regime in zip(effects, (1, 2)):
+            beta = results.params[names.index(f"x0_regime{regime}")]
+            cumulative, long_run = by_variable["x0"]
+            assert cumulative == pytest.approx(beta)
+            assert long_run == pytest.approx(beta / (1 - phi))
+        assert effects[0][1]["x0"][1] == pytest.approx(2.0, abs=0.3)
+        assert effects[1][1]["x0"][1] == pytest.approx(6.0, abs=0.6)
+
+
+class TestAdlNamesAndSummaries:
+    def test_dataframe_columns_name_the_regressors(self) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(48)
+        frame = pd.DataFrame(
+            {"income": rng.standard_normal(120), "rate": rng.standard_normal(120)}
+        )
+        y = pd.Series(rng.standard_normal(120), name="consumption")
+        by_name = rg.ADL(y, frame, lags=1, exog_lags={"income": 2, "rate": 0}).fit()
+        assert list(by_name.param_names) == [
+            "const",
+            "y.L1",
+            "income",
+            "income.L1",
+            "income.L2",
+            "rate",
+        ]
+        by_number = rg.ADL(
+            y.to_numpy(), frame.to_numpy(), lags=1, exog_lags={0: 2, 1: 0}
+        ).fit()
+        np.testing.assert_allclose(by_name.params, by_number.params)
+        series = rg.ADL(y, frame["income"], lags=1, exog_lags=1).fit()
+        assert "income.L1" in series.param_names
+
+    def test_adl_summary_by_regime(self) -> None:
+        y, x = _adl_data(seed=49, n=200)
+        pieces = [
+            rg.ADL(y[:100], x[:100], lags=1, exog_lags=3).fit(),
+            rg.ADL(y[100:], x[100:], lags=1, exog_lags=3).fit(),
+        ]
+        text = rg.adl_summary_by_regime(pieces, diagnostics=False)
+        # each piece lost three initial observations: the regimes are
+        # observations 0-99 and 100-199, not 0-97 and 98-195
+        assert "Regime 1 (0-99)" in text
+        assert "Regime 2 (100-199)" in text
+        with_breaks = rg.adl_summary_by_regime(pieces, breaks=[100], diagnostics=False)
+        assert "Breaks at: 100" in with_breaks
+
+
+class TestWhiteTestConstant:
+    def test_constant_of_any_value(self) -> None:
+        from statsmodels.stats.diagnostic import het_white
+
+        from regimes.diagnostics.misspec import heteroskedasticity_test
+
+        rng = np.random.default_rng(50)
+        n = 150
+        x = rng.standard_normal(n)
+        resid = rng.standard_normal(n) * (1 + 0.5 * np.abs(x))
+        only_constant = heteroskedasticity_test(resid, np.full((n, 1), 2.0))
+        assert np.isnan(only_constant.statistic)
+        with_two = heteroskedasticity_test(resid, np.column_stack([np.full(n, 2.0), x]))
+        reference = het_white(resid, np.column_stack([np.ones(n), x]))
+        assert with_two.statistic == pytest.approx(reference[0], rel=1e-8)
+        assert with_two.pvalue == pytest.approx(reference[1], rel=1e-8)

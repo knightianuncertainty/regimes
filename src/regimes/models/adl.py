@@ -33,6 +33,7 @@ from regimes.models.base import (
     _ensure_array,
     check_break_design,
     fit_with_covariance,
+    normalize_breaks,
 )
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
@@ -523,6 +524,13 @@ class ADL(RegimesModelBase):
 
         super().__init__(endog, exog_arr, breaks)
 
+        # the names of a pandas object (the array above has lost them)
+        columns = getattr(exog, "columns", None)
+        if columns is not None:
+            self._exog_names = [str(c) for c in columns]
+        elif hasattr(exog, "name") and hasattr(exog, "index"):
+            self._exog_names = [str(exog.name) if exog.name is not None else "x0"]
+
         # Validate that breaks and variable_breaks are not both specified
         if breaks is not None and variable_breaks is not None:
             raise ValueError(
@@ -784,13 +792,18 @@ class ADL(RegimesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for design "
                         f"matrix with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 if key not in param_names:
                     raise ValueError(
@@ -799,14 +812,11 @@ class ADL(RegimesModelBase):
                     )
                 idx = param_names.index(key)
 
-            # Validate and sort break points (in original sample coordinates)
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
+            # sorted, distinct integers inside the sample (original
+            # observation numbers)
+            breaks_list = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
             # Adjust for effective sample (subtract maxlag)
             for bp in breaks_list:
@@ -816,11 +826,6 @@ class ADL(RegimesModelBase):
                         f"observations before it: the first {self.maxlag} "
                         "observations are used as initial values for the lags"
                     )
-            if len(set(breaks_list)) != len(breaks_list):
-                raise ValueError(
-                    f"Break points for variable '{key}' must be distinct, "
-                    f"got {breaks_list}"
-                )
             adjusted_breaks = [bp - self.maxlag for bp in breaks_list]
             if adjusted_breaks:
                 normalized[idx] = adjusted_breaks
@@ -1103,6 +1108,23 @@ class ADL(RegimesModelBase):
             Optimal (ar_lags, exog_lags) specification. Ties go to the
             smaller model.
 
+        Raises
+        ------
+        ValueError
+            For an unknown criterion or a negative maximum; if the common
+            sample does not have more observations than the largest
+            candidate has coefficients; if a candidate's criterion is not
+            finite.
+
+        Notes
+        -----
+        Every regressor gets the same number of lags, ``0, ..., q``. The
+        values of the criteria are those of statsmodels' ``ARDL`` on the
+        same sample; ``ardl_select_order`` searches a larger set (a lag
+        length for each regressor, including leaving a regressor out), so
+        its choice is the same only when the best model of that larger set
+        is in this one.
+
         Examples
         --------
         >>> model = ADL(y, x, lags=1, exog_lags=0)
@@ -1117,34 +1139,45 @@ class ADL(RegimesModelBase):
         if self.exog is None:
             raise ValueError("exog is required for ADL models")
 
+        # the largest candidate must be estimable on the common sample
+        n_common = self.nobs - hold_back
+        k_trend = {"n": 0, "c": 1, "ct": 2}[self.trend]
+        k_largest = k_trend + max_ar_lags + self.exog.shape[1] * (max_exog_lags + 1)
+        if n_common <= k_largest:
+            raise ValueError(
+                f"the sample is too short to compare lag lengths up to "
+                f"({max_ar_lags}, {max_exog_lags}): after dropping "
+                f"{hold_back} initial observations {n_common} remain, for a "
+                f"largest model with {k_largest} coefficients; lower "
+                "max_ar_lags or max_exog_lags"
+            )
+
         best_ic = np.inf
         best_p = 0
         best_q = 0
 
         for p in range(0, max_ar_lags + 1):
             for q in range(0, max_exog_lags + 1):
-                try:
-                    # Same effective sample for every candidate: a model
-                    # with fewer lags starts later in the data
-                    drop = hold_back - max(p, q)
-                    temp_model = ADL(
-                        endog=self.endog[drop:],
-                        exog=self.exog[drop:],
-                        lags=p if p > 0 else [],
-                        exog_lags=q,
-                        trend=self.trend,
+                # Same effective sample for every candidate: a model with
+                # fewer lags starts later in the data
+                drop = hold_back - max(p, q)
+                temp_results = ADL(
+                    endog=self.endog[drop:],
+                    exog=self.exog[drop:],
+                    lags=p if p > 0 else [],
+                    exog_lags=q,
+                    trend=self.trend,
+                ).fit()
+                ic = temp_results.aic if criterion == "aic" else temp_results.bic
+                if not np.isfinite(ic):
+                    raise ValueError(
+                        f"the {criterion.upper()} of the ADL({p},{q}) candidate "
+                        "is not finite (an exact fit, or collinear regressors)"
                     )
-                    temp_results = temp_model.fit()
-
-                    ic = temp_results.aic if criterion == "aic" else temp_results.bic
-
-                    if ic < best_ic:
-                        best_ic = ic
-                        best_p = p
-                        best_q = q
-                except (np.linalg.LinAlgError, ValueError):
-                    # Skip invalid specifications
-                    continue
+                if ic < best_ic:
+                    best_ic = ic
+                    best_p = p
+                    best_q = q
 
         return best_p, best_q
 

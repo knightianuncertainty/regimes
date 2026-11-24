@@ -6,13 +6,14 @@ estimation that OLS and AR rolling estimators inherit from.
 
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pandas as pd
+
+from regimes._warn import warn_user
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,11 +43,9 @@ def check_rolling_cov_type(cov_type: str) -> None:
 def warn_if_breaks(model: Any) -> None:
     """Warn that rolling and recursive estimation ignores a model's breaks."""
     if getattr(model, "breaks", None) or getattr(model, "_variable_breaks", None):
-        warnings.warn(
+        warn_user(
             "the model has breaks; rolling and recursive estimation uses its "
-            "data, lags and trend only and ignores the breaks",
-            UserWarning,
-            stacklevel=3,
+            "data, lags and trend only and ignores the breaks"
         )
 
 

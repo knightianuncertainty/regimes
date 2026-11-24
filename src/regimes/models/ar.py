@@ -21,7 +21,9 @@ from regimes.models.base import (
     CovType,
     TimeSeriesModelBase,
     check_break_design,
+    check_regime_sample,
     fit_with_covariance,
+    normalize_breaks,
 )
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
@@ -544,13 +546,18 @@ class AR(TimeSeriesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for design "
                         f"matrix with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 # key is a string, find it in param_names
                 if key not in param_names:
@@ -560,14 +567,11 @@ class AR(TimeSeriesModelBase):
                     )
                 idx = param_names.index(key)
 
-            # Validate and sort break points (in original sample coordinates)
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
+            # sorted, distinct integers inside the sample (original
+            # observation numbers)
+            breaks_list = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
             # Adjust for effective sample (subtract maxlag)
             for bp in breaks_list:
@@ -577,11 +581,6 @@ class AR(TimeSeriesModelBase):
                         f"observations before it: the first {self.maxlag} "
                         "observations are used as initial values for the lags"
                     )
-            if len(set(breaks_list)) != len(breaks_list):
-                raise ValueError(
-                    f"Break points for variable '{key}' must be distinct, "
-                    f"got {breaks_list}"
-                )
             adjusted_breaks = [bp - self.maxlag for bp in breaks_list]
             if adjusted_breaks:
                 normalized[idx] = adjusted_breaks
@@ -929,6 +928,11 @@ class AR(TimeSeriesModelBase):
             y_regime = self.endog[start:end]
             exog_regime = self.exog[start:end] if self.exog is not None else None
 
+            if end - start <= self.maxlag:
+                raise ValueError(
+                    f"regime {_regime} has {end - start} observations, and "
+                    f"{self.maxlag} are needed as initial values for the lags"
+                )
             regime_model = AR(
                 y_regime,
                 lags=self.lags,
@@ -936,6 +940,7 @@ class AR(TimeSeriesModelBase):
                 breaks=None,
                 trend=self.trend,
             )
+            check_regime_sample(regime_model._build_design_matrix()[1], _regime)
             regime_results = regime_model.fit(cov_type=cov_type, cov_kwds=cov_kwds)
             results.append(regime_results)
 

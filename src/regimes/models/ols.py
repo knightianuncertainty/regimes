@@ -19,7 +19,9 @@ from regimes.models.base import (
     CovType,
     RegimesModelBase,
     check_break_design,
+    check_regime_sample,
     fit_with_covariance,
+    normalize_breaks,
 )
 from regimes.results.base import RegressionResultsBase, _obs_label, _obs_range_label
 
@@ -54,7 +56,8 @@ class OLSResults(RegressionResultsBase):
     llf : float
         Log-likelihood of the model.
     fvalue : float
-        F-statistic for overall model significance.
+        Classical F-statistic for overall model significance (it does not
+        use the covariance estimator).
     f_pvalue : float
         P-value for the F-statistic.
     """
@@ -105,7 +108,8 @@ class OLSResults(RegressionResultsBase):
         constant is zero: ``k - 1`` restrictions, centered sums of squares.
         Without a constant the null is that every coefficient is zero: ``k``
         restrictions, uncentered sums of squares. Both are what statsmodels
-        reports.
+        reports for ``cov_type="nonrobust"``; the statistic does not use the
+        covariance estimator.
         """
         k = self.df_model
         if self.df_resid <= 0 or self.ssr <= 0:
@@ -122,26 +126,40 @@ class OLSResults(RegressionResultsBase):
         return (explained / df_num) / (self.ssr / self.df_resid), df_num
 
     def _has_constant(self) -> bool:
-        """Whether a constant is in the column space of the regressors."""
-        if self._exog is None:
+        """Whether a constant is in the column space of the regressors.
+
+        The rule of statsmodels: a column that is constant and not zero, or
+        else regressors whose rank does not increase when a column of ones
+        is added (regime-specific constants, a full set of dummies).
+        """
+        X = self._exog
+        if X is None:
             return True
-        ones = np.ones(self._exog.shape[0])
-        fitted = self._exog @ np.linalg.lstsq(self._exog, ones, rcond=None)[0]
-        return bool(np.allclose(fitted, ones, atol=1e-8))
+        if np.any((np.ptp(X, axis=0) == 0.0) & (X[0] != 0.0)):
+            return True
+        augmented = np.column_stack([np.ones(X.shape[0]), X])
+        return bool(np.linalg.matrix_rank(augmented) == np.linalg.matrix_rank(X))
 
     @property
     def fvalue(self) -> float:
-        """F-statistic for overall significance.
+        """F-statistic for overall significance (classical).
 
         With a constant: all coefficients except the constant are zero.
         Without one: all coefficients are zero. NaN for a constant-only
         model.
+
+        The statistic is computed from the sums of squares and is valid
+        under homoskedastic, serially uncorrelated errors. It is the same
+        whatever ``cov_type`` the model was fitted with: with a robust
+        covariance it is *not* the robust Wald statistic that statsmodels
+        reports as ``fvalue``, and equals statsmodels' value only for
+        ``cov_type="nonrobust"``.
         """
         return float(self._f_test()[0])
 
     @property
     def f_pvalue(self) -> float:
-        """P-value for F-statistic."""
+        """P-value of the classical F-statistic (see ``fvalue``)."""
         fvalue, df_num = self._f_test()
         if np.isnan(fvalue):
             return np.nan
@@ -353,6 +371,10 @@ class OLSResults(RegressionResultsBase):
             lines.append(
                 f"Note: Standard errors are {self.cov_type} heteroskedasticity-robust."
             )
+        if self.cov_type != "nonrobust" and self.llf is not None:
+            lines.append(
+                "      The F-statistic is the classical one, not a robust test."
+            )
 
         # Add diagnostics section if requested
         if diagnostics and self._exog is not None:
@@ -487,12 +509,17 @@ class OLS(RegimesModelBase):
 
         for key, breaks in self._variable_breaks.items():
             # Convert key to index
-            if isinstance(key, int):
+            if isinstance(key, bool):
+                raise TypeError(
+                    "variable_breaks keys are variable names or column "
+                    f"numbers, got {key!r}"
+                )
+            if isinstance(key, (int, np.integer)):
                 if key < 0 or key >= k:
                     raise ValueError(
                         f"Variable index {key} is out of bounds for exog with {k} columns"
                     )
-                idx = key
+                idx = int(key)
             else:
                 # key is a string, find it in _exog_names
                 if key not in self._exog_names:
@@ -502,15 +529,10 @@ class OLS(RegimesModelBase):
                     )
                 idx = self._exog_names.index(key)
 
-            # Validate and sort break points
-            breaks_list = sorted(breaks)
-            for bp in breaks_list:
-                if bp <= 0 or bp >= self.nobs:
-                    raise ValueError(
-                        f"Break point {bp} for variable '{key}' is out of bounds. "
-                        f"Must be in range (0, {self.nobs})."
-                    )
-            normalized[idx] = breaks_list
+            # sorted, distinct integers inside the sample
+            normalized[idx] = normalize_breaks(
+                breaks, self.nobs, f"Break point for variable '{key}'"
+            )
 
         return normalized
 
@@ -751,6 +773,7 @@ class OLS(RegimesModelBase):
             y_r, X_r = self.get_regime_data(regime)
             if X_r is None:
                 raise ValueError("exog is required for OLS estimation")
+            check_regime_sample(X_r, regime)
 
             regime_model = OLS(y_r, X_r, has_constant=False)
             regime_results = regime_model.fit(cov_type=cov_type, cov_kwds=cov_kwds)

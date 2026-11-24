@@ -6,12 +6,14 @@ models in the regimes package inherit from.
 
 from __future__ import annotations
 
-import warnings
+import operator
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pandas as pd
+
+from regimes._warn import warn_user
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -74,18 +76,41 @@ def normalize_breaks(
 
     Raises
     ------
+    TypeError
+        If a date is not an integer (a float, a string, a boolean). Dates
+        are not rounded: 100.7 is an error, not 100.
     ValueError
         If a date is outside ``1, ..., nobs - 1`` or appears twice.
     """
     if breaks is None:
         return []
-    dates = sorted(int(b) for b in breaks)
+    dates = []
+    for b in breaks:
+        if isinstance(b, (bool, np.bool_)):
+            raise TypeError(f"{what}: break dates must be integers, got {b!r}")
+        try:
+            dates.append(operator.index(b))
+        except TypeError:
+            raise TypeError(
+                f"{what}: break dates must be integers, got {b!r}"
+            ) from None
+    dates.sort()
     for b in dates:
         if b <= 0 or b >= nobs:
             raise ValueError(f"{what} {b} is out of bounds [1, {nobs - 1}]")
     if len(set(dates)) != len(dates):
         raise ValueError(f"{what}: break dates must be distinct, got {dates}")
     return dates
+
+
+def _scaled_rank(X: NDArray[np.floating[Any]]) -> int:
+    """Rank of ``X`` with its columns scaled to unit length.
+
+    Without the scaling the decision depends on the units of the regressors:
+    a regressor measured in millions makes the others look like zero.
+    """
+    norms = np.linalg.norm(X, axis=0)
+    return int(np.linalg.matrix_rank(X / np.where(norms > 0, norms, 1.0)))
 
 
 def check_break_design(
@@ -104,22 +129,52 @@ def check_break_design(
         Naming the columns that are identically zero, or stating that the
         design is rank deficient.
     """
-    empty = [
+    zero = [
         str(name) for j, name in enumerate(param_names) if not np.any(X[:, j] != 0.0)
     ]
-    if empty:
+    if zero:
         raise ValueError(
-            "the breaks leave no observations for the coefficient(s) "
-            f"{', '.join(empty)}: a regime is empty (for AR and ADL models "
-            "the initial observations lost to the lags do not count)"
+            f"the coefficient(s) {', '.join(zero)} cannot be estimated: the "
+            "regressor is zero in every observation of its regime. Either "
+            "the regime has no observations (for AR and ADL models the "
+            "initial observations lost to the lags do not count), or the "
+            "variable is zero throughout it, as an impulse or step dummy is "
+            "outside its dates. Give such a variable its own break dates, or "
+            "none, with `variable_breaks`"
         )
-    rank = int(np.linalg.matrix_rank(X))
+    rank = _scaled_rank(X)
     if rank < X.shape[1]:
         raise ValueError(
             f"the model with breaks is not identified: {X.shape[1]} "
             f"coefficients but the regressors have rank {rank}. A regime has "
             "fewer observations than coefficients, or its regressors are "
             "collinear within the regime"
+        )
+
+
+def check_regime_sample(X: NDArray[np.floating[Any]], regime: int) -> None:
+    """Check that one regime can be estimated on its own (``fit_by_regime``).
+
+    Raises
+    ------
+    ValueError
+        If the regime does not have more observations than coefficients (a
+        separate regression needs at least one degree of freedom for the
+        error variance), or its regressors are collinear within it.
+    """
+    n, k = X.shape
+    if n <= k:
+        raise ValueError(
+            f"regime {regime} has {n} observations for {k} coefficients; a "
+            "separate regression needs more observations than coefficients "
+            "(for AR and ADL models the first observations of each regime "
+            "are used as initial values for the lags)"
+        )
+    if _scaled_rank(X) < k:
+        raise ValueError(
+            f"regime {regime}: the regressors are collinear within the regime "
+            "(a variable that is constant or zero there, for example), so "
+            "its coefficients are not identified"
         )
 
 
@@ -143,11 +198,9 @@ def fit_with_covariance(
         cov_kwds.setdefault("use_correction", True)
         return sm_model.fit(cov_type="HAC", cov_kwds=cov_kwds)
     if cov_kwds:
-        warnings.warn(
+        warn_user(
             f"cov_kwds is only used with cov_type='HAC'; it is ignored for "
-            f"cov_type={cov_type!r}",
-            UserWarning,
-            stacklevel=3,
+            f"cov_type={cov_type!r}"
         )
     if cov_type == "nonrobust":
         return sm_model.fit()

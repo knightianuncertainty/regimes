@@ -240,16 +240,14 @@ def heteroskedasticity_test(
     the constant columns contain zeros outside their regime. In this case,
     a constant column is prepended for the auxiliary regression.
     """
-    # Check if exog has a constant column (all values ≈ 1.0)
-    has_constant = any(np.allclose(exog[:, i], 1.0) for i in range(exog.shape[1]))
-
-    # Add constant if needed for White's test auxiliary regression
-    if has_constant:
+    # A constant column of any value (the auxiliary regression needs one)
+    is_constant = (np.ptp(exog, axis=0) == 0.0) & (exog[0] != 0.0)
+    if is_constant.any():
         exog_for_test = exog
     else:
         exog_for_test = np.column_stack([np.ones(len(resid)), exog])
 
-    if exog_for_test.shape[1] < 2:
+    if exog.shape[1] - int(is_constant.sum()) < 1:
         # a constant-only model: there is no regressor for the variance to
         # depend on, so the test is not defined
         return DiagnosticTestResult(
