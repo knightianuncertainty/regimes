@@ -282,7 +282,14 @@ class RegimeNumberSelection:
         Tests K vs K+1: H0 is that K regimes are sufficient.
         Stops when H0 is not rejected.
         """
-        from regimes.markov.sequential_restriction import _chi_bar_squared_pvalue
+        from scipy import stats
+
+        def _chi_bar_squared_pvalue(lr_stat: float, n: int) -> float:
+            # A Bonferroni multiple of a one-restriction chi-bar tail: the
+            # reference this test has always used. No result supports it for
+            # this null hypothesis; the test is replaced by a parametric
+            # bootstrap in the next change.
+            return float(min(n * 0.5 * stats.chi2.sf(lr_stat, 1), 1.0))
 
         tests = []
         selected_k = 1
