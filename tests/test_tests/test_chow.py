@@ -353,9 +353,10 @@ class TestChowFromModel:
         model = OLS(y, X, has_constant=False)
         test = ChowTest.from_model(model, break_vars="const")
 
-        # Only constant breaks (auto-added); original X becomes non-breaking
-        assert test.n_break_params == 1  # Default constant
-        assert test.n_nonbreak_params == 2  # Original X is non-breaking
+        # Only the constant breaks; the slope is the one regressor that
+        # does not (the constant is not counted twice)
+        assert test.n_break_params == 1
+        assert test.n_nonbreak_params == 1
 
     def test_from_model_invalid_type(self) -> None:
         """Test from_model raises error for invalid model type."""

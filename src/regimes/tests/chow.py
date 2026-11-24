@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from scipy import stats
 
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase
+from regimes.tests._bp_core import independent_columns
+from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -203,6 +204,12 @@ class ChowTest(BreakTestBase):
 
         super().__init__(endog, exog, exog_break)
 
+        # A fixed regressor that the breaking regressors span (a constant
+        # when the constant breaks) is not identified: leave it out.
+        if self.exog is not None and self.exog_break is not None:
+            keep = independent_columns(self.exog_break, self.exog)
+            self.exog = self.exog[:, keep] if keep else None  # type: ignore[assignment]
+
     @classmethod
     def from_model(
         cls,
@@ -253,7 +260,11 @@ class ChowTest(BreakTestBase):
         if break_vars == "all":
             return cls(endog, exog_break=exog_all)
         elif break_vars == "const":
-            return cls(endog, exog=exog_all)
+            return cls(
+                endog,
+                exog=split_constant(np.asarray(exog_all, dtype=np.float64)),
+                exog_break=np.ones((len(endog), 1)),
+            )
         else:
             raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
@@ -397,15 +408,18 @@ class ChowTest(BreakTestBase):
             df_num = n_small
             df_denom = n_large - total_params_per_sub
 
-            if df_denom <= 0 or ssr_large <= 0:
-                return {
-                    "f_stat": 0.0,
-                    "p_value": 1.0,
-                    "df_num": df_num,
-                    "df_denom": max(df_denom, 1),
-                    "ssr_unrestricted": ssr_large,
-                    "is_predictive": True,
-                }
+            if df_denom <= 0:
+                raise ValueError(
+                    f"break point {break_point}: neither sub-sample has more "
+                    f"observations ({n1} and {n2}) than the model has "
+                    f"coefficients ({total_params_per_sub}), so the test "
+                    "cannot be computed"
+                )
+            if ssr_large <= 1e-12 * float(y_full @ y_full):
+                raise ValueError(
+                    f"break point {break_point}: the model fits the larger "
+                    "sub-sample exactly, so the test statistic is not defined"
+                )
 
             f_stat = ((ssr_full - ssr_large) / df_num) / (ssr_large / df_denom)
             f_stat = max(0.0, f_stat)
@@ -455,15 +469,17 @@ class ChowTest(BreakTestBase):
             df_num = k
             df_denom = T - 2 * k - p
 
-            if df_denom <= 0 or ssr_unrestricted <= 0:
-                return {
-                    "f_stat": 0.0,
-                    "p_value": 1.0,
-                    "df_num": df_num,
-                    "df_denom": max(df_denom, 1),
-                    "ssr_unrestricted": ssr_unrestricted,
-                    "is_predictive": False,
-                }
+            if df_denom <= 0:
+                raise ValueError(
+                    f"break point {break_point}: the sample has {T} "
+                    f"observations and the model with a break {2 * k + p} "
+                    "coefficients, so the test cannot be computed"
+                )
+            if ssr_unrestricted <= 1e-12 * float(y_full @ y_full):
+                raise ValueError(
+                    f"break point {break_point}: the model with a break fits "
+                    "the data exactly, so the test statistic is not defined"
+                )
 
             f_stat = ((ssr_full - ssr_unrestricted) / df_num) / (
                 ssr_unrestricted / df_denom

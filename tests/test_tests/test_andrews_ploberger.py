@@ -205,7 +205,7 @@ class TestFSequence:
         test = AndrewsPlobergerTest(y)
         results = test.fit(trimming=trimming)
 
-        min_idx = int(np.ceil(n * trimming))
+        min_idx = int(np.floor(n * trimming))
         max_idx = n - min_idx
 
         assert results.candidate_indices[0] >= min_idx
@@ -442,11 +442,12 @@ class TestResults:
         assert results.q == 2
         assert results.p == 0
 
-        # Partial break: q=1 (constant), p=2 (X is non-breaking)
+        # Partial break: q=1 (constant), p=1 (the slope; the constant in X
+        # is the breaking regressor and is not counted twice)
         test2 = AndrewsPlobergerTest(y, exog=X)
         results2 = test2.fit()
         assert results2.q == 1
-        assert results2.p == 2
+        assert results2.p == 1
 
 
 class TestFromModel:
@@ -498,7 +499,7 @@ class TestFromModel:
         test = AndrewsPlobergerTest.from_model(model, break_vars="const")
 
         assert test.n_break_params == 1
-        assert test.n_nonbreak_params == 2
+        assert test.n_nonbreak_params == 1
 
     def test_from_model_invalid_type(self) -> None:
         """Test from_model raises error for invalid model type."""
@@ -608,7 +609,7 @@ class TestEdgeCases:
         results = test.fit()
 
         assert results.q == 1
-        assert results.p == 2
+        assert results.p == 1
 
     def test_strong_break_all_reject(self, rng: np.random.Generator) -> None:
         """Very strong break should cause all three statistics to reject."""

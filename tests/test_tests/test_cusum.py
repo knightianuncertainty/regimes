@@ -96,7 +96,9 @@ class TestCUSUMBasic:
 
         assert results.reject
         assert not results.is_stable
-        assert results.n_breaks >= 1
+        assert results.first_crossing is not None
+        # a crossing is not an estimate of the break date
+        assert results.n_breaks == 0
 
     def test_statistic_path_shape(self, rng: np.random.Generator) -> None:
         """Statistic path should have length T - k."""
@@ -509,21 +511,24 @@ class TestCUSUMEdgeCases:
         y = rng.standard_normal(100)
         test = CUSUMSQTest(y)
 
-        with pytest.raises(ValueError, match="significance must be in"):
+        with pytest.raises(ValueError, match="significance must be one of"):
             test.fit(significance=0.0)
 
-        with pytest.raises(ValueError, match="significance must be in"):
+        with pytest.raises(ValueError, match="significance must be one of"):
             test.fit(significance=1.0)
 
-    def test_cusumsq_any_significance(self, rng: np.random.Generator) -> None:
-        """CUSUM-SQ should accept any significance in (0, 1)."""
+    def test_cusumsq_tabulated_significance(self, rng: np.random.Generator) -> None:
+        """CUSUM-SQ accepts the levels for which the bounds are tabulated."""
         y = rng.standard_normal(100)
         test = CUSUMSQTest(y)
 
-        # These should all work
-        for sig in [0.001, 0.025, 0.05, 0.10, 0.20, 0.50]:
+        widths = []
+        for sig in [0.20, 0.10, 0.05, 0.02, 0.01]:
             results = test.fit(significance=sig)
             assert results.significance == sig
+            widths.append(results.critical_value)
+        # stricter levels have wider bounds
+        assert widths == sorted(widths)
 
     def test_crossing_indices_empty_when_stable(self, rng: np.random.Generator) -> None:
         """crossing_indices should be empty when stable."""

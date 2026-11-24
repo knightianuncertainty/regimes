@@ -15,7 +15,35 @@ import numpy as np
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from numpy.typing import ArrayLike
+    from numpy.typing import ArrayLike, NDArray
+
+
+def split_constant(
+    exog_all: NDArray[np.floating[Any]],
+) -> NDArray[np.floating[Any]] | None:
+    """The regressors of a model without its constant column(s).
+
+    Used for ``break_vars="const"``: the constant is the breaking regressor
+    and must not also be among the regressors that do not break.
+
+    Raises
+    ------
+    ValueError
+        If the model has no constant.
+    """
+    is_const = [
+        bool(np.allclose(exog_all[:, i], 1.0, atol=1e-10))
+        for i in range(exog_all.shape[1])
+    ]
+    if not any(is_const):
+        raise ValueError(
+            "break_vars='const' tests a break in the intercept, but the "
+            "model has no constant"
+        )
+    keep = [i for i, const in enumerate(is_const) if not const]
+    if not keep:
+        return None
+    return exog_all[:, keep]
 
 
 @dataclass
