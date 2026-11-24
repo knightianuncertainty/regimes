@@ -237,7 +237,7 @@ class RollingADL(RollingEstimatorBase):
             self._exog_full = self._exog_full.reshape(-1, 1)
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1)) if lags > 0 else []
         else:
             self.lags = sorted(list(lags))
@@ -249,17 +249,22 @@ class RollingADL(RollingEstimatorBase):
         self._exog_lags_raw = exog_lags
         self._k_exog = self._exog_full.shape[1]
 
-        # Generate exog names
+        # Names of the regressors: the columns of a pandas object, else x0, ...
         self._exog_names = [f"x{i}" for i in range(self._k_exog)]
+        columns = getattr(exog, "columns", None)
+        if columns is not None:
+            self._exog_names = [str(c) for c in columns]
+        elif hasattr(exog, "index") and getattr(exog, "name", None) is not None:
+            self._exog_names = [str(exog.name)]  # type: ignore[union-attr]
 
         # Compute maxlag
         ar_max = max(self.lags) if self.lags else 0
         exog_max = 0
-        if isinstance(exog_lags, int):
+        if isinstance(exog_lags, (int, np.integer)):
             exog_max = exog_lags
         elif isinstance(exog_lags, dict):
             for val in exog_lags.values():
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     exog_max = max(exog_max, val)
                 else:
                     exog_max = max(exog_max, max(val) if val else 0)
@@ -296,13 +301,13 @@ class RollingADL(RollingEstimatorBase):
         """Process exog_lags into normalized form."""
         result: dict[int, list[int]] = {}
 
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             lags_list = list(range(0, self._exog_lags_raw + 1))
             for i in range(self._k_exog):
                 result[i] = lags_list
         elif isinstance(self._exog_lags_raw, dict):
             for key, val in self._exog_lags_raw.items():
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     if key in self._exog_names:
@@ -310,7 +315,7 @@ class RollingADL(RollingEstimatorBase):
                     else:
                         raise ValueError(f"Exogenous variable name '{key}' not found")
 
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
@@ -441,9 +446,13 @@ class RollingADL(RollingEstimatorBase):
         >>> results = rolling.fit()
         """
         warn_if_breaks(model)
+        import pandas as pd
+
+        # a DataFrame carries the model's names for its regressors, which
+        # exog_lags may refer to
         return cls(
             endog=model.endog,
-            exog=model.exog,
+            exog=pd.DataFrame(model.exog, columns=list(model._exog_names)),
             lags=model.lags,
             exog_lags=model._exog_lags_raw,
             window=window,
@@ -578,7 +587,7 @@ class RecursiveADL(RollingEstimatorBase):
             self._exog_full = self._exog_full.reshape(-1, 1)
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1)) if lags > 0 else []
         else:
             self.lags = sorted(list(lags))
@@ -590,17 +599,22 @@ class RecursiveADL(RollingEstimatorBase):
         self._exog_lags_raw = exog_lags
         self._k_exog = self._exog_full.shape[1]
 
-        # Generate exog names
+        # Names of the regressors: the columns of a pandas object, else x0, ...
         self._exog_names = [f"x{i}" for i in range(self._k_exog)]
+        columns = getattr(exog, "columns", None)
+        if columns is not None:
+            self._exog_names = [str(c) for c in columns]
+        elif hasattr(exog, "index") and getattr(exog, "name", None) is not None:
+            self._exog_names = [str(exog.name)]  # type: ignore[union-attr]
 
         # Compute maxlag
         ar_max = max(self.lags) if self.lags else 0
         exog_max = 0
-        if isinstance(exog_lags, int):
+        if isinstance(exog_lags, (int, np.integer)):
             exog_max = exog_lags
         elif isinstance(exog_lags, dict):
             for val in exog_lags.values():
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     exog_max = max(exog_max, val)
                 else:
                     exog_max = max(exog_max, max(val) if val else 0)
@@ -637,13 +651,13 @@ class RecursiveADL(RollingEstimatorBase):
         """Process exog_lags into normalized form."""
         result: dict[int, list[int]] = {}
 
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             lags_list = list(range(0, self._exog_lags_raw + 1))
             for i in range(self._k_exog):
                 result[i] = lags_list
         elif isinstance(self._exog_lags_raw, dict):
             for key, val in self._exog_lags_raw.items():
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     if key in self._exog_names:
@@ -651,7 +665,7 @@ class RecursiveADL(RollingEstimatorBase):
                     else:
                         raise ValueError(f"Exogenous variable name '{key}' not found")
 
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
@@ -782,9 +796,13 @@ class RecursiveADL(RollingEstimatorBase):
         >>> results = recursive.fit()
         """
         warn_if_breaks(model)
+        import pandas as pd
+
+        # a DataFrame carries the model's names for its regressors, which
+        # exog_lags may refer to
         return cls(
             endog=model.endog,
-            exog=model.exog,
+            exog=pd.DataFrame(model.exog, columns=list(model._exog_names)),
             lags=model.lags,
             exog_lags=model._exog_lags_raw,
             min_nobs=min_nobs,

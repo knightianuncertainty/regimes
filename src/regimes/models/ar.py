@@ -930,7 +930,7 @@ class AR(TimeSeriesModelBase):
 
             if end - start <= self.maxlag:
                 raise ValueError(
-                    f"regime {_regime} has {end - start} observations, and "
+                    f"regime {_regime + 1} has {end - start} observations, and "
                     f"{self.maxlag} are needed as initial values for the lags"
                 )
             regime_model = AR(

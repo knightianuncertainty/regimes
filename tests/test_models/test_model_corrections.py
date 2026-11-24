@@ -615,10 +615,10 @@ class TestFitByRegimeChecks:
         n = 100
         X = np.column_stack([np.ones(n), rng.standard_normal((n, 2))])
         y = rng.standard_normal(n)
-        with pytest.raises(ValueError, match="regime 1 has 3 observations"):
+        with pytest.raises(ValueError, match="regime 2 has 3 observations"):
             rg.OLS(y, X, has_constant=False, breaks=[97]).fit_by_regime()
         X[50:, 2] = 4.0
-        with pytest.raises(ValueError, match="regime 1: the regressors are collinear"):
+        with pytest.raises(ValueError, match="regime 2: the regressors are collinear"):
             rg.OLS(y, X, has_constant=False, breaks=[50]).fit_by_regime()
         results = rg.OLS(y, X[:, :2], has_constant=False, breaks=[50]).fit_by_regime()
         assert [r.nobs for r in results] == [50, 50]
@@ -628,7 +628,7 @@ class TestFitByRegimeChecks:
         y = rng.standard_normal(100)
         # 4 observations in the last regime: 2 initial values, 2 left for 3
         # coefficients
-        with pytest.raises(ValueError, match="regime 1 has 2 observations"):
+        with pytest.raises(ValueError, match="regime 2 has 2 observations"):
             rg.AR(y, lags=2, breaks=[96]).fit_by_regime()
         with pytest.raises(ValueError, match="initial values"):
             rg.AR(y, lags=4, breaks=[97]).fit_by_regime()
@@ -846,3 +846,95 @@ class TestWhiteTestConstant:
         reference = het_white(resid, np.column_stack([np.ones(n), x]))
         assert with_two.statistic == pytest.approx(reference[0], rel=1e-8)
         assert with_two.pvalue == pytest.approx(reference[1], rel=1e-8)
+
+
+class TestSecondReview:
+    def test_names_reach_the_estimators_built_from_an_adl_model(self) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(51)
+        frame = pd.DataFrame(
+            {"income": rng.standard_normal(150), "rate": rng.standard_normal(150)}
+        )
+        y = rng.standard_normal(150)
+        model = rg.ADL(y, frame, lags=1, exog_lags={"income": 1})
+        names = ["const", "y.L1", "income", "income.L1", "rate"]
+        assert list(model.fit().param_names) == names
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert list(model.rolling(60).fit().param_names) == names
+            assert list(model.recursive(min_nobs=30).fit().param_names) == names
+            direct = rg.RollingADL(
+                y, frame, lags=1, exog_lags={"income": 1}, window=60
+            ).fit()
+            assert list(direct.param_names) == names
+            markov = model.markov_switching(2)
+        assert "income.L1[0]" in list(markov.param_names)
+        # the estimates are those of the same call with column numbers
+        by_number = rg.ADL(y, frame.to_numpy(), lags=1, exog_lags={0: 1})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            np.testing.assert_allclose(
+                model.rolling(60).fit().params, by_number.rolling(60).fit().params
+            )
+
+    def test_numpy_integers_in_lag_arguments(self) -> None:
+        """``exog_lags=np.int64(2)`` silently meant no lags of x."""
+        y, x = _adl_data(seed=52, n=150)
+        plain = rg.ADL(y, x, lags=2, exog_lags=2).fit()
+        numpy_ints = rg.ADL(y, x, lags=np.int64(2), exog_lags=np.int64(2)).fit()
+        assert list(numpy_ints.param_names) == list(plain.param_names)
+        np.testing.assert_allclose(numpy_ints.params, plain.params)
+        keyed = rg.ADL(y, x, lags=2, exog_lags={np.int64(0): np.int64(2)}).fit()
+        np.testing.assert_allclose(keyed.params, plain.params)
+
+    def test_a_single_break_is_still_a_list(self) -> None:
+        y = np.random.default_rng(53).standard_normal(100)
+        with pytest.raises(TypeError, match=r"write \[50\] for a single break"):
+            rg.AR(y, lags=1, breaks=50)  # type: ignore[arg-type]
+        assert normalize_breaks(range(40, 42), 100) == [40, 41]
+
+    @pytest.mark.parametrize(("trend", "k_trend"), [("n", 0), ("c", 1), ("ct", 2)])
+    def test_select_lags_counts_every_coefficient(
+        self, trend: str, k_trend: int
+    ) -> None:
+        """Two regressors: the largest candidate has k_trend + p + 2 (q + 1)
+        coefficients, and needs one observation more than that."""
+        max_p, max_q = 2, 1
+        k_largest = k_trend + max_p + 2 * (max_q + 1)
+        n = max(max_p, max_q) + k_largest  # exactly as many as coefficients
+        rng = np.random.default_rng(54)
+        y, X = rng.standard_normal(n + 1), rng.standard_normal((n + 1, 2))
+        short = rg.ADL(y[:n], X[:n], lags=1, exog_lags=0, trend=trend)
+        with pytest.raises(ValueError, match=f"{k_largest} coefficients"):
+            short.select_lags(max_ar_lags=max_p, max_exog_lags=max_q)
+        enough = rg.ADL(y, X, lags=1, exog_lags=0, trend=trend)
+        assert len(enough.select_lags(max_ar_lags=max_p, max_exog_lags=max_q)) == 2
+
+    def test_white_test_does_not_take_a_zero_column_for_the_constant(self) -> None:
+        from statsmodels.stats.diagnostic import het_white
+
+        from regimes.diagnostics.misspec import heteroskedasticity_test
+
+        rng = np.random.default_rng(55)
+        n = 120
+        x = rng.standard_normal(n)
+        resid = rng.standard_normal(n) * (1 + np.abs(x))
+        without_constant = heteroskedasticity_test(resid, x.reshape(-1, 1))
+        reference = het_white(resid, np.column_stack([np.ones(n), x]))
+        assert without_constant.statistic == pytest.approx(reference[0], rel=1e-8)
+        # a column of zeros is not a constant: one is still added
+        with_zeros = heteroskedasticity_test(resid, np.column_stack([np.zeros(n), x]))
+        assert np.isfinite(with_zeros.statistic)
+
+    def test_warnings_do_not_depend_on_the_spelling_of_the_path(self) -> None:
+        import os
+
+        from regimes import _warn
+
+        inside = _warn.__file__
+        assert _warn._inside_package(inside)
+        assert not _warn._inside_package(__file__)
+        if os.name == "nt":
+            assert _warn._inside_package(inside.upper())
+            assert _warn._inside_package(inside.lower())

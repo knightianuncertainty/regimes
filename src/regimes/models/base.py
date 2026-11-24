@@ -84,6 +84,11 @@ def normalize_breaks(
     """
     if breaks is None:
         return []
+    if isinstance(breaks, (int, float, str, np.number)):
+        raise TypeError(
+            f"{what}: break dates are given as a list, got {breaks!r}; "
+            f"write [{breaks!r}] for a single break"
+        )
     dates = []
     for b in breaks:
         if isinstance(b, (bool, np.bool_)):
@@ -155,6 +160,9 @@ def check_break_design(
 def check_regime_sample(X: NDArray[np.floating[Any]], regime: int) -> None:
     """Check that one regime can be estimated on its own (``fit_by_regime``).
 
+    ``regime`` is the position of the regime, from 0; messages number the
+    regimes from 1, as parameter names and summaries do.
+
     Raises
     ------
     ValueError
@@ -165,14 +173,14 @@ def check_regime_sample(X: NDArray[np.floating[Any]], regime: int) -> None:
     n, k = X.shape
     if n <= k:
         raise ValueError(
-            f"regime {regime} has {n} observations for {k} coefficients; a "
+            f"regime {regime + 1} has {n} observations for {k} coefficients; a "
             "separate regression needs more observations than coefficients "
             "(for AR and ADL models the first observations of each regime "
             "are used as initial values for the lags)"
         )
     if _scaled_rank(X) < k:
         raise ValueError(
-            f"regime {regime}: the regressors are collinear within the regime "
+            f"regime {regime + 1}: the regressors are collinear within the regime "
             "(a variable that is constant or zero there, for example), so "
             "its coefficients are not identified"
         )

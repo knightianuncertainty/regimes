@@ -546,7 +546,7 @@ class ADL(RegimesModelBase):
             raise ValueError(f"trend must be 'c', 'ct', or 'n', got {trend}")
 
         # Process AR lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             if lags < 0:
                 raise ValueError("lags must be non-negative")
             self.lags: list[int] = list(range(1, lags + 1)) if lags > 0 else []
@@ -572,11 +572,11 @@ class ADL(RegimesModelBase):
 
         # Get max exog lag
         exog_max = 0
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             exog_max = self._exog_lags_raw
         elif isinstance(self._exog_lags_raw, dict):
             for val in self._exog_lags_raw.values():
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     exog_max = max(exog_max, val)
                 else:
                     exog_max = max(exog_max, max(val) if val else 0)
@@ -602,7 +602,7 @@ class ADL(RegimesModelBase):
         k_exog = self.exog.shape[1]
         result: dict[int, list[int]] = {}
 
-        if isinstance(self._exog_lags_raw, int):
+        if isinstance(self._exog_lags_raw, (int, np.integer)):
             # Same lag structure for all variables
             lags_list = list(range(0, self._exog_lags_raw + 1))
             for i in range(k_exog):
@@ -611,7 +611,7 @@ class ADL(RegimesModelBase):
             # Variable-specific lags
             for key, val in self._exog_lags_raw.items():
                 # Convert key to index
-                if isinstance(key, int):
+                if isinstance(key, (int, np.integer)):
                     idx = key
                 else:
                     # String key - find in exog names
@@ -630,7 +630,7 @@ class ADL(RegimesModelBase):
                     )
 
                 # Convert val to list of lags
-                if isinstance(val, int):
+                if isinstance(val, (int, np.integer)):
                     result[idx] = list(range(0, val + 1))
                 else:
                     result[idx] = sorted(list(val))
