@@ -144,10 +144,11 @@ def _objective_search_fit(
     log-likelihood plus that penalty and the starting values are compared
     on the same objective; the log-likelihood of the results is the plain
     one, and so is the Hessian behind their standard errors (computed at
-    the penalized estimates). And if the optimizer stops at ``maxiter``
-    from the best starting value, it is continued from there once with five
+    the penalized estimates). And if the optimizer does not report
+    convergence from the best starting value (it stopped at ``maxiter``, or
+    at a loss of precision), it is continued from there once with five
     times as many iterations; ``mle_retvals`` of the results says whether
-    it converged.
+    it converged in the end.
     """
     generator = rng if rng is not None else np.random.default_rng()
     base = kwargs.pop("start_params", None)
@@ -165,7 +166,9 @@ def _objective_search_fit(
     best_value = -np.inf
     best_retvals: Any = None
 
-    def consider(start: Any, n_em: int, iterations: int) -> None:
+    def consider(
+        start: Any, n_em: int, iterations: int, continued: bool = False
+    ) -> None:
         nonlocal best_params, best_value, best_retvals
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -192,7 +195,10 @@ def _objective_search_fit(
                 value = float(np.real(sm_model.loglike(params)))
             except Exception:
                 return
-        if np.isfinite(value) and value > best_value:
+        # a continued fit replaces the fit it continues unless it ends lower
+        # (it usually ends at the same value, now converged)
+        better = value >= best_value if continued else value > best_value
+        if np.isfinite(value) and better:
             best_params = params
             best_value = value
             best_retvals = getattr(fitted, "mle_retvals", None)
@@ -208,7 +214,7 @@ def _objective_search_fit(
             and isinstance(best_retvals, dict)
             and not best_retvals.get("converged", True)
         ):
-            consider(best_params, 0, 5 * maxiter)
+            consider(best_params, 0, 5 * maxiter, continued=True)
     finally:
         if penalty is not None:
             del sm_model.loglike

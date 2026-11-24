@@ -221,7 +221,7 @@ class RollingAR(RollingEstimatorBase):
         )
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))
@@ -489,7 +489,7 @@ class RecursiveAR(RollingEstimatorBase):
         )
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))

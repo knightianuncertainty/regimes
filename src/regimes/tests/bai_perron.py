@@ -29,6 +29,7 @@ Yao, Y.-C. (1988). Estimating the number of change-points via Schwarz'
 
 from __future__ import annotations
 
+import operator
 import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -296,6 +297,11 @@ class BaiPerronResults(BreakTestResultsBase):
                 f"model with {self.index_offset} initial observation(s) for "
                 f"the lags and reports dates in the model's data, so it needs "
                 f"the index of that data ({expected} entries)"
+            )
+        if index is not None and len(index) < expected:
+            raise ValueError(
+                f"index has {len(index)} entries for a sample of {expected} "
+                "observations"
             )
 
         def dates(breaks: Sequence[int]) -> str:
@@ -1105,12 +1111,21 @@ class BaiPerronTest(BreakTestBase):
         """
         y, z, x = self._data()
         q = self.q
-        dates = np.asarray(list(break_indices), dtype=np.int64) - self.index_offset
+        try:
+            given = [operator.index(b) for b in break_indices]
+        except TypeError:
+            raise TypeError(
+                f"break dates must be integers, got {list(break_indices)}"
+            ) from None
+        if sorted(set(given)) != given:
+            raise ValueError(
+                f"break dates must be distinct and in increasing order, got {given}"
+            )
+        dates = np.asarray(given, dtype=np.int64) - self.index_offset
         if np.any(dates < 1) or np.any(dates >= self.nobs):
             first, last = 1 + self.index_offset, self.nobs - 1 + self.index_offset
             raise ValueError(
-                f"break dates must lie in {first}, ..., {last}, "
-                f"got {list(break_indices)}"
+                f"break dates must lie in {first}, ..., {last}, got {given}"
             )
         vb = dates - 1
         delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)

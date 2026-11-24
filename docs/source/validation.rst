@@ -106,7 +106,10 @@ Chow, CUSUM and Andrews-Ploberger
      - statsmodels ``RecursiveLS``, and a brute-force recursive least
        squares for regressors that are collinear at the start or contain a
        dummy variable: differences of 1e-14; the sum of squared recursive
-       residuals equals the residual sum of squares (test, same file)
+       residuals equals the residual sum of squares, also for regressors
+       that grow by nine orders of magnitude over the sample; the
+       observations without a residual are those at which the rank rises
+       in exact rational arithmetic (test, same file)
    * - CUSUM-of-squares path and bounds
      - statsmodels ``RecursiveLS`` (test, same file)
    * - Sequence of F statistics, SupF, AveF, ExpF and their p-values

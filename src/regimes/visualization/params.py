@@ -307,8 +307,10 @@ def _extract_baiperron_param_data(
     # Get regime estimates
     regime_estimates = test.get_regime_estimates(break_indices)
 
-    # Compute boundaries
-    boundaries = [0] + list(break_indices) + [nobs]
+    # Compute boundaries, in the observations the break dates are in (those
+    # of the model's data for a test built from an AR or ADL model)
+    offset = int(getattr(test, "index_offset", 0))
+    boundaries = [offset] + list(break_indices) + [nobs + offset]
 
     # Parameter names
     if q == 1:
@@ -331,7 +333,7 @@ def _extract_baiperron_param_data(
 
             # Get the design matrix for this segment
             if test.exog_break is not None:
-                X_seg = test.exog_break[start:end]
+                X_seg = test.exog_break[start - offset : end - offset]
                 try:
                     XtX_inv = np.linalg.inv(X_seg.T @ X_seg)
                     se = np.sqrt(np.diag(sigma2 * XtX_inv))

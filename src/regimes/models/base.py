@@ -84,10 +84,14 @@ def normalize_breaks(
     """
     if breaks is None:
         return []
-    if isinstance(breaks, (int, float, str, np.number)):
+    if isinstance(breaks, (int, float, str, np.number)) or np.ndim(breaks) == 0:
+        hint = (
+            f"; write [{int(breaks)}] for a single break"
+            if isinstance(breaks, (int, np.integer)) and not isinstance(breaks, bool)
+            else ""
+        )
         raise TypeError(
-            f"{what}: break dates are given as a list, got {breaks!r}; "
-            f"write [{breaks!r}] for a single break"
+            f"{what}: break dates are given as a list of integers, got {breaks!r}{hint}"
         )
     dates = []
     for b in breaks:
@@ -503,7 +507,7 @@ class TimeSeriesModelBase(RegimesModelBase):
         super().__init__(endog, exog, breaks)
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))

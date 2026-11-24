@@ -371,3 +371,59 @@ class TestEveryPathUsesTheOffset:
             (2, break_date),
             (break_date, len(y)),
         ]
+
+
+class TestRegimeEstimatesAndMessages:
+    def test_regime_estimates_validate_their_dates(self) -> None:
+        y = _ar_break_data(seed=27)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=2)
+        test = results._test
+        # the last admissible date is the last observation of the series
+        with pytest.raises(ValueError, match="break dates must lie in 3, ..., 239"):
+            test.get_regime_estimates([240])
+        assert len(test.get_regime_estimates([200])) == 2
+        with pytest.raises(TypeError, match="must be integers"):
+            test.get_regime_estimates([60.7])
+        for dates in ([150, 60], [60, 60]):
+            with pytest.raises(ValueError, match="distinct and in increasing order"):
+                test.get_regime_estimates(dates)
+
+    def test_parameter_plot_data_of_the_test_object(self) -> None:
+        from regimes.visualization.params import _extract_baiperron_param_data
+
+        y = _ar_break_data(seed=28)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = rg.AR(y, lags=2).bai_perron(max_breaks=1)
+        test = results._test
+        test._selected_breaks = list(results.break_indices)
+        data = _extract_baiperron_param_data(test)
+        segments = next(iter(data.values()))
+        break_date = results.break_indices[0]
+        assert [(seg["start"], seg["end"]) for seg in segments] == [
+            (2, break_date),
+            (break_date, len(y)),
+        ]
+        assert all(np.isfinite(seg["ci_lower"]) for seg in segments)
+
+    def test_summary_with_an_index_that_is_too_short(self) -> None:
+        rng = np.random.default_rng(29)
+        y = np.concatenate([rng.normal(0, 1, 60), rng.normal(3, 1, 60)])
+        results = rg.BaiPerronTest(y).fit(max_breaks=2)
+        index = pd.period_range("2000-01", periods=120, freq="M")
+        assert "2005-01" in results.summary(index=index)
+        with pytest.raises(
+            ValueError, match="index has 50 entries for a sample of 120"
+        ):
+            results.summary(index=index[:50])
+
+    def test_exact_fit_message_of_andrews_ploberger(self) -> None:
+        """A series that steps from 0 to 1 at observation 50 is fitted exactly
+        by an AR(3) with a break there."""
+        y = np.concatenate([np.zeros(50), np.ones(50)])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises(ValueError, match="break at observation 50;"):
+                rg.AR(y, lags=3).andrews_ploberger()

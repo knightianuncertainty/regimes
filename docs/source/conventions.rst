@@ -148,8 +148,10 @@ Chow test
 * With ``exog_break`` only those regressors change at the break point; the
   regressors in ``exog`` have common coefficients.
 * A design in which the break is not identified raises: a breaking
-  regressor that is zero or collinear in a sub-sample, or a step dummy at
-  the tested date among the regressors that do not break.
+  regressor that is zero or collinear in a sub-sample (an impulse or step
+  dummy), or a step dummy at the tested date among the regressors that do
+  not break. A dummy variable belongs in ``exog``, with a coefficient that
+  does not break.
 
 CUSUM tests
 -----------
@@ -161,7 +163,13 @@ CUSUM tests
   later) they come later, and every other observation keeps its residual.
   There are always ``T - k`` residuals, and their sum of squares is the
   residual sum of squares of the regression. ``observations`` gives the
-  observation of each point of a path.
+  observation of each point of a path. Whether an observation adds to the
+  rank is decided from the linear dependencies that hold among the columns
+  in all earlier observations (a column that is zero so far, two columns
+  that are equal so far); the decision does not change when a regressor is
+  rescaled. A design that double precision cannot resolve (a cubic in
+  calendar years) raises an error: measure the trend from the start of the
+  sample.
 * The CUSUM scale estimate is ``sqrt(sum w^2 / (T - k))`` (uncentered).
 * CUSUM bounds: the lines of Brown, Durbin and Evans (1975) with
   ``a = 1.143, 0.948, 0.850`` for 1, 5 and 10 percent.

@@ -33,7 +33,7 @@ from regimes.tests._hansen_pvalues import (
     hansen_pvalue,
     pi0_from_range,
 )
-from regimes.tests.cusum import cusum_sq_critical_value
+from regimes.tests.cusum import _compute_recursive_residuals, cusum_sq_critical_value
 
 REF = Path(__file__).resolve().parents[1] / "reference_data"
 
@@ -524,8 +524,8 @@ class TestRecursiveResidualsNumerics:
         )
 
     def test_nearly_collinear_start(self) -> None:
-        """Two first observations that almost coincide count as one design
-        point: the second has a residual, the third completes the rank."""
+        """Two first observations that differ by 1e-9 are two design points:
+        the second completes the rank, as in exact arithmetic."""
         rng = np.random.default_rng(52)
         x = rng.standard_normal(60)
         x[1] = x[0] + 1e-9
@@ -533,15 +533,17 @@ class TestRecursiveResidualsNumerics:
         y = 1.0 + 0.5 * x + rng.standard_normal(60)
         results = rg.CUSUMTest(y, exog=X).fit()
         assert len(results.recursive_residuals) == 58
+        np.testing.assert_array_equal(results.observations[:3], [2, 3, 4])
+        assert np.sum(results.recursive_residuals**2) == pytest.approx(
+            sm.OLS(y, X).fit().ssr, rel=1e-8
+        )
+        # observations that are exactly equal are one design point
+        x[1] = x[0]
+        X = np.column_stack([np.ones(60), x])
+        results = rg.CUSUMTest(y, exog=X).fit()
         np.testing.assert_array_equal(results.observations[:3], [1, 3, 4])
         assert results.recursive_residuals[0] == pytest.approx(
-            (y[1] - y[0]) / np.sqrt(2), abs=1e-6
-        )
-        np.testing.assert_allclose(
-            results.recursive_residuals[1:], self._direct(y, X, 3), atol=1e-6
-        )
-        assert np.sum(results.recursive_residuals**2) == pytest.approx(
-            sm.OLS(y, X).fit().ssr, rel=1e-6
+            (y[1] - y[0]) / np.sqrt(2)
         )
 
     def test_series_that_starts_at_zero(self) -> None:
@@ -874,3 +876,178 @@ class TestChowDegenerateDesigns:
         y = np.concatenate([np.zeros(30), np.ones(30)])
         with pytest.raises(ValueError, match="exactly"):
             rg.AndrewsPlobergerTest(y).fit()
+
+
+class TestRecursiveResidualsDoNotDependOnScale:
+    """The rank decision used a tolerance relative to the largest singular
+    value of the whole sample: a regressor that is small early in the sample
+    was treated as absent there, and the tests rejected a stable model."""
+
+    @staticmethod
+    def _check(y: np.ndarray, X: np.ndarray, no_residual: list[int]) -> None:
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        expected = [t for t in range(len(y)) if t not in no_residual]
+        np.testing.assert_array_equal(positions, expected)
+        scaled = X / np.max(np.abs(X), axis=0)
+        beta, *_ = np.linalg.lstsq(scaled, y, rcond=None)
+        ssr = float(np.sum((y - scaled @ beta) ** 2))
+        assert np.sum(w**2) == pytest.approx(ssr, rel=2e-6)
+
+    @pytest.mark.parametrize("rate", [0.05, 0.07])
+    def test_regressor_that_grows_by_orders_of_magnitude(self, rate: float) -> None:
+        rng = np.random.default_rng(72)
+        n = 300
+        x = np.exp(rate * np.arange(n))  # up to 3e6 and 1e9
+        X = np.column_stack([np.ones(n), x])
+        y = 1.0 + x + rng.standard_normal(n)
+        self._check(y, X, [0, 1])
+        # the coefficients are stable: with rate 0.07 the sum of squared
+        # residuals was 3.7 million where the regression has 276, and both
+        # tests rejected
+        assert not rg.CUSUMTest(y, exog=X).fit().reject
+        assert not rg.CUSUMSQTest(y, exog=X).fit().reject
+
+    def test_one_very_large_value(self) -> None:
+        rng = np.random.default_rng(73)
+        n = 300
+        x = rng.standard_normal(n)
+        x[200] = 1e8
+        X = np.column_stack([np.ones(n), x])
+        y = 1.0 + x + rng.standard_normal(n)
+        self._check(y, X, [0, 1])
+        assert not rg.CUSUMSQTest(y, exog=X).fit().reject
+
+    def test_long_polynomial_trends(self) -> None:
+        """The first k observations complete the rank (the old rule dropped
+        observation 8 of a quadratic trend with 2000 observations)."""
+        rng = np.random.default_rng(74)
+        for n, degree in ((2000, 2), (500, 3)):
+            t = np.arange(n, dtype=float)
+            X = np.column_stack([t**j for j in range(degree + 1)])
+            self._check(rng.standard_normal(n), X, list(range(degree + 1)))
+
+    def test_rescaling_a_regressor_changes_nothing(self) -> None:
+        rng = np.random.default_rng(75)
+        n = 120
+        step = (np.arange(n) >= 40).astype(float)
+        X = np.column_stack([np.ones(n), rng.standard_normal(n), step])
+        y = rng.standard_normal(n)
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        for factors in ([1.0, 1e8, 1.0], [1e-6, 1.0, 1e9]):
+            w2, _f2, positions2 = _compute_recursive_residuals(y, X * factors)
+            np.testing.assert_array_equal(positions2, positions)
+            np.testing.assert_allclose(w2, w, rtol=1e-8, atol=1e-10)
+
+    def test_design_beyond_double_precision_raises(self) -> None:
+        """A cubic in calendar years: the columns agree to twelve digits."""
+        rng = np.random.default_rng(76)
+        years = 1990 + np.arange(60) / 4
+        y = rng.standard_normal(60)
+        calendar = np.column_stack([years**j for j in range(4)])
+        with pytest.raises(ValueError, match="could not be computed accurately"):
+            rg.CUSUMTest(y, exog=calendar).fit()
+        # measured from the start of the sample it is an ordinary design
+        elapsed = years - years[0]
+        results = rg.CUSUMTest(
+            y, exog=np.column_stack([elapsed**j for j in range(4)])
+        ).fit()
+        np.testing.assert_array_equal(results.observations, np.arange(4, 60))
+
+
+class TestCrossingBeforeALateDummy:
+    """Positions when the observation without a residual comes late."""
+
+    def test_cusum_crossing_and_plot(self) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        rng = np.random.default_rng(77)
+        n = 200
+        impulse = np.zeros(n)
+        impulse[150] = 1.0
+        X = np.column_stack([np.ones(n), impulse])
+        y = rng.standard_normal(n)
+        y[40:] += 3.0  # the mean shifts long before the dummy
+        results = rg.CUSUMTest(y, exog=X).fit()
+        assert results.reject
+        outside = np.where(
+            (results.statistic_path > results.upper_bound)
+            | (results.statistic_path < results.lower_bound)
+        )[0]
+        # residual number i belongs to observation i + 1 before the dummy
+        assert results.first_crossing == outside[0] + 1
+        assert results.first_crossing < 150
+        assert results.crossing_indices[0] == results.first_crossing
+        fig, ax = results.plot()
+        np.testing.assert_array_equal(
+            ax.lines[0].get_xdata(), [t for t in range(n) if t not in (0, 150)]
+        )
+        plt.close(fig)
+
+
+class TestChowWhenEveryCoefficientBreaks:
+    def test_dummy_among_the_regressors(self) -> None:
+        """It returned F(3, 94) = 0.71 where the test of the two coefficients
+        that can change is F(2, 95) = 1.08."""
+        rng = np.random.default_rng(78)
+        n = 100
+        x = rng.standard_normal(n)
+        impulse = np.zeros(n)
+        impulse[10] = 1.0
+        y = 1.0 + 0.5 * x + rng.standard_normal(n)
+        X = np.column_stack([np.ones(n), x, impulse])
+        with pytest.raises(ValueError, match="Pass such a regressor as `exog`"):
+            rg.ChowTest(y, exog_break=X).fit(break_points=50)
+        with pytest.raises(ValueError, match="not identified"):
+            rg.ChowTest.from_model(rg.OLS(y, X, has_constant=False)).fit(
+                break_points=50
+            )
+        # the way out that the message names
+        results = rg.ChowTest(y, exog=impulse, exog_break=X[:, :2]).fit(break_points=50)
+        assert (results.df_num[50], results.df_denom[50]) == (2, 95)
+        reference = sm.OLS(
+            y,
+            np.column_stack(
+                [
+                    X[:, :2] * (np.arange(n) < 50)[:, None],
+                    X[:, :2] * (np.arange(n) >= 50)[:, None],
+                    impulse,
+                ]
+            ),
+        ).fit()
+        restricted = sm.OLS(y, X).fit()
+        f_stat = ((restricted.ssr - reference.ssr) / 2) / (reference.ssr / 95)
+        assert results.f_stats[50] == pytest.approx(f_stat, rel=1e-9)
+
+    def test_other_unidentified_designs(self) -> None:
+        rng = np.random.default_rng(79)
+        n = 100
+        x = rng.standard_normal(n)
+        y = rng.standard_normal(n)
+        step = (np.arange(n) >= 50).astype(float)
+        late = np.where(np.arange(n) >= 60, x, 0.0)
+        for X in (
+            np.column_stack([np.ones(n), x, step]),  # the break itself
+            np.column_stack([np.ones(n), x, x]),  # a duplicated column
+            np.column_stack([np.ones(n), late]),  # zero before the break
+        ):
+            with pytest.raises(ValueError, match="not identified|collinear"):
+                rg.ChowTest(y, exog_break=X).fit(break_points=50)
+        # predictive variant with collinear regressors
+        with pytest.raises(ValueError, match="collinear in the sample"):
+            rg.ChowTest(y, exog_break=np.column_stack([np.ones(n), x, x])).fit(
+                break_points=98
+            )
+        # and an ordinary design is not affected
+        results = rg.ChowTest(y, exog_break=np.column_stack([np.ones(n), x])).fit(
+            break_points=[50, 99]
+        )
+        assert results.df_num[50] == 2
+        assert results.is_predictive[99]
+
+    def test_break_points_given_as_an_array_scalar(self) -> None:
+        y = np.random.default_rng(80).standard_normal(60)
+        with pytest.raises(TypeError, match="must be integers"):
+            rg.ChowTest(y).fit(break_points=np.array(30.5))
