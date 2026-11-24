@@ -1,7 +1,8 @@
 """Simulation from Markov switching models and Monte Carlo p-values.
 
 Internal helpers for the parametric bootstrap tests in
-:mod:`regimes.markov.sequential_restriction`.
+:mod:`regimes.markov.sequential_restriction` and
+:mod:`regimes.markov.selection`.
 
 The data-generating process is the one whose likelihood the statsmodels
 classes evaluate:
@@ -242,6 +243,34 @@ def simulate_markov_switching(
     )
 
 
+def simulate_linear(
+    exog: NDArray[np.floating[Any]] | None,
+    beta: NDArray[np.floating[Any]] | None,
+    sigma2: float,
+    ar_coefs: NDArray[np.floating[Any]] | None,
+    initial_values: NDArray[np.floating[Any]] | None,
+    nobs: int,
+    rng: np.random.Generator,
+) -> NDArray[np.floating[Any]]:
+    """Simulate from the one-regime model, in the same form as above.
+
+    ``y_t = x_t' b + u_t`` with ``u_t = sum_i phi_i u_{t-i} + s e_t``. The
+    first ``order`` observations are ``initial_values``.
+    """
+    means = np.zeros((nobs, 1), dtype=np.float64)
+    if exog is not None and beta is not None and np.size(beta) > 0:
+        means[:, 0] = np.asarray(exog, dtype=np.float64).reshape(nobs, -1) @ np.asarray(
+            beta, dtype=np.float64
+        )
+    ar = None
+    if ar_coefs is not None and np.size(ar_coefs) > 0:
+        ar = np.asarray(ar_coefs, dtype=np.float64).reshape(1, -1)
+    path = np.zeros(nobs, dtype=np.intp)
+    return generate_series(
+        path, means, np.array([np.sqrt(sigma2)]), ar, initial_values, rng
+    )
+
+
 @dataclass(kw_only=True)
 class MonteCarloPValue:
     """Outcome of a Monte Carlo (parametric bootstrap) test.
@@ -277,13 +306,14 @@ class MonteCarloPValue:
         ``rejects``). It is infinite if ``r = 0``: with so few replications
         the test cannot reject.
         """
-        if self.n_valid == 0:
+        n = len(self.statistics)
+        if n == 0:
             return float("nan")
         rank = int(np.floor(significance * (len(self.statistics) + 1) + 1e-9))
         if rank < 1:
             return float("inf")
         ordered = np.sort(self.statistics)[::-1]
-        return float(ordered[min(rank, self.n_valid) - 1])
+        return float(ordered[min(rank, n) - 1])
 
 
 def monte_carlo_pvalue(
