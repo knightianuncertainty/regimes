@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 4: v0.4.0 - Bai-Perron Corrections & Date-Aware Summaries** Complete, followed by a correction round for every other part of the package (unreleased, see below); Phase 5 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
+**Phase 5: v0.5.0 - Corrections, Validation & Documentation** Complete; Phase 6 (model selection and indicator saturation) is in development and not yet merged — [github.com/knightianuncertainty/regimes](https://github.com/knightianuncertainty/regimes)
 
 ## Completed Phases
 
@@ -88,11 +88,11 @@ Core package structure, OLS/AR models, Bai-Perron test, basic visualization, CI/
   - Replaces integer observation numbers with date labels throughout
 - [x] 1030 tests
 
-### Corrections after v0.4.0 (unreleased)
+### Phase 5: v0.5.0 - Corrections, Validation & Documentation (Complete)
 
 Every part of the package other than Bai-Perron was checked against its
-sources and against other implementations in November 2026. The defects
-found are fixed, each with a permanent test against another package or a
+sources and against other implementations in November 2026, after v0.4.0
+had corrected Bai-Perron. The defects found are fixed, each with a permanent test against another package or a
 published number; the details are in the changelog and on the validation
 page of the documentation.
 
@@ -107,6 +107,7 @@ page of the documentation.
   built from them
 - [x] Documentation: API reference for every public class, a conventions
   page, a validation page; every code example of the README runs
+- [x] 1434 tests
 
 Known limits that remain are listed on the validation page ("Not
 validated") and in the docstrings: the restriction tests of Markov models
@@ -115,29 +116,29 @@ can depend on the seed, rolling estimation supports two covariance types.
 
 ## Planned Phases
 
-### Phase 5: v0.5.0 - Model Selection & Indicator Saturation
+### Phase 6: v0.6.0 - Model Selection & Indicator Saturation
 
 - [ ] Autometrics-inspired general-to-specific model-selection algorithm
 - [ ] Step-indicator saturation (SIS)
 - [ ] Multiplicative step-indicator saturation
 - [ ] Target: 88%+ test coverage
 
-### Phase 6: v0.6.0 - Documentation & Release
+### Phase 7: v0.7.0 - Examples & Release
 
 - [ ] Real data examples (US interest rates, inflation)
 - [ ] Comprehensive example notebooks
-- [ ] Full Sphinx documentation on Read the Docs
+- [ ] Documentation hosted on Read the Docs (the pages themselves are in place since v0.5.0)
 - [ ] PyPI stable release
 - [ ] Target: 90%+ test coverage
 
-### Phase 7: v0.7.0 - Advanced Models
+### Phase 8: v0.8.0 - Advanced Models
 
 - [ ] VAR (Vector Autoregression) model with breaks
 - [ ] Cointegration model
 - [ ] Panel data extensions
 - [ ] Bootstrap inference methods
 
-### Phase 8: v0.8.0+ - Forecasting Workflow
+### Phase 9: v0.9.0+ - Forecasting Workflow
 
 - [ ] End-to-end forecasting workflow with structural change
 - [ ] *(Details to be defined as the research program develops)*
@@ -161,7 +162,8 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.1 | Complete | Fix smoothed probability leakage in restricted Markov models, 880 tests |
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
 | 0.4.0 | Complete | Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), date-aware summaries, 1030 tests |
-| 0.5.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
-| 0.6.0 | Planned | Real data examples, example notebooks, Sphinx docs, PyPI stable release |
-| 0.7.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
-| 0.8.0+ | Future | End-to-end forecasting workflow with structural change |
+| 0.5.0 | Complete | Corrections of the Markov switching tests, the Chow, CUSUM and Andrews-Ploberger tests, the models and rolling estimators; one convention for break dates of AR and ADL models; API reference, conventions and validation pages; 1434 tests |
+| 0.6.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
+| 0.7.0 | Planned | Real data examples, example notebooks, hosted documentation, PyPI stable release |
+| 0.8.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
+| 0.9.0+ | Future | End-to-end forecasting workflow with structural change |

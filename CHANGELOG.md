@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-24
+
 ### Fixed
 
 - **Markov switching: the parameter table used different regime labels from every other result.** After the regimes were relabeled (`ordering="first_appearance"`, the default, or `"intercept"`), `regime_params`, the probabilities and the transition matrix followed the new labels, while `params`, `bse` and `param_names` (and so `summary()`, `to_dataframe()`, `tvalues`, `pvalues`, `conf_int()`) kept the order of the estimation: `const[0]` could be the constant of the regime reported everywhere else as regime 1. The table now follows the same labels in `MarkovRegression`, `MarkovAR` and `MarkovADL`. Code that paired `regime_params[j]` with `bse` through names such as `const[j]` gave the wrong standard errors whenever the regimes had been relabeled.
