@@ -269,16 +269,17 @@ class MonteCarloPValue:
     def critical_value(self, significance: float) -> float:
         """The value an observed statistic must exceed to be rejected.
 
-        The p-value ``(1 + #{simulated >= observed}) / (N + 1)`` is below
+        The p-value ``(1 + #{simulated >= observed}) / (N + 1)`` is at most
         ``significance`` exactly when the observed statistic is larger than
-        the ``r``-th largest simulated one, ``r = ceil(significance (N + 1))
-        - 1``. That value is returned, so that "statistic > critical value"
-        and "p-value < significance" are the same decision. It is infinite
-        if ``r = 0``: with so few replications the test cannot reject.
+        the ``r``-th largest simulated one, ``r = floor(significance (N +
+        1))``. That value is returned, so that "statistic > critical value"
+        and "p-value <= significance" are the same decision (see
+        ``rejects``). It is infinite if ``r = 0``: with so few replications
+        the test cannot reject.
         """
         if self.n_valid == 0:
             return float("nan")
-        rank = int(np.ceil(significance * (self.n_valid + 1) - 1e-12)) - 1
+        rank = int(np.floor(significance * (len(self.statistics) + 1) + 1e-9))
         if rank < 1:
             return float("inf")
         ordered = np.sort(self.statistics)[::-1]
@@ -352,3 +353,27 @@ def monte_carlo_pvalue(
 def smallest_pvalue(n_replications: int) -> float:
     """The smallest p-value ``monte_carlo_pvalue`` can return: ``1 / (N + 1)``."""
     return 1.0 / (n_replications + 1)
+
+
+def rejects(p_value: float, significance: float) -> bool:
+    """Decision of a test from its p-value: reject when ``p <= significance``.
+
+    For a Monte Carlo p-value this is the rule of Dufour (2006). Under the
+    null the probability of ``p <= alpha`` is ``floor(alpha (N + 1)) / (N +
+    1)``, which is ``alpha`` itself when ``alpha (N + 1)`` is an integer: 19
+    replications give an exact test at 5 percent, 199 at 5 and at 1. (With
+    "p < alpha" the same test would have level 4.5 percent at 199.) For a
+    p-value from a continuous distribution the two rules do not differ. NaN
+    does not reject.
+    """
+    return bool(p_value <= significance + 1e-12)
+
+
+def can_reject(n_replications: int, significance: float) -> bool:
+    """Whether a Monte Carlo test with ``N`` replications can reject."""
+    return rejects(smallest_pvalue(n_replications), significance)
+
+
+def replications_needed(significance: float) -> int:
+    """Smallest ``N`` with which a Monte Carlo test can reject at the level."""
+    return max(int(np.ceil(1.0 / significance - 1e-9)) - 1, 1)

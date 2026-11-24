@@ -73,7 +73,10 @@ from regimes.markov._simulate import (
     MonteCarloPValue,
     RandomState,
     as_generator,
+    can_reject,
     monte_carlo_pvalue,
+    rejects,
+    replications_needed,
     simulate_markov_switching,
     smallest_pvalue,
 )
@@ -511,8 +514,11 @@ class NonRecurringRegimeTest:
         Reference distribution: "chi_bar_squared" (default) or "bootstrap".
     n_bootstrap : int
         Number of bootstrap replications (if method="bootstrap"). Default
-        199. It must exceed ``1 / significance - 1``, or the test could
-        never reject. Each replication estimates both models, so the
+        199. It must be at least ``1 / significance - 1`` (19 for a test
+        at 5 percent), or the test could never reject; the test rejects
+        when the p-value is at most ``significance``, which makes its level
+        exact when ``significance * (n_bootstrap + 1)`` is an integer
+        (Dufour, 2006). Each replication estimates both models, so the
         bootstrap is slow. If the statistic is exactly zero the p-value is
         one whatever samples are drawn, and no replications are run.
     order : int
@@ -555,12 +561,12 @@ class NonRecurringRegimeTest:
         if method not in _METHODS:
             raise ValueError(f"method must be one of {_METHODS}, got {method!r}")
         _check_arguments(model_type, significance, n_bootstrap, model_kwargs)
-        if method == "bootstrap" and smallest_pvalue(n_bootstrap) >= significance:
+        if method == "bootstrap" and not can_reject(n_bootstrap, significance):
             raise ValueError(
                 f"with n_bootstrap={n_bootstrap} the smallest possible p-value "
                 f"is {smallest_pvalue(n_bootstrap):.4f}, so the test could "
                 f"never reject at significance={significance}; use at least "
-                f"{int(np.floor(1 / significance))} replications"
+                f"{replications_needed(significance)} replications"
             )
         self.endog = np.asarray(endog, dtype=np.float64)
         self.k_regimes = k_regimes
@@ -690,7 +696,7 @@ class NonRecurringRegimeTest:
                 self.significance, n_restrictions
             )
 
-        rejected = bool(p_value < self.significance)
+        rejected = rejects(p_value, self.significance)
 
         return NonRecurringRegimeTestResults(
             lr_statistic=lr_stat,
@@ -974,7 +980,7 @@ class SequentialRestrictionTest:
         if lr_stat == 0.0:
             # Every simulated statistic is at least zero: the p-value is one.
             return 1.0, float("nan")
-        if smallest_pvalue(self.n_bootstrap) >= significance:
+        if not can_reject(self.n_bootstrap, significance):
             warnings.warn(
                 f"a test at level {significance:.4f} cannot reject with "
                 f"n_bootstrap={self.n_bootstrap}: the smallest possible "
@@ -1096,7 +1102,7 @@ class SequentialRestrictionTest:
                 lr_statistic=lr_stat,
                 p_value=p_value,
                 critical_value=cv,
-                rejected=bool(p_value < adj_sig),
+                rejected=rejects(p_value, adj_sig),
                 significance=adj_sig,
                 method=self.critical_value_method,
                 n_restrictions=1,
@@ -1132,7 +1138,7 @@ class SequentialRestrictionTest:
                     lr_statistic=joint_lr,
                     p_value=joint_p,
                     critical_value=joint_cv,
-                    rejected=bool(joint_p < self.significance),
+                    rejected=rejects(joint_p, self.significance),
                     significance=self.significance,
                     method=self.critical_value_method,
                     n_restrictions=n_restrictions,

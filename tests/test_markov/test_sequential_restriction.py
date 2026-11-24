@@ -466,10 +466,15 @@ class TestArgumentChecks:
             SequentialRestrictionTest(np.zeros(20), ordering="intercept")
 
     def test_too_few_replications_to_reject(self) -> None:
-        """With 19 replications the smallest p-value is 0.05: no rejection at 5%."""
-        with pytest.raises(ValueError, match="could never reject"):
-            NonRecurringRegimeTest(np.zeros(20), method="bootstrap", n_bootstrap=19)
-        NonRecurringRegimeTest(np.zeros(20), method="bootstrap", n_bootstrap=20)
+        """With 18 replications the smallest p-value is 1/19, above 5%; with
+        19 it is 0.05 and the test at 5% is exact (Dufour, 2006)."""
+        with pytest.raises(ValueError, match="use at least 19 replications"):
+            NonRecurringRegimeTest(np.zeros(20), method="bootstrap", n_bootstrap=18)
+        NonRecurringRegimeTest(np.zeros(20), method="bootstrap", n_bootstrap=19)
+        with pytest.raises(ValueError, match="use at least 99 replications"):
+            NonRecurringRegimeTest(
+                np.zeros(20), method="bootstrap", n_bootstrap=98, significance=0.01
+            )
         # not a requirement of the chi-bar-squared version
         NonRecurringRegimeTest(np.zeros(20), n_bootstrap=5)
 
@@ -899,11 +904,16 @@ class TestSequentialProcedure:
                 p_value=0.5, statistics=np.array([5.0]), n_valid=n, n_failed=0
             ),
         )
+        # the second step of a Holm search tests at 0.05 / 2: 19 replications
+        # cannot reject there
         with pytest.warns(UserWarning, match="cannot reject"):
             p_value, _cv = test._reference(
-                4.0, 1, 0.05, _FakeFit(-102.0, 2), {(0, 1): 0.0}, {}
+                4.0, 1, 0.025, _FakeFit(-102.0, 2), {(0, 1): 0.0}, {}
             )
         assert p_value == 0.5
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            test._reference(4.0, 1, 0.05, _FakeFit(-102.0, 2), {(0, 1): 0.0}, {})
 
     def test_models_in_the_search_share_the_starting_distribution(self) -> None:
         test = SequentialRestrictionTest(_break_series(seed=39), k_regimes=2)

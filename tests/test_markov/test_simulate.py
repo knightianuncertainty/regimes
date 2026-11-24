@@ -23,10 +23,13 @@ from statsmodels.tsa.regime_switching.markov_regression import (
 
 from regimes.markov._simulate import (
     as_generator,
+    can_reject,
     draw_regime_path,
     generate_series,
     monte_carlo_pvalue,
     presample_periods,
+    rejects,
+    replications_needed,
     simulate_markov_switching,
 )
 from regimes.markov.models import _SMMarkovAutoregression
@@ -470,17 +473,42 @@ class TestMonteCarloPValue:
         assert out.p_value == pytest.approx(0.6)
         assert out.n_valid == 4
         assert out.n_failed == 0
-        # reject at 0.45 iff (1 + c) / 5 < 0.45 iff c <= 1 iff the statistic
+        # reject at 0.45 iff (1 + c) / 5 <= 0.45 iff c <= 1 iff the statistic
         # exceeds the second largest simulated value
         assert out.critical_value(0.45) == 2.5
-        # at 0.25 only c = 0 rejects: above the largest
+        # at 0.4 the same: (1 + 1) / 5 = 0.4 rejects
+        assert out.critical_value(0.4) == 2.5
+        # at 0.25 and at 0.2 only c = 0 rejects: above the largest
         assert out.critical_value(0.25) == 3.5
-        # at 0.2 nothing can reject: 1 / 5 is not below 0.2
-        assert out.critical_value(0.2) == float("inf")
-        for level in (0.45, 0.25, 0.2):
+        assert out.critical_value(0.2) == 3.5
+        # below 1 / 5 nothing can reject
+        assert out.critical_value(0.19) == float("inf")
+        for level in (0.45, 0.4, 0.25, 0.2, 0.19):
             for observed in (0.4, 1.0, 2.0, 3.0, 4.0):
                 p_value = (1 + sum(v >= observed for v in (0.5, 1.5, 2.5, 3.5))) / 5
-                assert (p_value < level) == (observed > out.critical_value(level))
+                assert rejects(p_value, level) == (observed > out.critical_value(level))
+
+    def test_decision_rule(self) -> None:
+        """Reject when p <= level: exact with 19 replications at 5 percent."""
+        assert rejects(0.05, 0.05)
+        assert rejects(10 / 200, 0.05)
+        assert rejects(3 / 30, 0.1)
+        assert not rejects(0.0501, 0.05)
+        assert not rejects(float("nan"), 0.05)
+        assert can_reject(19, 0.05) and not can_reject(18, 0.05)
+        assert can_reject(99, 0.01) and not can_reject(98, 0.01)
+        assert [replications_needed(a) for a in (0.1, 0.05, 0.025, 0.01)] == [
+            9,
+            19,
+            39,
+            99,
+        ]
+        # the level of the test under the null: floor(alpha (N + 1)) / (N + 1)
+        rng = np.random.default_rng(0)
+        draws = rng.standard_normal((20000, 20))
+        p_values = (1 + (draws[:, 1:] >= draws[:, :1]).sum(axis=1)) / 20
+        rate = np.mean([rejects(p, 0.05) for p in p_values])
+        assert abs(rate - 0.05) < 0.006
 
     def test_ties_count_against_the_null(self) -> None:
         out = monte_carlo_pvalue(
