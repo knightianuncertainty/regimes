@@ -255,7 +255,8 @@ class NonRecurringRegimeTest:
     """Test H0: non-recurring (structural break) vs H1: unrestricted MS.
 
     Computes LR = 2 * (llf_unrestricted - llf_restricted) where the restricted
-    model enforces the Chib (1998) upper-triangular transition structure.
+    model enforces the Chib (1998) structure: from each regime the chain can
+    only stay or move to the next one. Both models start in regime 0.
 
     Parameters
     ----------
@@ -318,20 +319,37 @@ class NonRecurringRegimeTest:
         return restrictions
 
     def _fit_unrestricted(self) -> Any:
-        """Fit the unrestricted MS model."""
-        from regimes.markov import MarkovAR, MarkovRegression
+        """Fit the unrestricted MS model.
 
+        The chain starts in regime 0, as in the non-recurring model, so that
+        the two models are nested and differ only in the transition matrix.
+        (With the stationary starting distribution the unrestricted model
+        would not contain the non-recurring one, and the statistic could be
+        negative.)
+        """
+        from regimes.markov.restricted import (
+            RestrictedMarkovAR,
+            RestrictedMarkovRegression,
+        )
+
+        start = np.eye(self.k_regimes)[0]
+        model: Any
         if self.model_type == "ar":
-            model = MarkovAR(
+            model = RestrictedMarkovAR(
                 self.endog,
                 k_regimes=self.k_regimes,
                 order=self.order,
-                ordering=None,
+                restrictions={},
+                initial_probabilities=start,
                 **self.model_kwargs,
             )
         else:
-            model = MarkovRegression(
-                self.endog, k_regimes=self.k_regimes, ordering=None, **self.model_kwargs
+            model = RestrictedMarkovRegression(
+                self.endog,
+                k_regimes=self.k_regimes,
+                restrictions={},
+                initial_probabilities=start,
+                **self.model_kwargs,
             )
         return model.fit(search_reps=5)
 
@@ -342,8 +360,7 @@ class NonRecurringRegimeTest:
             RestrictedMarkovRegression,
         )
 
-        self._build_non_recurring_restrictions()
-
+        model: Any
         if self.model_type == "ar":
             model = RestrictedMarkovAR.non_recurring(
                 self.endog,

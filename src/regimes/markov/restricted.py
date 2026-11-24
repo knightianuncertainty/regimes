@@ -4,10 +4,14 @@ This module provides RestrictedMarkovRegression and RestrictedMarkovAutoregressi
 that subclass the statsmodels implementations to enforce exact zeros (or other
 fixed values) in the transition probability matrix.
 
-The key insight: statsmodels uses a softmax parameterization that maps to the
-interior of the probability simplex. We override transform_params/untransform_params
-to handle restrictions by fixing some entries and distributing the remaining
-probability mass among free entries via softmax.
+statsmodels maps the unconstrained parameters to the interior of the
+probability simplex. ``transform_params`` is overridden to set the restricted
+entries of the transition matrix and to rescale the free entries of each
+column so that it sums to one.
+
+statsmodels stores the transition probabilities as ``p[j->i]`` for the
+destinations ``i = 0, ..., k-2``, destination by destination: reshaped to
+``(k-1, k)``, entry ``[i, j]`` is the probability of moving from ``j`` to ``i``.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from statsmodels.tools.numdiff import approx_hess_cs
 from statsmodels.tsa.regime_switching.markov_autoregression import (
     MarkovAutoregression,
 )
@@ -74,6 +79,168 @@ class _RestrictedFilterMixin:
 
     _restrictions: dict[tuple[int, int], float]
 
+    def _transition_index(self) -> NDArray[np.intp]:
+        """Positions of the transition probabilities in the parameter vector.
+
+        Returns an array of shape (k-1, k): entry ``[i, j]`` is the position
+        of ``p[j->i]``, the probability of moving from regime j to regime i.
+        """
+        k = self.k_regimes  # type: ignore[attr-defined]
+        index = np.arange(self.k_params)[  # type: ignore[attr-defined]
+            self.parameters["regime_transition"]  # type: ignore[attr-defined]
+        ]
+        return np.asarray(index, dtype=np.intp).reshape(k - 1, k)
+
+    def _impose_restrictions(self, matrix: NDArray[Any]) -> NDArray[Any]:
+        """Set the restricted entries of a transition matrix.
+
+        ``matrix[i, j]`` is the probability of moving from j to i. In each
+        column the restricted entries are set to their values and the free
+        entries are rescaled to share the remaining probability.
+        """
+        k = self.k_regimes  # type: ignore[attr-defined]
+        out = np.array(matrix, copy=True)
+        for j in range(k):
+            fixed = {i: v for (i, jj), v in self._restrictions.items() if jj == j}
+            free = [i for i in range(k) if i not in fixed]
+            for i, value in fixed.items():
+                out[i, j] = value
+            if not free:
+                continue
+            available = max(1.0 - float(sum(fixed.values())), 0.0)
+            total = out[free, j].sum()
+            if np.real(total) > 0:
+                out[free, j] = out[free, j] / total * available
+            else:
+                out[free, j] = available / len(free)
+        return out
+
+    def transform_params(self, unconstrained: NDArray[Any]) -> NDArray[Any]:
+        """Transform unconstrained parameters and impose the restrictions."""
+        constrained: NDArray[Any] = np.asarray(
+            super().transform_params(unconstrained)  # type: ignore[misc]
+        )
+        if not self._restrictions:
+            return constrained
+
+        k = self.k_regimes  # type: ignore[attr-defined]
+        index = self._transition_index()
+        matrix = np.zeros((k, k), dtype=constrained.dtype)
+        matrix[: k - 1, :] = constrained[index]
+        matrix[k - 1, :] = 1.0 - matrix[: k - 1, :].sum(axis=0)
+        matrix = self._impose_restrictions(matrix)
+        constrained[index] = matrix[: k - 1, :]
+        return constrained
+
+    def untransform_params(self, constrained: NDArray[Any]) -> NDArray[Any]:
+        """Inverse of ``transform_params`` for the free entries.
+
+        statsmodels' version takes logs of the probabilities and cannot
+        handle the exact zeros and ones of a restricted matrix. The
+        unconstrained value of a restricted entry is irrelevant, because
+        ``transform_params`` overwrites it; it is set from a small positive
+        probability.
+        """
+        if not self._restrictions:
+            return np.asarray(super().untransform_params(constrained))  # type: ignore[misc]
+
+        k = self.k_regimes  # type: ignore[attr-defined]
+        index = self._transition_index()
+        values = np.array(constrained, dtype=np.float64, copy=True)
+        matrix = np.zeros((k, k))
+        matrix[: k - 1, :] = values[index]
+        matrix[k - 1, :] = 1.0 - matrix[: k - 1, :].sum(axis=0)
+        matrix = np.clip(matrix, 1e-8, None)
+        matrix /= matrix.sum(axis=0)
+
+        # The other parameters (variances, AR coefficients) are untransformed
+        # by statsmodels; give it interior probabilities to work with
+        values[index] = 1.0 / k
+        unconstrained: NDArray[Any] = np.asarray(
+            super().untransform_params(values)  # type: ignore[misc]
+        )
+        # statsmodels: p_i = exp(x_i) / (1 + sum_l exp(x_l)), last regime as base
+        unconstrained[index] = np.log(matrix[: k - 1, :]) - np.log(matrix[k - 1, :])
+        return unconstrained
+
+    def regime_transition_matrix(
+        self, params: NDArray[Any], exog_tvtp: Any = None
+    ) -> NDArray[Any]:
+        """Transition matrix with the restrictions imposed.
+
+        For parameters that satisfy the restrictions this only removes
+        rounding errors: the last row is one minus the sum of the others,
+        which can leave 1e-16 where a restriction says zero, and the filter
+        treats only an exact zero as a forbidden transition. Parameters that
+        do not satisfy them (statsmodels' starting values and its EM steps)
+        are mapped to a matrix that does.
+        """
+        matrix: NDArray[Any] = np.asarray(
+            super().regime_transition_matrix(params, exog_tvtp)  # type: ignore[misc]
+        )
+        if self._restrictions:
+            matrix[..., 0] = self._impose_restrictions(matrix[..., 0])
+        return matrix
+
+    def _em_regime_transition(self, result: Any) -> NDArray[Any]:
+        """EM update of the transition probabilities, under the restrictions.
+
+        The probability of moving from j to i is the expected number of such
+        moves divided by the expected number of periods the chain moves on
+        from j. statsmodels divides by the expected time spent in j over the
+        sample instead, which leaves out the starting period and includes
+        the last one. The difference is small for a regime that is visited
+        often, but when a regime is occupied only briefly at the start, as
+        in the first iterations of a model whose chain starts in a regime it
+        must leave, statsmodels' ratio reaches one and the model can then
+        never leave its first regime.
+
+        Returns an array of shape (k, k-1): row j holds the probabilities of
+        moving from j to the regimes 0, ..., k-2.
+        """
+        k = self.k_regimes  # type: ignore[attr-defined]
+        joint = np.asarray(result.smoothed_joint_probabilities)
+        for _ in range(joint.ndim - 3):
+            joint = joint.sum(axis=-2)
+        moves = joint.sum(axis=-1)  # moves[i, j]: expected moves from j to i
+        totals = moves.sum(axis=0)
+        matrix = np.full((k, k), 1.0 / k)
+        left = totals > 0
+        matrix[:, left] = moves[:, left] / totals[left]
+        matrix = self._impose_restrictions(matrix)
+        return np.asarray(matrix[: k - 1, :].T)
+
+    def _free_parameter_jacobian(self) -> NDArray[np.floating[Any]]:
+        """Jacobian of the parameter vector in a minimal set of free parameters.
+
+        Parameters other than transition probabilities are free. In column j
+        of the transition matrix the free entries sum to a constant, so all
+        but the last of them are free and the last is determined.
+        """
+        k = self.k_regimes  # type: ignore[attr-defined]
+        n = int(self.k_params)  # type: ignore[attr-defined]
+        index = self._transition_index()
+        is_transition = np.zeros(n, dtype=bool)
+        is_transition[index.ravel()] = True
+
+        columns = []
+        for ix in np.flatnonzero(~is_transition):
+            column = np.zeros(n)
+            column[ix] = 1.0
+            columns.append(column)
+        for j in range(k):
+            free = [i for i in range(k) if (i, j) not in self._restrictions]
+            if not free:
+                continue
+            determined = free[-1]
+            for i in free[:-1]:
+                column = np.zeros(n)
+                column[index[i, j]] = 1.0
+                if determined < k - 1:
+                    column[index[determined, j]] = -1.0
+                columns.append(column)
+        return np.column_stack(columns)
+
     @staticmethod
     def _restricted_log_transition(
         regime_transition: NDArray[Any],
@@ -93,7 +260,7 @@ class _RestrictedFilterMixin:
 
         # Replicate cy_hamilton_filter_log with our strict log-zero
         if regime_transition is None:
-            regime_transition = self.regime_transition_matrix(params)  # type: ignore[attr-defined]
+            regime_transition = self.regime_transition_matrix(params)
         initial_probabilities = self.initial_probabilities(  # type: ignore[attr-defined]
             params, regime_transition
         )
@@ -105,7 +272,12 @@ class _RestrictedFilterMixin:
         order = conditional_loglikelihoods.ndim - 2
         dtype = conditional_loglikelihoods.dtype
 
-        log_initial = np.log(initial_probabilities)
+        # A known starting distribution can have exact zeros
+        log_initial = np.where(
+            initial_probabilities == 0,
+            _LOG_ZERO,
+            np.log(np.maximum(initial_probabilities, 1e-20)),
+        )
         log_transition = self._restricted_log_transition(regime_transition)
 
         filtered_marginal_probabilities = np.zeros((k_regimes, nobs), dtype=dtype)
@@ -192,7 +364,7 @@ class _RestrictedFilterMixin:
             )
 
         if regime_transition is None:
-            regime_transition = self.regime_transition_matrix(params)  # type: ignore[attr-defined]
+            regime_transition = self.regime_transition_matrix(params)
 
         # --- begin cy_kim_smoother_log logic with restricted log ---
         k_regimes = filtered_joint_probabilities_log.shape[0]
@@ -242,9 +414,8 @@ class _RestrictedFilterMixin:
 class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
     """statsmodels MarkovRegression with restricted transition probabilities.
 
-    Overrides transform_params/untransform_params to enforce fixed values
-    in the transition matrix.  Also overrides _filter/_smooth to use a strict
-    log-zero that prevents probability leakage through forbidden transitions.
+    The restrictions are imposed in ``transform_params`` and the filter and
+    smoother use a strict log-zero (both in ``_RestrictedFilterMixin``).
 
     Parameters
     ----------
@@ -263,126 +434,9 @@ class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
         self._restrictions = restrictions or {}
         super().__init__(endog, k_regimes, **kwargs)
 
-        # Recalculate the number of free transition parameters
-        k = k_regimes
-        # Standard: (k-1) free params per column, k columns = k*(k-1)
-        # With restrictions: subtract 1 per restricted entry
-        n_restricted = len(self._restrictions)
-        self._n_free_transition = k * (k - 1) - n_restricted
-
-    @property
-    def _n_transition_params(self) -> int:
-        """Number of free transition parameters."""
-        # We need to keep the same parameter vector length as statsmodels expects,
-        # so we don't override this. Instead, we handle restrictions in transform.
-        return self.k_regimes * (self.k_regimes - 1)
-
-    def _build_free_mask(self) -> list[list[tuple[int, bool, float]]]:
-        """Build a mask describing free/restricted entries per column.
-
-        Returns
-        -------
-        list[list[tuple[int, bool, float]]]
-            For each column j: list of (row_i, is_free, fixed_value).
-        """
-        k = self.k_regimes
-        mask = []
-        for j in range(k):
-            col_entries = []
-            for i in range(k):
-                if (i, j) in self._restrictions:
-                    col_entries.append((i, False, self._restrictions[(i, j)]))
-                else:
-                    col_entries.append((i, True, 0.0))
-            mask.append(col_entries)
-        return mask
-
-    def transform_params(self, unconstrained: NDArray[Any]) -> NDArray[Any]:
-        """Transform unconstrained params to constrained, applying restrictions.
-
-        The transition matrix parameters are at the end of the parameter vector.
-        For each column j:
-          1. Sum fixed values
-          2. available_mass = 1 - sum(fixed)
-          3. Free entries: softmax(unconstrained[free_indices]) * available_mass
-        """
-        constrained = super().transform_params(unconstrained)
-
-        if not self._restrictions:
-            return constrained
-
-        # The transition params are the first k*(k-1) entries (statsmodels convention)
-        k = self.k_regimes
-        n_tp = k * (k - 1)
-
-        # Reconstruct transition matrix from the constrained params
-        # statsmodels stores transition params column by column, k-1 per col
-        tp_start = 0
-        tp = constrained[tp_start : tp_start + n_tp]
-
-        # Rebuild the full transition matrix
-        P = np.zeros((k, k))
-        idx = 0
-        for j in range(k):
-            # statsmodels convention: stores k-1 probs, the k-th is 1 - sum
-            probs = tp[idx : idx + k - 1]
-            P[: k - 1, j] = probs
-            P[k - 1, j] = 1.0 - np.sum(probs)
-            idx += k - 1
-
-        # Apply restrictions
-        mask = self._build_free_mask()
-        for j in range(k):
-            entries = mask[j]
-            fixed_sum = sum(fv for _, is_free, fv in entries if not is_free)
-            available = max(1.0 - fixed_sum, 0.0)
-
-            free_indices = [i for i, is_free, _ in entries if is_free]
-            n_free = len(free_indices)
-
-            if n_free == 0:
-                # All entries fixed — set them
-                for i, _is_free, fv in entries:
-                    P[i, j] = fv
-            elif n_free == 1:
-                # One free entry gets all remaining mass
-                for i, is_free, fv in entries:
-                    if not is_free:
-                        P[i, j] = fv
-                    else:
-                        P[i, j] = available
-            else:
-                # Multiple free entries: distribute available mass proportionally
-                free_vals = np.array([P[i, j] for i in free_indices])
-                free_sum = np.sum(free_vals)
-                if free_sum > 0:
-                    free_vals = free_vals / free_sum * available
-                else:
-                    free_vals = np.ones(n_free) / n_free * available
-
-                for i, is_free, fv in entries:
-                    if not is_free:
-                        P[i, j] = fv
-
-                for fi, i in enumerate(free_indices):
-                    P[i, j] = free_vals[fi]
-
-        # Write back to constrained parameter vector
-        idx = 0
-        new_tp = np.zeros(n_tp)
-        for j in range(k):
-            new_tp[idx : idx + k - 1] = P[: k - 1, j]
-            idx += k - 1
-
-        constrained[tp_start : tp_start + n_tp] = new_tp
-        return constrained
-
 
 class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregression):
-    """statsmodels MarkovAutoregression with restricted transition probabilities.
-
-    Inherits filter/smooth overrides from _RestrictedFilterMixin.
-    """
+    """statsmodels MarkovAutoregression with restricted transition probabilities."""
 
     def __init__(
         self,
@@ -394,77 +448,6 @@ class _RestrictedSMMarkovAutoregression(_RestrictedFilterMixin, MarkovAutoregres
     ) -> None:
         self._restrictions = restrictions or {}
         super().__init__(endog, k_regimes, order=order, **kwargs)
-
-    def _build_free_mask(self) -> list[list[tuple[int, bool, float]]]:
-        k = self.k_regimes
-        mask = []
-        for j in range(k):
-            col_entries = []
-            for i in range(k):
-                if (i, j) in self._restrictions:
-                    col_entries.append((i, False, self._restrictions[(i, j)]))
-                else:
-                    col_entries.append((i, True, 0.0))
-            mask.append(col_entries)
-        return mask
-
-    def transform_params(self, unconstrained: NDArray[Any]) -> NDArray[Any]:
-        constrained = super().transform_params(unconstrained)
-
-        if not self._restrictions:
-            return constrained
-
-        k = self.k_regimes
-        n_tp = k * (k - 1)
-        tp_start = 0
-        tp = constrained[tp_start : tp_start + n_tp]
-
-        P = np.zeros((k, k))
-        idx = 0
-        for j in range(k):
-            probs = tp[idx : idx + k - 1]
-            P[: k - 1, j] = probs
-            P[k - 1, j] = 1.0 - np.sum(probs)
-            idx += k - 1
-
-        mask = self._build_free_mask()
-        for j in range(k):
-            entries = mask[j]
-            fixed_sum = sum(fv for _, is_free, fv in entries if not is_free)
-            available = max(1.0 - fixed_sum, 0.0)
-            free_indices = [i for i, is_free, _ in entries if is_free]
-            n_free = len(free_indices)
-
-            if n_free == 0:
-                for i, _is_free, fv in entries:
-                    P[i, j] = fv
-            elif n_free == 1:
-                for i, is_free, fv in entries:
-                    if not is_free:
-                        P[i, j] = fv
-                    else:
-                        P[i, j] = available
-            else:
-                free_vals = np.array([P[i, j] for i in free_indices])
-                free_sum = np.sum(free_vals)
-                if free_sum > 0:
-                    free_vals = free_vals / free_sum * available
-                else:
-                    free_vals = np.ones(n_free) / n_free * available
-                for i, is_free, fv in entries:
-                    if not is_free:
-                        P[i, j] = fv
-                for fi, i in enumerate(free_indices):
-                    P[i, j] = free_vals[fi]
-
-        idx = 0
-        new_tp = np.zeros(n_tp)
-        for j in range(k):
-            new_tp[idx : idx + k - 1] = P[: k - 1, j]
-            idx += k - 1
-
-        constrained[tp_start : tp_start + n_tp] = new_tp
-        return constrained
 
 
 def _reject_ordering(kwargs: dict[str, Any]) -> None:
@@ -484,6 +467,202 @@ def _reject_ordering(kwargs: dict[str, Any]) -> None:
         )
 
 
+def _validate_restrictions(
+    k_regimes: int, restrictions: dict[tuple[int, int], float]
+) -> None:
+    """Check that the restrictions describe a possible transition matrix."""
+    for (i, j), value in restrictions.items():
+        if not (0 <= i < k_regimes and 0 <= j < k_regimes):
+            raise ValueError(
+                f"restriction ({i}, {j}) is outside a {k_regimes}-regime "
+                "transition matrix"
+            )
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"restriction ({i}, {j}) = {value} is not a probability")
+    for j in range(k_regimes):
+        fixed = [v for (_i, jj), v in restrictions.items() if jj == j]
+        total = float(sum(fixed))
+        if total > 1.0 + 1e-12:
+            raise ValueError(
+                f"the fixed probabilities of leaving regime {j} sum to {total}"
+            )
+        if len(fixed) == k_regimes and abs(total - 1.0) > 1e-12:
+            raise ValueError(
+                f"all probabilities of leaving regime {j} are fixed but sum "
+                f"to {total}, not 1"
+            )
+
+
+def _validate_initial_probabilities(
+    k_regimes: int, initial_probabilities: Any
+) -> NDArray[np.floating[Any]] | None:
+    if initial_probabilities is None:
+        return None
+    probs = np.asarray(initial_probabilities, dtype=np.float64).ravel()
+    if probs.shape != (k_regimes,) or np.any(probs < 0) or abs(probs.sum() - 1) > 1e-8:
+        raise ValueError(
+            f"initial_probabilities must be {k_regimes} non-negative numbers "
+            "that sum to 1"
+        )
+    return probs
+
+
+def _default_initial_probabilities(
+    k_regimes: int, restrictions: dict[tuple[int, int], float]
+) -> NDArray[np.floating[Any]] | None:
+    """Starting distribution for a chain that the restrictions make reducible.
+
+    If every regime can be reached from every other, the stationary
+    distribution is used (None is returned). Otherwise the stationary
+    distribution puts no mass on the regimes that the chain eventually leaves
+    for good, so the model could never be in them. The chain then starts,
+    with equal probabilities, in the regimes that cannot be entered from
+    outside their own class: regime 0 of a non-recurring model.
+    """
+    k = k_regimes
+    # allowed[i, j]: the chain can move from j to i
+    allowed = np.ones((k, k), dtype=bool)
+    for (i, j), value in restrictions.items():
+        if value == 0.0:
+            allowed[i, j] = False
+    reach = allowed.T | np.eye(k, dtype=bool)  # reach[j, i]: i reachable from j
+    for m in range(k):
+        reach |= reach[:, [m]] & reach[[m], :]
+    same_class = reach & reach.T
+    if same_class.all():
+        return None
+    start = np.zeros(k)
+    for r in range(k):
+        members = same_class[r]
+        entered = allowed[np.ix_(members, ~members)].any()
+        if not entered:
+            start[r] = 1.0
+    return start / start.sum()
+
+
+def _non_recurring_restrictions(k_regimes: int) -> dict[tuple[int, int], float]:
+    """Chib (1998): from regime j the chain stays or moves to regime j + 1."""
+    return {
+        (i, j): 0.0
+        for j in range(k_regimes)
+        for i in range(k_regimes)
+        if i not in (j, j + 1)
+    }
+
+
+def _time_ordered_start_params(sm_model: Any) -> NDArray[np.floating[Any]]:
+    """Starting values for a model whose regimes follow one another in time.
+
+    statsmodels' default starting values order the regimes by the size of
+    their coefficients, which need not be the order in which they occur. A
+    non-recurring model started that way can only leave its first regime at
+    once. Here regime j starts from a regression on the j-th of ``k`` equal
+    stretches of the sample, and each regime is expected to last ``nobs / k``
+    periods.
+
+    Returns
+    -------
+    NDArray[np.floating]
+        Starting values on the scale of the parameters (``transformed=True``).
+    """
+    k = int(sm_model.k_regimes)
+    params = np.array(sm_model.start_params, dtype=np.float64, copy=True)
+    parameters = sm_model.parameters
+    all_idx = np.arange(sm_model.k_params)
+    endog = np.asarray(sm_model.endog, dtype=np.float64).ravel()
+    nobs = len(endog)
+    bounds = np.linspace(0, nobs, k + 1).astype(int)
+
+    exog = getattr(sm_model, "exog", None)
+    if exog is not None and np.size(exog) > 0:
+        exog = np.asarray(exog, dtype=np.float64).reshape(nobs, -1)
+        full = np.linalg.lstsq(exog, endog, rcond=None)[0]
+        switching = np.atleast_1d(parameters.switching["exog"]).astype(bool)
+        resid = np.zeros(nobs)
+        for j in range(k):
+            rows = slice(bounds[j], bounds[j + 1])
+            beta = full.copy()
+            if bounds[j + 1] - bounds[j] > exog.shape[1]:
+                local = np.linalg.lstsq(exog[rows], endog[rows], rcond=None)[0]
+                beta[switching] = local[switching]
+            params[all_idx[parameters[j, "exog"]]] = beta
+            resid[rows] = endog[rows] - exog[rows] @ beta
+    else:
+        resid = endog - endog.mean()
+
+    for j in range(k):
+        rows = slice(bounds[j], bounds[j + 1])
+        if np.atleast_1d(parameters.switching["variance"])[0]:
+            variance = float(np.mean(resid[rows] ** 2))
+        else:
+            variance = float(np.mean(resid**2))
+        params[all_idx[parameters[j, "variance"]]] = max(variance, 1e-8)
+
+    # Stay with probability 1 - k / nobs, otherwise share the rest among the
+    # moves the restrictions allow
+    stay = min(max(1.0 - k / nobs, 0.5), 0.99)
+    matrix = np.full((k, k), (1.0 - stay) / max(k - 1, 1))
+    np.fill_diagonal(matrix, stay)
+    matrix = sm_model._impose_restrictions(matrix)
+    params[sm_model._transition_index()] = matrix[: k - 1, :]
+    return params
+
+
+def _restricted_inference(
+    sm_results: Any,
+) -> tuple[NDArray[np.floating[Any]], int]:
+    """Standard errors and the number of free parameters of a restricted fit.
+
+    The likelihood is differentiated with respect to a minimal set of free
+    parameters, so that every evaluation satisfies the restrictions, and the
+    covariance matrix of the full parameter vector follows by the delta
+    method (exact: the map is linear). A parameter that the restrictions
+    determine gets a NaN standard error.
+
+    statsmodels' own standard errors differentiate with respect to every
+    transition probability, restricted or not, which leaves the restricted
+    model and counts parameters that are not estimated.
+    """
+    model = sm_results.model
+    params = np.asarray(sm_results.params, dtype=np.float64)
+    jacobian = model._free_parameter_jacobian()
+    n_free = jacobian.shape[1]
+
+    def loglike(theta: NDArray[Any]) -> Any:
+        return model.loglike(params + jacobian @ theta, transformed=True)
+
+    bse = np.full(len(params), np.nan)
+    try:
+        hessian = np.asarray(approx_hess_cs(np.zeros(n_free), loglike))
+        cov_free = -np.linalg.pinv(hessian)
+        variances = np.einsum("ij,jk,ik->i", jacobian, cov_free, jacobian)
+    except Exception:
+        warnings.warn(
+            "standard errors of the restricted model could not be computed",
+            UserWarning,
+            stacklevel=3,
+        )
+        return bse, n_free
+    estimated = np.any(jacobian != 0, axis=1) & (variances > 0)
+    bse[estimated] = np.sqrt(variances[estimated])
+    return bse, n_free
+
+
+def _finish_restricted_results(
+    results: Any, sm_results: Any, restrictions: dict[tuple[int, int], float]
+) -> None:
+    """Checks and inference common to the two restricted model classes."""
+    for (i, j), value in restrictions.items():
+        if abs(float(results.regime_transition[i, j]) - value) > 1e-8:
+            raise RuntimeError(
+                f"the estimated transition matrix violates restriction "
+                f"({i}, {j}) = {value}: {results.regime_transition[i, j]}"
+            )
+    results.restricted_transitions = dict(restrictions)
+    if restrictions:
+        results.bse, results.n_free_params = _restricted_inference(sm_results)
+
+
 class RestrictedMarkovRegression(MarkovRegression):
     """MarkovRegression with fixed transition probabilities.
 
@@ -500,8 +679,22 @@ class RestrictedMarkovRegression(MarkovRegression):
         Dictionary mapping (row, col) -> fixed_value in the transition
         matrix. Entry (i, j) is P(S_t = i | S_{t-1} = j). Typically
         used to set {(i, j): 0.0} for forbidden transitions.
+    initial_probabilities : ArrayLike | None
+        Distribution of the regime in the first period. If None (default)
+        and every regime can be reached from every other, the stationary
+        distribution of the transition matrix is used, as in statsmodels.
+        If the restrictions make some regimes impossible to return to, the
+        stationary distribution puts no mass on them; the chain then starts,
+        with equal probabilities, in the regimes that cannot be entered from
+        outside (regime 0 of a non-recurring model).
     **kwargs
         Additional arguments for MarkovRegression.
+
+    Notes
+    -----
+    Standard errors and ``df_model`` (and so the information criteria) count
+    only the parameters that are free under the restrictions; a transition
+    probability that the restrictions determine has a NaN standard error.
 
     Examples
     --------
@@ -511,7 +704,8 @@ class RestrictedMarkovRegression(MarkovRegression):
     >>> y = np.concatenate([np.random.randn(100) + 1, np.random.randn(100) + 3])
     >>> # Non-recurring: forbid going back from regime 1 to regime 0
     >>> model = RestrictedMarkovRegression(
-    ...     y, k_regimes=2, restrictions={(0, 1): 0.0}
+    ...     y, k_regimes=2, restrictions={(0, 1): 0.0},
+    ...     initial_probabilities=[1.0, 0.0],
     ... )
     >>> results = model.fit()
     >>> print(results.regime_transition)
@@ -522,9 +716,20 @@ class RestrictedMarkovRegression(MarkovRegression):
         endog: Any,
         k_regimes: int = 2,
         restrictions: dict[tuple[int, int], float] | None = None,
+        initial_probabilities: Any = None,
         **kwargs: Any,
     ) -> None:
         self.restrictions = restrictions or {}
+        _validate_restrictions(k_regimes, self.restrictions)
+        self.initial_probabilities = _validate_initial_probabilities(
+            k_regimes, initial_probabilities
+        )
+        if self.initial_probabilities is None:
+            self.initial_probabilities = _default_initial_probabilities(
+                k_regimes, self.restrictions
+            )
+        # Set by non_recurring(): the regimes follow one another in time
+        self._time_ordered = bool(kwargs.pop("_time_ordered", False))
         _reject_ordering(kwargs)
         super().__init__(endog, k_regimes=k_regimes, ordering=None, **kwargs)
 
@@ -547,20 +752,17 @@ class RestrictedMarkovRegression(MarkovRegression):
             switching_exog=self.switching_exog,
             switching_variance=self.switching_variance,
         )
+        if self.initial_probabilities is not None:
+            sm_model.initialize_known(self.initial_probabilities)
+        if self._time_ordered and "start_params" not in kwargs:
+            kwargs["start_params"] = _time_ordered_start_params(sm_model)
 
         sm_results = self._fit_with_search(
             sm_model, method, maxiter, em_iter, search_reps, **kwargs
         )
 
         results = self._wrap_results(sm_results)
-
-        # Enforce exact restriction values in the returned transition matrix
-        for (i, j), val in self.restrictions.items():
-            results.regime_transition[i, j] = val
-
-        # Store restriction info
-        results.restricted_transitions = dict(self.restrictions)
-
+        _finish_restricted_results(results, sm_results, self.restrictions)
         return results
 
     @staticmethod
@@ -571,10 +773,11 @@ class RestrictedMarkovRegression(MarkovRegression):
     ) -> RestrictedMarkovRegression:
         """Create a non-recurring (structural break) model.
 
-        Sets up the Chib (1998) upper-triangular restriction: the latent
-        state can only stay put or advance to the next regime.
+        Sets up the Chib (1998) structure: the chain starts in regime 0 and
+        can only stay put or advance to the next regime. The last regime is
+        absorbing.
 
-        For k=3 regimes, the transition matrix is:
+        For k=3 regimes, the transition matrix (column = regime of origin) is:
             P = [[p11, 0,    0   ],
                  [p21, p22,  0   ],
                  [0,   p32,  1.0 ]]
@@ -586,34 +789,21 @@ class RestrictedMarkovRegression(MarkovRegression):
         k_regimes : int
             Number of regimes.
         **kwargs
-            Additional arguments.
+            Additional arguments. ``initial_probabilities`` overrides the
+            start in regime 0.
 
         Returns
         -------
         RestrictedMarkovRegression
             Model with non-recurring transition structure.
         """
-        restrictions: dict[tuple[int, int], float] = {}
-
-        for j in range(k_regimes):
-            for i in range(k_regimes):
-                # Forbid going backward: i < j means earlier regime
-                if i < j - 0:  # Allow staying (i==j) and advancing (i==j+1)
-                    # But only restrict j<i (going back) and j>i+1 (skipping)
-                    pass
-
-        # More precisely: for each column j (conditioning on S_{t-1}=j),
-        # only allow transitions to j (stay) and j+1 (advance)
-        for j in range(k_regimes):
-            for i in range(k_regimes):
-                if i != j and i != j + 1:
-                    restrictions[(i, j)] = 0.0
-
-        # Last regime is absorbing
-        # Already handled: only (k-1, k-1) is allowed for last column
-
+        kwargs.setdefault("initial_probabilities", np.eye(k_regimes)[0])
         return RestrictedMarkovRegression(
-            endog, k_regimes=k_regimes, restrictions=restrictions, **kwargs
+            endog,
+            k_regimes=k_regimes,
+            restrictions=_non_recurring_restrictions(k_regimes),
+            _time_ordered=True,
+            **kwargs,
         )
 
 
@@ -633,6 +823,9 @@ class RestrictedMarkovAR(MarkovAR):
         AR order.
     restrictions : dict[tuple[int, int], float]
         Transition matrix restrictions.
+    initial_probabilities : ArrayLike | None
+        Distribution of the regime at the start of the sample; see
+        ``RestrictedMarkovRegression``.
     **kwargs
         Additional arguments for MarkovAR.
     """
@@ -643,9 +836,20 @@ class RestrictedMarkovAR(MarkovAR):
         k_regimes: int = 2,
         order: int = 1,
         restrictions: dict[tuple[int, int], float] | None = None,
+        initial_probabilities: Any = None,
         **kwargs: Any,
     ) -> None:
         self.restrictions = restrictions or {}
+        _validate_restrictions(k_regimes, self.restrictions)
+        self.initial_probabilities = _validate_initial_probabilities(
+            k_regimes, initial_probabilities
+        )
+        if self.initial_probabilities is None:
+            self.initial_probabilities = _default_initial_probabilities(
+                k_regimes, self.restrictions
+            )
+        # Set by non_recurring(): the regimes follow one another in time
+        self._time_ordered = bool(kwargs.pop("_time_ordered", False))
         _reject_ordering(kwargs)
         super().__init__(
             endog, k_regimes=k_regimes, order=order, ordering=None, **kwargs
@@ -671,18 +875,17 @@ class RestrictedMarkovAR(MarkovAR):
             switching_trend=self.switching_trend,
             switching_variance=self.switching_variance,
         )
+        if self.initial_probabilities is not None:
+            sm_model.initialize_known(self.initial_probabilities)
+        if self._time_ordered and "start_params" not in kwargs:
+            kwargs["start_params"] = _time_ordered_start_params(sm_model)
 
         sm_results = self._fit_with_search(
             sm_model, method, maxiter, em_iter, search_reps, **kwargs
         )
 
         results = self._wrap_results(sm_results)
-
-        for (i, j), val in self.restrictions.items():
-            results.regime_transition[i, j] = val
-
-        results.restricted_transitions = dict(self.restrictions)
-
+        _finish_restricted_results(results, sm_results, self.restrictions)
         return results
 
     @staticmethod
@@ -692,13 +895,17 @@ class RestrictedMarkovAR(MarkovAR):
         order: int = 1,
         **kwargs: Any,
     ) -> RestrictedMarkovAR:
-        """Create a non-recurring (structural break) AR model."""
-        restrictions: dict[tuple[int, int], float] = {}
-        for j in range(k_regimes):
-            for i in range(k_regimes):
-                if i != j and i != j + 1:
-                    restrictions[(i, j)] = 0.0
+        """Create a non-recurring (structural break) AR model.
 
+        The chain starts in regime 0 and can only stay put or advance to the
+        next regime; see ``RestrictedMarkovRegression.non_recurring``.
+        """
+        kwargs.setdefault("initial_probabilities", np.eye(k_regimes)[0])
         return RestrictedMarkovAR(
-            endog, k_regimes=k_regimes, order=order, restrictions=restrictions, **kwargs
+            endog,
+            k_regimes=k_regimes,
+            order=order,
+            restrictions=_non_recurring_restrictions(k_regimes),
+            _time_ordered=True,
+            **kwargs,
         )

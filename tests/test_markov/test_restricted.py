@@ -66,13 +66,21 @@ class TestRestrictedMarkovRegression:
     def test_restricted_llf_leq_unrestricted(
         self, two_regime_data: NDArray[np.floating[Any]]
     ) -> None:
-        """Restricted model should have lower (or equal) log-likelihood."""
-        from regimes.markov import MarkovRegression
+        """Restricted model should have lower (or equal) log-likelihood.
 
+        The comparison needs nested models: both chains start in regime 0.
+        With the stationary starting distribution in the unrestricted model
+        the restricted likelihood can be the higher one.
+        """
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            # Unrestricted
-            u_model = MarkovRegression(two_regime_data, k_regimes=2, ordering=None)
+            # Unrestricted transition matrix, same starting distribution
+            u_model = RestrictedMarkovRegression(
+                two_regime_data,
+                k_regimes=2,
+                restrictions={},
+                initial_probabilities=[1.0, 0.0],
+            )
             u_results = u_model.fit(search_reps=5)
 
             # Restricted
@@ -88,8 +96,8 @@ class TestRestrictedMarkovRegression:
             "Unrestricted model should produce finite llf"
         )
         assert np.isfinite(r_results.llf), "Restricted model should produce finite llf"
-        # Restricted should be <= unrestricted (with small tolerance)
-        assert r_results.llf <= u_results.llf + 1.0
+        # Restricted should be <= unrestricted (up to optimizer tolerance)
+        assert r_results.llf <= u_results.llf + 1e-3
 
     def test_result_type(self, two_regime_data: NDArray[np.floating[Any]]) -> None:
         from regimes.markov.results import MarkovRegressionResults
@@ -139,11 +147,8 @@ class TestNonRecurringSmoothedProbabilities:
         probs = results.smoothed_marginal_probabilities
         assert np.isfinite(results.llf), "Model should produce finite llf"
 
-        # Find regime 1 (the high-mean regime)
-        # Determine which column corresponds to the higher mean
-        # Identify the absorbing (high-mean) regime by its constant
-        consts = {r: results.regime_params[r]["const"] for r in range(2)}
-        high_regime = max(consts, key=consts.get)
+        # The last regime is the absorbing one, whatever its mean
+        high_regime = 1
 
         p_high = probs[:, high_regime]
 
@@ -172,8 +177,8 @@ class TestNonRecurringSmoothedProbabilities:
         probs = results.filtered_marginal_probabilities
         assert np.isfinite(results.llf)
 
-        consts = {r: results.regime_params[r]["const"] for r in range(2)}
-        high_regime = max(consts, key=consts.get)
+        # The last regime is the absorbing one, whatever its mean
+        high_regime = 1
         p_high = probs[:, high_regime]
 
         # At t=200 (well into the high-mean regime), filtered prob should be
@@ -196,8 +201,8 @@ class TestNonRecurringSmoothedProbabilities:
         probs = results.smoothed_marginal_probabilities
         assert np.isfinite(results.llf), "AR model should produce finite llf"
 
-        consts = {r: results.regime_params[r]["const"] for r in range(2)}
-        high_regime = max(consts, key=consts.get)
+        # The last regime is the absorbing one, whatever its mean
+        high_regime = 1
         p_high = probs[:, high_regime]
 
         above = np.where(p_high > 0.99)[0]
