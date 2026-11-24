@@ -364,6 +364,7 @@ class RollingAR(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 
@@ -631,6 +632,7 @@ class RecursiveAR(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 

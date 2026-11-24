@@ -550,6 +550,7 @@ def plot_diagnostics(
     """Plot PcGive-style misspecification diagnostic panel.
 
     Creates a 2x2 panel with:
+
     - Top left: Actual vs Fitted values
     - Top right: Residual Distribution histogram
     - Bottom left: Scaled Residuals (vertical index plot)

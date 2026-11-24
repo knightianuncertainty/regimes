@@ -24,15 +24,31 @@ A Python package for structural break detection and estimation in time-series ec
 
 ## Installation
 
-```bash
-pip install regimes
-```
-
-For development:
+The package is not on PyPI yet. Install it from GitHub:
 
 ```bash
-pip install regimes[dev,test]
+pip install git+https://github.com/knightianuncertainty/regimes.git
 ```
+
+or a released version by its tag:
+
+```bash
+pip install git+https://github.com/knightianuncertainty/regimes.git@v0.4.0
+```
+
+For development, clone the repository and install it in editable mode:
+
+```bash
+git clone https://github.com/knightianuncertainty/regimes.git
+cd regimes
+pip install -e ".[dev,test]"
+```
+
+Documentation: the API reference, the conventions the package uses (what a
+break date is, how the statistics are scaled, which covariance estimators
+are used) and a validation page (what each method was checked against) are
+in `docs/source` and are built with Sphinx (`pip install -e ".[docs]"`, then
+`make html` in `docs`).
 
 ## Quick Start
 
@@ -113,6 +129,11 @@ bp_results = rg.BaiPerronTest.from_model(model).fit()
 | `break_ci`, `break_ci_90` | Confidence intervals for the break dates (Bai 1997) |
 
 ```python
+# a partial structural change model: the constant breaks, the slope does not
+rng = np.random.default_rng(0)
+x_fixed = rng.standard_normal(len(y))
+z_breaking = np.ones((len(y), 1))
+
 results = rg.BaiPerronTest(y, exog=x_fixed, exog_break=z_breaking).fit(
     max_breaks=5,
     trimming=0.15,           # minimum regime length h = floor(trimming * T), at least q + 1
@@ -399,8 +420,11 @@ print(f"Optimal specification: ADL({optimal_p},{optimal_q})")
 ADL with multiple exogenous variables and different lag structures:
 
 ```python
-# x1: 2 lags (contemporary + L1 + L2), x2: contemporary only
-model = rg.ADL(y, X, lags=1, exog_lags={"x1": 2, "x2": 0})
+# two regressors: the first with two lags (contemporary + L1 + L2), the
+# second contemporary only. Columns of an array are named x0, x1, ...;
+# columns of a DataFrame keep their names.
+X2 = np.column_stack([x, np.random.randn(len(y))])
+model = rg.ADL(y, X2, lags=1, exog_lags={"x0": 2, "x1": 0})
 results = model.fit()
 ```
 
@@ -460,10 +484,11 @@ print(results.param_names)
 import regimes as rg
 
 # Plot data with detected breaks
-fig, ax = rg.plot_breaks(y, breaks=results.break_indices, shade_regimes=True)
+bp_results = rg.BaiPerronTest(y).fit(max_breaks=3)
+fig, ax = rg.plot_breaks(y, breaks=bp_results.break_indices, shade_regimes=True)
 
 # Plot with regime means
-fig, ax = rg.plot_regime_means(y, breaks=results.break_indices)
+fig, ax = rg.plot_regime_means(y, breaks=bp_results.break_indices)
 ```
 
 ### Plotting Style

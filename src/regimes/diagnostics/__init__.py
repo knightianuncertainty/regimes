@@ -2,6 +2,7 @@
 
 This module provides standard diagnostic tests for regression models (the
 same four questions as PcGive's tests, in LM form; see ``misspec``):
+
 - Autocorrelation test (Breusch-Godfrey LM)
 - ARCH test (Engle's ARCH-LM)
 - Normality test (Jarque-Bera)

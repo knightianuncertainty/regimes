@@ -181,6 +181,7 @@ class OLSResults(RegressionResultsBase):
         -------
         DiagnosticsResults
             Collection of diagnostic test results including:
+
             - AR test (Breusch-Godfrey LM)
             - ARCH test (Engle's LM)
             - Normality test (Jarque-Bera)
@@ -658,6 +659,7 @@ class OLS(RegimesModelBase):
         ----------
         cov_type : CovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0", "HC1", "HC2", "HC3": Heteroskedasticity-robust
             - "HAC": Heteroskedasticity and autocorrelation consistent
@@ -799,6 +801,7 @@ class OLS(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         max_breaks : int
@@ -808,6 +811,7 @@ class OLS(RegimesModelBase):
             (``h = floor(trimming * T)``, at least ``q + 1``). Default is 0.15.
         selection : str
             Break selection criterion:
+
             - "bic": Bayesian Information Criterion (default)
             - "lwz": Liu-Wu-Zidek modified Schwarz criterion
             - "sequential": Sequential testing procedure
@@ -869,6 +873,7 @@ class OLS(RegimesModelBase):
             One or more break point indices to test.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         significance : float
@@ -972,6 +977,7 @@ class OLS(RegimesModelBase):
         ----------
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only intercept can break (mean-shift model)
         trimming : float

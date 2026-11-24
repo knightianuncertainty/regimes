@@ -362,6 +362,7 @@ class AndrewsPlobergerTest(BreakTestBase):
             Model to test for structural breaks.
         break_vars : "all" | "const"
             Which variables can have breaks:
+
             - "all": All regressors can break (default)
             - "const": Only the intercept can break (mean-shift model); the
               model must have a constant.

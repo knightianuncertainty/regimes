@@ -6,11 +6,11 @@ This guide will help you get started with regimes.
 Installation
 ------------
 
-Install regimes using pip:
+The package is not on PyPI yet. Install it from GitHub:
 
 .. code-block:: bash
 
-   pip install regimes
+   pip install git+https://github.com/knightianuncertainty/regimes.git
 
 Testing for Structural Breaks
 -----------------------------

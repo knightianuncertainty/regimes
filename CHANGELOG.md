@@ -69,6 +69,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The docstrings of both tests state what is and is not known about them: no published result gives the distribution of the statistics (in a non-recurring model each regime is left once, so the usual boundary theory is not obviously applicable), the statistic tested in the search is the smallest among the candidates, which the reference distributions do not account for, and the multiple-testing levels have no proven error-rate property here.
 - `RegimeNumberSelection`: an unknown `method` or `model_type` raises `ValueError` (an unknown method silently meant BIC); `method="sequential"` raises if `n_bootstrap` is too small for a test to reject at the chosen level, and estimates a model only when a test needs it, so `results_by_k` and `ic_table` stop one regime above the selected number. The sequential test is slow: each replication estimates every model up to K + 1 regimes (on the order of 15 minutes for one regime against two with 200 observations and the defaults, hours for two against three). The docstring notes that the consistency of AIC and BIC for the number of regimes is not established.
 
+### Documentation
+
+- API reference for every public class and function (it covered `OLS`, `AR` and `BaiPerronTest` only).
+- New page **Conventions**: what a break date is in models and in tests, how the statistics are scaled, which covariance estimators and misspecification tests are used, the timing and labeling conventions of the Markov switching models.
+- New page **Validation**: for every method, what it was checked against (statsmodels, R `strucchange`, R `MSTest`, Perron's program, OxRegimes, published tables), with the numbers, the simulated rejection rates, and what is not validated.
+- The installation instructions said `pip install regimes`; the package is not on PyPI. They now give the installation from GitHub.
+- Three code examples of the README did not run (undefined variables, a regressor name that does not exist); all 26 run now.
+- Bullet lists in 36 docstrings rendered as broken block quotes in the reference; they are lists now.
+
+
 ## [0.4.0] - 2026-11-20
 
 ### Fixed

@@ -466,6 +466,7 @@ class RollingADL(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 
@@ -816,6 +817,7 @@ class RecursiveADL(RollingEstimatorBase):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust (White)
 

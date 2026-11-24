@@ -216,6 +216,7 @@ class RollingEstimatorBase(ABC):
         ----------
         cov_type : RollingCovType
             Type of covariance estimator:
+
             - "nonrobust": Standard OLS covariance
             - "HC0": Heteroskedasticity-robust
 

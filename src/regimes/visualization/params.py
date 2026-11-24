@@ -477,6 +477,7 @@ def plot_params_over_time(
     ----------
     results : ResultType | list[ResultType] | dict[str, ResultType]
         Results to plot. Can be:
+
         - Single result object (OLSResults, ARResults, or BaiPerronTest)
         - List of results (auto-labeled as "Model 1", "Model 2", etc.)
         - Dict mapping labels to results for custom labels
