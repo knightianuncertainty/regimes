@@ -22,6 +22,7 @@ from regimes.models.base import (
     TimeSeriesModelBase,
     check_break_design,
     check_regime_sample,
+    check_unique_names,
     fit_with_covariance,
     normalize_breaks,
 )
@@ -234,8 +235,11 @@ class ARResults(RegressionResultsBase):
             for bp in self._breaks:
                 lines.append(f"Break at {_obs_label(bp, index)}")
 
-            # Show regime information
-            boundaries = [0] + list(self._breaks) + [nobs]
+            # Show regime information. The first regime starts at the first
+            # observation of the estimation sample (the observations before
+            # it are initial values for the lags), so that the counts add
+            # up to the number of observations.
+            boundaries = [nobs - self.nobs] + list(self._breaks) + [nobs]
             for i in range(len(boundaries) - 1):
                 start = boundaries[i]
                 end = boundaries[i + 1] - 1
@@ -258,7 +262,7 @@ class ARResults(RegressionResultsBase):
                     lines.append(f"{var_name}: breaks at {break_str}")
 
                 # Show regime ranges on same line
-                boundaries = [0] + list(breaks) + [nobs]
+                boundaries = [nobs - self.nobs] + list(breaks) + [nobs]
                 regime_parts = []
                 for i in range(len(boundaries) - 1):
                     start = boundaries[i]
@@ -515,6 +519,7 @@ class AR(TimeSeriesModelBase):
             param_names.extend(self._exog_names)
 
         X = np.column_stack(components)
+        check_unique_names(param_names)
         return y, X, param_names
 
     def _normalize_variable_breaks(

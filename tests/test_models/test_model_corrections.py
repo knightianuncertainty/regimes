@@ -938,3 +938,54 @@ class TestSecondReview:
         if os.name == "nt":
             assert _warn._inside_package(inside.upper())
             assert _warn._inside_package(inside.lower())
+
+
+class TestAfterRelease:
+    """Small corrections made after v0.5.0."""
+
+    def test_regime_counts_in_summaries_add_up(self) -> None:
+        """The first regime of an AR or ADL model starts at the first
+        observation of the estimation sample (it used to count the initial
+        observations for the lags)."""
+        rng = np.random.default_rng(56)
+        n = 200
+        x = rng.standard_normal(n)
+        y = np.zeros(n)
+        for t in range(2, n):
+            y[t] = (0.0 if t < 100 else 2.0) + 0.4 * y[t - 1] + rng.standard_normal()
+        ar = rg.AR(y, lags=2, breaks=[100]).fit().summary(diagnostics=False)
+        assert "No. Observations:           198" in ar
+        assert "Regime 1: 2-99 (n=98)" in ar
+        assert "Regime 2: 100-199 (n=100)" in ar
+        adl = rg.ADL(y, x, lags=1, exog_lags=3, breaks=[100]).fit()
+        text = adl.summary(diagnostics=False)
+        assert "Regime 1: 3-99 (n=97)" in text
+        assert "Regime 2: 100-199 (n=100)" in text
+        partial = rg.ADL(
+            y, x, lags=1, exog_lags=3, variable_breaks={"const": [100]}
+        ).fit()
+        assert "Regime 1: 3-99, Regime 2: 100-199" in partial.summary(diagnostics=False)
+        # a regression has no initial observations
+        ols = rg.OLS(
+            y, np.column_stack([np.ones(n), x]), has_constant=False, breaks=[100]
+        ).fit()
+        assert "Regime 1: 0-99 (n=100)" in ols.summary(diagnostics=False)
+
+    @pytest.mark.parametrize("name", ["const", "y.L1", "trend"])
+    def test_regressor_with_the_name_of_a_model_term(self, name: str) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(57)
+        y = rng.standard_normal(120)
+        frame = pd.DataFrame(rng.standard_normal((120, 2)), columns=[name, "rate"])
+        trend = "ct" if name == "trend" else "c"
+        with pytest.raises(ValueError, match="parameter names are not unique"):
+            rg.ADL(y, frame, lags=1, exog_lags=0, trend=trend).fit()
+        with pytest.raises(ValueError, match="parameter names are not unique"):
+            rg.AR(y, lags=1, exog=frame, trend=trend).fit()
+        # other names are fine
+        renamed = frame.rename(columns={name: "income"})
+        assert (
+            "income"
+            in rg.ADL(y, renamed, lags=1, exog_lags=0, trend=trend).fit().param_names
+        )

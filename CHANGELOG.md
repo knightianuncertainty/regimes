@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Summaries of AR and ADL models with breaks counted the initial observations, which are used for the lags, in the first regime ("Regime 1: 0-99 (n=100)" with 199 observations in the regression). The first regime now starts at the first observation of the estimation sample, and the counts add up to the number of observations.
+- A regressor whose name is one the model gives to its own terms (a DataFrame column called `const`, `trend` or `y.L1` in an AR or ADL model) gave two parameters the same name, so that `variable_breaks` by name could not tell them apart. It raises `ValueError`.
+
 ## [0.5.0] - 2026-11-24
 
 ### Fixed

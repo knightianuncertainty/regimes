@@ -157,6 +157,33 @@ def check_break_design(
         )
 
 
+def check_unique_names(param_names: Sequence[str]) -> None:
+    """Parameter names must be unique.
+
+    The names of the regressors come from the columns of a DataFrame. A
+    column called ``const``, ``trend`` or like a lag (``y.L1``, ``x.L1``)
+    would give two parameters the same name, and ``variable_breaks`` or
+    ``exog_lags`` by name could not tell them apart.
+
+    Raises
+    ------
+    ValueError
+        Naming the duplicated names.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for name in param_names:
+        if name in seen and name not in duplicates:
+            duplicates.append(name)
+        seen.add(name)
+    if duplicates:
+        raise ValueError(
+            f"parameter names are not unique: {duplicates}. A regressor has "
+            "the name the model gives to its constant, trend or a lag; "
+            "rename the column"
+        )
+
+
 def check_regime_sample(X: NDArray[np.floating[Any]], regime: int) -> None:
     """Check that one regime can be estimated on its own (``fit_by_regime``).
 
