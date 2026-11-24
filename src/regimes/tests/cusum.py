@@ -308,6 +308,8 @@ class CUSUMResults(BreakTestResultsBase):
         Observation number of each point of the path. Usually ``k, ..., T -
         1``; in general every observation except the ``k`` at which the
         rank of the regressors rises (see ``residual_positions``).
+        For a test built from an AR or ADL model these are observations
+        of the model's data (``index_offset`` is added).
     statistic_path : NDArray
         The CUSUM statistic W_r at each time point, shape (T - k,).
     upper_bound : NDArray
@@ -358,9 +360,10 @@ class CUSUMResults(BreakTestResultsBase):
     def observations(self) -> NDArray[np.intp]:
         """Observation number of each point of the path."""
         if self.residual_positions is not None:
-            return np.asarray(self.residual_positions, dtype=np.intp)
-        start = self.nobs - len(self.statistic_path)
-        return np.arange(start, self.nobs, dtype=np.intp)
+            positions = np.asarray(self.residual_positions, dtype=np.intp)
+            return positions + self.index_offset
+        start = self.nobs - len(self.statistic_path) + self.index_offset
+        return np.arange(start, start + len(self.statistic_path), dtype=np.intp)
 
     @property
     def max_statistic(self) -> float:
@@ -476,6 +479,8 @@ class CUSUMSQResults(BreakTestResultsBase):
         Observation number of each point of the path. Usually ``k, ..., T -
         1``; in general every observation except the ``k`` at which the
         rank of the regressors rises (see ``residual_positions``).
+        For a test built from an AR or ADL model these are observations
+        of the model's data (``index_offset`` is added).
     critical_value : float
         Half-width ``c_0`` of the bounds.
     statistic_path : NDArray
@@ -528,9 +533,10 @@ class CUSUMSQResults(BreakTestResultsBase):
     def observations(self) -> NDArray[np.intp]:
         """Observation number of each point of the path."""
         if self.residual_positions is not None:
-            return np.asarray(self.residual_positions, dtype=np.intp)
-        start = self.nobs - len(self.statistic_path)
-        return np.arange(start, self.nobs, dtype=np.intp)
+            positions = np.asarray(self.residual_positions, dtype=np.intp)
+            return positions + self.index_offset
+        start = self.nobs - len(self.statistic_path) + self.index_offset
+        return np.arange(start, start + len(self.statistic_path), dtype=np.intp)
 
     @property
     def max_deviation(self) -> float:
@@ -710,8 +716,10 @@ class CUSUMTest(BreakTestBase):
 
         Notes
         -----
-        For AR and ADL models, the test uses the effective sample (after
-        dropping initial observations for lags).
+        For AR and ADL models, the test is computed on the effective
+        sample (after dropping the initial observations for lags).
+        Break dates and other observation numbers in the results are
+        those of the model's data (see ``index_offset``).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR as ARModel
@@ -719,11 +727,13 @@ class CUSUMTest(BreakTestBase):
 
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
-            return cls(y, exog=X)
+            offset = int(model.maxlag)
+            return cls._create(offset, y, exog=X)
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog = model.exog
-            return cls(endog, exog=exog)
+            return cls._create(offset, endog, exog=exog)
         else:
             raise TypeError(
                 f"model must be OLS, AR, or ADL, got {type(model).__name__}"
@@ -795,7 +805,9 @@ class CUSUMTest(BreakTestBase):
 
         # First crossing, as an observation of the sample. It is not an
         # estimate of a break date, so no break is reported.
-        first_crossing = int(positions[crossed[0]]) if reject else None
+        first_crossing = (
+            int(positions[crossed[0]]) + self.index_offset if reject else None
+        )
 
         return CUSUMResults(
             test_name="CUSUM",
@@ -803,6 +815,7 @@ class CUSUMTest(BreakTestBase):
             n_breaks=0,
             break_indices=[],
             first_crossing=first_crossing,
+            index_offset=self.index_offset,
             statistic_path=statistic_path,
             upper_bound=upper_bound,
             lower_bound=lower_bound,
@@ -931,11 +944,13 @@ class CUSUMSQTest(BreakTestBase):
 
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
-            return cls(y, exog=X)
+            offset = int(model.maxlag)
+            return cls._create(offset, y, exog=X)
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog = model.exog
-            return cls(endog, exog=exog)
+            return cls._create(offset, endog, exog=exog)
         else:
             raise TypeError(
                 f"model must be OLS, AR, or ADL, got {type(model).__name__}"
@@ -1014,7 +1029,9 @@ class CUSUMSQTest(BreakTestBase):
 
         # First crossing, as an observation of the sample. It is not an
         # estimate of a break date, so no break is reported.
-        first_crossing = int(positions[crossed[0]]) if reject else None
+        first_crossing = (
+            int(positions[crossed[0]]) + self.index_offset if reject else None
+        )
 
         return CUSUMSQResults(
             test_name="CUSUM-SQ",
@@ -1022,6 +1039,7 @@ class CUSUMSQTest(BreakTestBase):
             n_breaks=0,
             break_indices=[],
             first_crossing=first_crossing,
+            index_offset=self.index_offset,
             critical_value=c_alpha,
             statistic_path=statistic_path,
             expected_path=expected_path,

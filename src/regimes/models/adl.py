@@ -1192,8 +1192,10 @@ class ADL(RegimesModelBase):
         """Test for structural breaks using Bai-Perron procedure.
 
         Convenience method that creates a BaiPerronTest from this ADL model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1237,14 +1239,16 @@ class ADL(RegimesModelBase):
         """Test for structural breaks at known break points using the Chow test.
 
         Convenience method that creates a ChowTest from this ADL model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
         break_points : int | Sequence[int]
-            One or more break point indices to test (in effective sample
-            coordinates, after lag trimming).
+            One or more break dates to test, as observation numbers of the
+            model's data (the first observation of the second regime).
         break_vars : "all" | "const"
             Which variables can have breaks:
             - "all": All regressors can break (default)
@@ -1271,8 +1275,10 @@ class ADL(RegimesModelBase):
         """Test for parameter instability using the CUSUM test.
 
         Convenience method that creates a CUSUMTest from this ADL model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1298,8 +1304,10 @@ class ADL(RegimesModelBase):
         """Test for variance instability using the CUSUM-SQ test.
 
         Convenience method that creates a CUSUMSQTest from this ADL model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1330,8 +1338,10 @@ class ADL(RegimesModelBase):
         """Test for a structural break at unknown date using Andrews-Ploberger.
 
         Convenience method that creates an AndrewsPlobergerTest from this
-        ADL model and runs it. The test uses the effective sample (after
-        dropping initial observations for lags).
+        ADL model and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------

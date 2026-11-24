@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fit_by_regime()` with `variable_breaks` returned the pooled fit; it raises `ValueError` (there is no single set of regimes). It also raises when a regime does not have more observations than coefficients, or collinear regressors.
 - **`ADL` lost the column names of a DataFrame** (the regressors were named `x0`, `x1`, ...), so `exog_lags={"income": 2}` and `variable_breaks` by name failed. Regressors are named after the columns, as in `OLS`, also in the rolling, recursive and Markov switching estimators built from the model and in `RollingADL` and `RecursiveADL` given a DataFrame; parameter names of models built from pandas objects change accordingly. numpy integers are accepted for `lags` and `exog_lags` (`exog_lags=np.int64(2)` silently fitted no lags of x).
 - `adl_summary_by_regime` inferred the regime boundaries from the autoregressive lags only; it uses the longest lag of `y` or `x`.
+- **Break dates meant different things in AR/ADL models and in the tests built from them.** `AR(..., breaks=[k])` reads `k` as an observation of the data, while `model.bai_perron()`, `chow_test`, `andrews_ploberger` and the CUSUM tests worked in the sample that remains after the initial observations for the lags: a break found by a test and passed back to the model landed `maxlag` observations late, and a date-aware Bai-Perron summary printed dates `maxlag` early. Tests built from an AR or ADL model now report every observation number (break dates, confidence intervals, candidate dates, crossings) in the observations of the model's data, and `chow_test(break_points=...)` takes them in the same numbers. Results change by `maxlag` for these models; tests built from arrays or from an OLS model are unchanged. The offset is available as `index_offset` on the test and on its results.
 
 ### Changed
 
@@ -51,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rolling and recursive estimators built from a model with breaks (`model.rolling(...)`, `from_model`) warn that the breaks are ignored. This warning and the one about `cov_kwds` point at the line of the caller's code.
 - `cov_kwds` is passed to statsmodels' HAC covariance (`maxlags`, `use_correction`, ...); with another `cov_type` it has no effect and a warning says so. An unknown `cov_type` raises in every model.
 - Documentation of conventions: the default HAC lag `floor(4 (T/100)^(2/9))` is a fixed rule, not "Newey-West automatic bandwidth selection"; the misspecification tests are standard LM tests and not the statistics PcGive prints; with breaks the error variance is pooled across regimes; inference under robust covariances uses t(n - k); R-squared is centered also without a constant.
+- The Bai-Perron summary of a test built from an AR or ADL model prints the sample the test was computed on.
 
 ## [0.4.0] - 2026-11-20
 

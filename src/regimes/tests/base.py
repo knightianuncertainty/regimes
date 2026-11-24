@@ -63,12 +63,18 @@ class BreakTestResultsBase(ABC):
         Number of breaks detected/tested.
     break_indices : Sequence[int]
         Estimated break point indices.
+    index_offset : int
+        Number of observations of the underlying data before the first
+        observation the test was computed on (the initial observations of
+        an AR or ADL model; otherwise 0). Observation numbers in the
+        results already include it.
     """
 
     test_name: str
     nobs: int
     n_breaks: int
     break_indices: Sequence[int]
+    index_offset: int = 0
 
     @property
     def break_dates(self) -> Sequence[int]:
@@ -107,6 +113,23 @@ class BreakTestBase(ABC):
     exog_break : ArrayLike | None
         Regressors whose coefficients may break.
     """
+
+    #: Number of observations of the underlying data that come before the
+    #: first observation the test is computed on. It is zero for a test built
+    #: from arrays or from an OLS model, and the number of initial
+    #: observations lost to the lags for a test built from an AR or ADL model
+    #: (``from_model``). Every observation number in the results (break
+    #: dates, candidate dates, crossings) and every break date passed to
+    #: ``fit`` is an observation number of the underlying data: the position
+    #: in the arrays of the test plus this offset.
+    index_offset: int = 0
+
+    @classmethod
+    def _create(cls, index_offset: int, *args: Any, **kwargs: Any) -> Any:
+        """Construct a test and record the offset of its first observation."""
+        test = cls(*args, **kwargs)
+        test.index_offset = int(index_offset)
+        return test
 
     def __init__(
         self,

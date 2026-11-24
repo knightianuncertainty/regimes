@@ -239,7 +239,9 @@ class BaiPerronResults(BreakTestResultsBase):
             n_break_cols = self._test.exog_break.shape[1]
             # Add breaks for these columns
             for i in range(n_break_cols):
-                variable_breaks[col_idx + i] = list(self.break_indices)
+                variable_breaks[col_idx + i] = [
+                    int(b) - self.index_offset for b in self.break_indices
+                ]
             col_idx += n_break_cols
 
         if exog_list:
@@ -286,6 +288,10 @@ class BaiPerronResults(BreakTestResultsBase):
         lines.append(f"{'Bai-Perron Multiple Structural Break Test':^{width}}")
         lines.append("=" * width)
         lines.append(f"Number of observations:   {self.nobs:>10}")
+        if self.index_offset:
+            first = _obs_label(self.index_offset, index)
+            last = _obs_label(self.index_offset + self.nobs - 1, index)
+            lines.append(f"Sample:                   {first} to {last}")
         lines.append(
             f"Trimming parameter:       {self.trimming:>10.2f}  (h = {self.h})"
         )
@@ -413,6 +419,36 @@ class BaiPerronResults(BreakTestResultsBase):
 
         lines.append("=" * width)
         return "\n".join(lines)
+
+
+def _shift_break_dates(results: BaiPerronResults, offset: int) -> BaiPerronResults:
+    """Express every break date of the results in the model's observations.
+
+    A test built from an AR or ADL model is computed on the sample that
+    remains after the initial observations for the lags; its break dates are
+    reported as observation numbers of the model's data, ``offset`` later.
+    """
+    if offset == 0:
+        return results
+    results.index_offset = offset
+    results.break_indices = [int(b) + offset for b in results.break_indices]
+    results.sequential_breaks = [int(b) + offset for b in results.sequential_breaks]
+    results.breaks_by_m = {
+        m: [int(b) + offset for b in dates] for m, dates in results.breaks_by_m.items()
+    }
+    results.seqf_break = {
+        ell: (int(b) + offset if b >= 0 else int(b))
+        for ell, b in results.seqf_break.items()
+    }
+    results.break_ci = {
+        int(b) + offset: (lo + offset, hi + offset)
+        for b, (lo, hi) in results.break_ci.items()
+    }
+    results.break_ci_90 = {
+        int(b) + offset: (lo + offset, hi + offset)
+        for b, (lo, hi) in results.break_ci_90.items()
+    }
+    return results
 
 
 class BaiPerronTest(BreakTestBase):
@@ -554,14 +590,17 @@ class BaiPerronTest(BreakTestBase):
         if isinstance(model, AR):
             # For AR, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, ADLModel):
             # For ADL, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog_all = model.exog
         else:
@@ -574,7 +613,7 @@ class BaiPerronTest(BreakTestBase):
 
         if break_vars == "all":
             # All regressors can break
-            return cls(endog, exog_break=exog_all)
+            return cls._create(offset, endog, exog_break=exog_all)
         elif break_vars == "const":
             # Only constant breaks (mean-shift model)
             # exog contains all regressors (non-breaking)
@@ -604,11 +643,13 @@ class BaiPerronTest(BreakTestBase):
                 # exog_break will be a single constant column
                 exog_break = np.ones((len(endog), 1))
 
-                return cls(endog, exog=exog_non_break, exog_break=exog_break)
+                return cls._create(
+                    offset, endog, exog=exog_non_break, exog_break=exog_break
+                )
             else:
                 # No constant found, so we just use exog_all as non-breaking
                 # and let __init__ add a constant as exog_break
-                return cls(endog, exog=exog_all)
+                return cls._create(offset, endog, exog=exog_all)
         else:
             raise ValueError(f"break_vars must be 'all' or 'const', got {break_vars!r}")
 
@@ -976,7 +1017,7 @@ class BaiPerronTest(BreakTestBase):
                     break_ci[b_idx] = (lo95, hi95)
                     break_ci_90[b_idx] = (lo90, hi90)
 
-        return BaiPerronResults(
+        results = BaiPerronResults(
             test_name="Bai-Perron",
             nobs=nobs,
             n_breaks=n_breaks,
@@ -1016,6 +1057,7 @@ class BaiPerronTest(BreakTestBase):
             repartition=repartition,
             _test=self,
         )
+        return _shift_break_dates(results, self.index_offset)
 
     def get_regime_estimates(
         self, break_indices: Sequence[int]

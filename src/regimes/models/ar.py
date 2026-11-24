@@ -957,8 +957,10 @@ class AR(TimeSeriesModelBase):
         """Test for structural breaks using Bai-Perron procedure.
 
         Convenience method that creates a BaiPerronTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1018,8 +1020,8 @@ class AR(TimeSeriesModelBase):
         -----
         The Bai-Perron test is applied to the AR design matrix, which includes
         the constant, lagged dependent variables, and any exogenous regressors.
-        Break indices are reported in effective sample coordinates (after
-        dropping initial observations for lags).
+        Break dates are reported as observation numbers of the model's data
+        and can be passed to the model as ``breaks``.
         """
         from regimes.tests.bai_perron import BaiPerronTest
 
@@ -1037,14 +1039,16 @@ class AR(TimeSeriesModelBase):
         """Test for structural breaks at known break points using the Chow test.
 
         Convenience method that creates a ChowTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
         break_points : int | Sequence[int]
-            One or more break point indices to test (in effective sample
-            coordinates, after lag trimming).
+            One or more break dates to test, as observation numbers of the
+            model's data (the first observation of the second regime).
         break_vars : "all" | "const"
             Which variables can have breaks:
             - "all": All regressors can break (default), including constant
@@ -1072,8 +1076,10 @@ class AR(TimeSeriesModelBase):
         """Test for parameter instability using the CUSUM test.
 
         Convenience method that creates a CUSUMTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1099,8 +1105,10 @@ class AR(TimeSeriesModelBase):
         """Test for variance instability using the CUSUM-SQ test.
 
         Convenience method that creates a CUSUMSQTest from this AR model
-        and runs it. The test uses the effective sample (after dropping
-        initial observations for lags).
+        and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------
@@ -1131,8 +1139,10 @@ class AR(TimeSeriesModelBase):
         """Test for a structural break at unknown date using Andrews-Ploberger.
 
         Convenience method that creates an AndrewsPlobergerTest from this
-        AR model and runs it. The test uses the effective sample (after
-        dropping initial observations for lags).
+        AR model and runs it. The test is computed on the effective sample
+        (after dropping the initial observations for lags); break dates and
+        other observation numbers in the results are those of the model's
+        data, so a break date can be passed back as ``breaks``.
 
         Parameters
         ----------

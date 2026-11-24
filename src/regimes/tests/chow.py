@@ -251,8 +251,10 @@ class ChowTest(BreakTestBase):
 
         Notes
         -----
-        For AR and ADL models, the test uses the effective sample (after
-        dropping initial observations for lags).
+        For AR and ADL models, the test is computed on the effective
+        sample (after dropping the initial observations for lags).
+        Break dates and other observation numbers in the results are
+        those of the model's data (see ``index_offset``).
         """
         from regimes.models.adl import ADL as ADLModel
         from regimes.models.ar import AR
@@ -261,9 +263,11 @@ class ChowTest(BreakTestBase):
         # Extract endog and exog from model
         if isinstance(model, (AR, ADLModel)):
             y, X, _ = model._build_design_matrix()
+            offset = int(model.maxlag)
             endog = y
             exog_all = X
         elif isinstance(model, OLSModel):
+            offset = 0
             endog = model.endog
             exog_all = model.exog
         else:
@@ -275,9 +279,10 @@ class ChowTest(BreakTestBase):
             exog_all = np.ones((len(endog), 1))
 
         if break_vars == "all":
-            return cls(endog, exog_break=exog_all)
+            return cls._create(offset, endog, exog_break=exog_all)
         elif break_vars == "const":
-            return cls(
+            return cls._create(
+                offset,
                 endog,
                 exog=split_constant(np.asarray(exog_all, dtype=np.float64)),
                 exog_break=np.ones((len(endog), 1)),
@@ -557,8 +562,11 @@ class ChowTest(BreakTestBase):
         Parameters
         ----------
         break_points : int | Sequence[int]
-            One or more break point indices to test. Each index τ splits
-            the sample into [0, τ) and [τ, T).
+            One or more break dates to test. A date τ is the first
+            observation of the second sub-sample. For a test built from an
+            AR or ADL model it is an observation number of the model's data
+            (see ``index_offset``); the results are keyed by the same
+            numbers.
         significance : float
             Significance level for rejection decisions. Default is 0.05.
         **kwargs
@@ -596,12 +604,14 @@ class ChowTest(BreakTestBase):
             break_points = points
 
         T = self.nobs
+        offset = self.index_offset
 
         # Validate break points
         for bp in break_points:
-            if bp < 1 or bp >= T:
+            if bp - offset < 1 or bp - offset >= T:
                 raise ValueError(
-                    f"Break point {bp} is outside the valid range [1, {T - 1}]"
+                    f"Break point {bp} is outside the valid range "
+                    f"[{offset + 1}, {offset + T - 1}]"
                 )
 
         # Compute full-sample SSR
@@ -617,7 +627,7 @@ class ChowTest(BreakTestBase):
         is_predictive: dict[int, bool] = {}
 
         for bp in break_points:
-            result = self._test_single_break(bp)
+            result = self._test_single_break(bp - offset)
             f_stats[bp] = result["f_stat"]
             p_values[bp] = result["p_value"]
             df_num[bp] = result["df_num"]
@@ -644,5 +654,6 @@ class ChowTest(BreakTestBase):
             is_predictive=is_predictive,
             n_params=self.n_break_params,
             significance_level=significance,
+            index_offset=offset,
             _test=self,
         )
