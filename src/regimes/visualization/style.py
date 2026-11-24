@@ -134,7 +134,9 @@ def set_style() -> None:
     """
     import matplotlib as mpl
 
-    mpl.rcParams.update(get_style())
+    # Any: newer matplotlib stubs type the keys of rcParams as literals
+    style: Any = get_style()
+    mpl.rcParams.update(style)
 
 
 @contextmanager

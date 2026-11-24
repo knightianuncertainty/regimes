@@ -6,7 +6,7 @@ from the Andrews-Ploberger structural break test.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -81,7 +81,7 @@ def plot_f_sequence(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot F-statistic path
         ax.plot(
@@ -123,4 +123,4 @@ def plot_f_sequence(
         ax.set_ylabel(ylabel)
         ax.legend(loc="best", frameon=False)
 
-    return fig, ax  # type: ignore[return-value]
+    return fig, ax

@@ -55,13 +55,15 @@ _LOG_ZERO = -1000.0
 def _softmax(x: NDArray[Any]) -> NDArray[Any]:
     """Numerically stable softmax."""
     e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum()
+    out: NDArray[Any] = e_x / e_x.sum()
+    return out
 
 
 def _inverse_softmax(p: NDArray[Any]) -> NDArray[Any]:
     """Inverse of softmax (up to a constant, using log)."""
     p = np.clip(p, 1e-10, 1.0)
-    return np.log(p)
+    out: NDArray[Any] = np.log(p)
+    return out
 
 
 class _RestrictedFilterMixin:
@@ -254,7 +256,10 @@ class _RestrictedFilterMixin:
         self, params: NDArray[Any], regime_transition: NDArray[Any] | None = None
     ) -> tuple[Any, ...]:
         if not self._restrictions:
-            return super()._filter(params, regime_transition)  # type: ignore[misc]
+            unrestricted: tuple[Any, ...] = super()._filter(  # type: ignore[misc]
+                params, regime_transition
+            )
+            return unrestricted
 
         # Replicate cy_hamilton_filter_log with our strict log-zero
         if regime_transition is None:
@@ -298,7 +303,8 @@ class _RestrictedFilterMixin:
         filtered_joint_probabilities[..., 0] = tmp
 
         if log_transition.shape[-1] > 1:
-            log_transition = log_transition[..., self.order :]  # type: ignore[attr-defined]
+            model_order: int = self.order  # type: ignore[attr-defined]
+            log_transition = log_transition[..., model_order:]
 
         prefix, _dtype_blas, _ = find_best_blas_type(
             (
@@ -354,12 +360,13 @@ class _RestrictedFilterMixin:
         regime_transition: NDArray[Any] | None = None,
     ) -> tuple[NDArray[Any], NDArray[Any]]:
         if not self._restrictions:
-            return super()._smooth(  # type: ignore[misc]
+            unrestricted: tuple[NDArray[Any], NDArray[Any]] = super()._smooth(  # type: ignore[misc]
                 params,
                 predicted_joint_probabilities_log,
                 filtered_joint_probabilities_log,
                 regime_transition,
             )
+            return unrestricted
 
         if regime_transition is None:
             regime_transition = self.regime_transition_matrix(params)
@@ -409,7 +416,7 @@ class _RestrictedFilterMixin:
         return smoothed_joint_probabilities, smoothed_marginal_probabilities
 
 
-class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):
+class _RestrictedSMMarkovRegression(_RestrictedFilterMixin, SMMarkovRegression):  # type: ignore[misc]
     """statsmodels MarkovRegression with restricted transition probabilities.
 
     The restrictions are imposed in ``transform_params`` and the filter and
@@ -537,7 +544,8 @@ def _default_initial_probabilities(
         entered = allowed[np.ix_(members, ~members)].any()
         if not entered:
             start[r] = 1.0
-    return start / start.sum()
+    initial: NDArray[np.floating[Any]] = start / start.sum()
+    return initial
 
 
 def _non_recurring_restrictions(k_regimes: int) -> dict[tuple[int, int], float]:

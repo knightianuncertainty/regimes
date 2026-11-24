@@ -160,7 +160,7 @@ class RollingEstimatorBase(ABC):
             )
 
         self.window = window
-        self._n_params = self.exog.shape[1]
+        self._n_params: int = self.exog.shape[1]
 
         # Determine minimum observations
         if min_nobs is None:
@@ -286,7 +286,8 @@ class RollingResultsBase(ABC):
     @property
     def n_params(self) -> int:
         """Number of parameters."""
-        return self.params.shape[1]
+        n_params: int = self.params.shape[1]
+        return n_params
 
     @property
     def tvalues(self) -> NDArray[np.floating[Any]]:
@@ -383,10 +384,11 @@ class RollingResultsBase(ABC):
             DataFrame with parameter estimates, indexed by observation.
             Column names are parameter names.
         """
-        return pd.DataFrame(
+        frame: pd.DataFrame = pd.DataFrame(
             self.params,
             columns=self.param_names,
         )
+        return frame
 
     def to_dataframe_full(self) -> pd.DataFrame:
         """Convert all estimates with standard errors to DataFrame.
@@ -401,7 +403,8 @@ class RollingResultsBase(ABC):
         for i, name in enumerate(self.param_names):
             data[name] = self.params[:, i]
             data[f"{name}_se"] = self.bse[:, i]
-        return pd.DataFrame(data)
+        frame: pd.DataFrame = pd.DataFrame(data)
+        return frame
 
     @abstractmethod
     def plot_coefficients(

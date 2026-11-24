@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
@@ -48,7 +48,7 @@ _COND_WARN = 1e6
 _EXACT_FIT = 1e-22
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Sized
 
     from numpy.typing import ArrayLike, NDArray
 
@@ -233,7 +233,7 @@ class BaiPerronResults(BreakTestResultsBase):
 
         # Build exog and variable_breaks
         exog_list = []
-        variable_breaks = {}
+        variable_breaks: dict[str | int, Sequence[int]] = {}
         col_idx = 0
 
         # Non-breaking regressors: the columns fit() used (columns of exog that
@@ -552,7 +552,7 @@ class BaiPerronTest(BreakTestBase):
         """Initialize the Bai-Perron test."""
         # Default to constant (mean shift) if no breaking regressors specified
         if exog_break is None:
-            exog_break = np.ones((len(endog), 1))
+            exog_break = np.ones((len(cast("Sized", endog)), 1))
 
         super().__init__(endog, exog, exog_break)
 
@@ -608,6 +608,7 @@ class BaiPerronTest(BreakTestBase):
         from regimes.models.ols import OLS as OLSModel
 
         # Extract endog and exog from model
+        exog_all: NDArray[np.floating[Any]] | None
         if isinstance(model, AR):
             # For AR, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
@@ -679,7 +680,8 @@ class BaiPerronTest(BreakTestBase):
         """Number of breaking regressors."""
         if self.exog_break is None:
             return 0
-        return self.exog_break.shape[1]
+        q: int = self.exog_break.shape[1]
+        return q
 
     @property
     def p(self) -> int:
@@ -729,7 +731,7 @@ class BaiPerronTest(BreakTestBase):
         x = self.exog[:, cols] if cols and self.exog is not None else None
         return self.endog, z, x
 
-    def fit(  # type: ignore[override]  # explicit options instead of **kwargs
+    def fit(
         self,
         max_breaks: int = 5,
         trimming: float = 0.15,
