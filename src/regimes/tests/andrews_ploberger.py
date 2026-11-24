@@ -56,6 +56,12 @@ from regimes.tests._hansen_pvalues import (
 )
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
 
+# A sum of squared residuals this small relative to y'y is rounding error:
+# the model fits exactly and the statistic is not defined. (The threshold
+# is far below the residual variance of any series with noise, also when
+# its mean is large.)
+_EXACT_FIT = 1e-24
+
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike, NDArray
 
@@ -334,9 +340,10 @@ class AndrewsPlobergerTest(BreakTestBase):
 
         # A fixed regressor that the breaking regressors span (a constant
         # when the constant breaks) is not identified: leave it out.
-        if self.exog is not None and self.exog_break is not None:
-            keep = independent_columns(self.exog_break, self.exog)
-            self.exog = self.exog[:, keep] if keep else None  # type: ignore[assignment]
+        fixed = self.exog
+        if fixed is not None and self.exog_break is not None:
+            keep = independent_columns(self.exog_break, fixed)
+            self.exog = fixed[:, keep] if keep else None
 
     @classmethod
     def from_model(
@@ -522,7 +529,7 @@ class AndrewsPlobergerTest(BreakTestBase):
                 ssr2 = self._compute_ssr(self.endog[tau:], X2)
                 ssr_unrestricted = ssr1 + ssr2
 
-            if ssr_unrestricted <= 1e-12 * float(self.endog @ self.endog):
+            if ssr_unrestricted <= _EXACT_FIT * float(self.endog @ self.endog):
                 raise ValueError(
                     "the model fits the data exactly with a break at "
                     f"observation {tau}; the test statistic is not defined"

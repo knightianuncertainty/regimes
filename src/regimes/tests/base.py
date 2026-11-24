@@ -32,7 +32,7 @@ def split_constant(
         If the model has no constant.
     """
     is_const = [
-        bool(np.allclose(exog_all[:, i], 1.0, atol=1e-10))
+        bool(exog_all[0, i] != 0.0 and np.ptp(exog_all[:, i]) == 0.0)
         for i in range(exog_all.shape[1])
     ]
     if not any(is_const):

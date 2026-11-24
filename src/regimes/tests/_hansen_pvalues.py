@@ -14,6 +14,14 @@ exactly as Hansen's own program does (linear interpolation in ``pi_0``
 between the two nearest tabulated values) and inverts it for critical
 values. The coefficients are in ``regimes.tests._hansen_tables``.
 
+Three deviations from Hansen's program, each where it is not meant to be
+used: for ``pi_0`` between 0.49 and 0.5 (almost a single candidate date) the
+ExpF statistic is doubled before it is referred to chi-squared, since it is
+half the statistic of that date; far in the tail, where the polynomials for
+``q <= 3`` turn back, the p-value is held at its minimum; and a warning is
+issued for ``pi_0`` below 0.01, the smallest tabulated value, where the
+p-value for 0.01 is returned.
+
 The range of candidate dates enters through
 
     lambda = pi_2 (1 - pi_1) / (pi_1 (1 - pi_2)),   pi_0 = 1 / (1 + sqrt(lambda))
@@ -37,6 +45,7 @@ References
 
 from __future__ import annotations
 
+import warnings
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -95,7 +104,8 @@ def _running_maximum(kind: str, q: int, statistic: float) -> NDArray[np.floating
 
     For ``q <= 3`` Hansen's polynomials are quadratic or cubic and turn down
     far in the tail: for ExpF with two or three coefficients and AveF with
-    two, at statistics whose p-value is below about 0.001. Beyond that point
+    one or two, at statistics whose p-value is below about 0.001. Beyond that
+    point
     the published formula (and programs that use it) return p-values that
     rise towards one. Here the argument of the chi-squared distribution is
     held at its maximum, so that the p-value never increases with the
@@ -143,9 +153,13 @@ def hansen_pvalue(statistic: float, q: int, pi0: float, kind: Kind) -> float:
     if np.isnan(statistic):
         return float("nan")
 
-    chi2_tail = float(stats.chi2.sf(statistic, q))
+    # With a single candidate date (pi_0 = 0.5) SupF and AveF are the
+    # chi-squared statistic of that date and ExpF is half of it. Hansen's
+    # program refers all three to chi2(q) there, which is wrong for ExpF by
+    # the factor two; here ExpF is doubled first.
+    at_single_date = 2.0 * statistic if kind == "exp" else statistic
+    chi2_tail = float(stats.chi2.sf(at_single_date, q))
     if pi0 == 0.5:
-        # a single candidate date: the ordinary chi-squared test
         return chi2_tail
 
     beta = np.asarray(_TABLES[kind][q], dtype=np.float64)
@@ -156,6 +170,14 @@ def hansen_pvalue(statistic: float, q: int, pi0: float, kind: Kind) -> float:
     argument = np.maximum(argument, 0.0)
     tails = stats.chi2.sf(argument, beta[:, n_terms])
 
+    if pi0 < 0.01 - 1e-12:
+        warnings.warn(
+            f"pi_0 = {pi0:.4f} is below 0.01, the smallest value Hansen "
+            "(1997) tabulates; the p-value is that for pi_0 = 0.01 and is too "
+            "small (trimming of less than about 1 percent)",
+            UserWarning,
+            stacklevel=3,
+        )
     if pi0 <= 0.01:
         return float(tails[-1])
     if pi0 >= 0.49:
@@ -169,7 +191,13 @@ def hansen_pvalue(statistic: float, q: int, pi0: float, kind: Kind) -> float:
 
 
 def hansen_critical_value(significance: float, q: int, pi0: float, kind: Kind) -> float:
-    """Critical value: the statistic whose Hansen p-value is ``significance``."""
+    """Critical value: the statistic whose Hansen p-value is ``significance``.
+
+    NaN if no statistic has that p-value: a level above the p-value of a
+    statistic of zero, or (for ExpF with two or three coefficients and AveF
+    with one or two) a level below the floor at which the p-value is held,
+    about 0.0005 or less.
+    """
     if not 0.0 < significance < 1.0:
         raise ValueError("significance must be between 0 and 1")
 

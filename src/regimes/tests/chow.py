@@ -21,6 +21,12 @@ from scipy import stats
 from regimes.tests._bp_core import independent_columns
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
 
+# A sum of squared residuals this small relative to y'y is rounding error:
+# the model fits exactly and the statistic is not defined. (The threshold
+# is far below the residual variance of any series with noise, also when
+# its mean is large.)
+_EXACT_FIT = 1e-24
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -206,9 +212,10 @@ class ChowTest(BreakTestBase):
 
         # A fixed regressor that the breaking regressors span (a constant
         # when the constant breaks) is not identified: leave it out.
-        if self.exog is not None and self.exog_break is not None:
-            keep = independent_columns(self.exog_break, self.exog)
-            self.exog = self.exog[:, keep] if keep else None  # type: ignore[assignment]
+        fixed = self.exog
+        if fixed is not None and self.exog_break is not None:
+            keep = independent_columns(self.exog_break, fixed)
+            self.exog = fixed[:, keep] if keep else None
 
     @classmethod
     def from_model(
@@ -415,7 +422,7 @@ class ChowTest(BreakTestBase):
                     f"coefficients ({total_params_per_sub}), so the test "
                     "cannot be computed"
                 )
-            if ssr_large <= 1e-12 * float(y_full @ y_full):
+            if ssr_large <= _EXACT_FIT * float(y_full @ y_full):
                 raise ValueError(
                     f"break point {break_point}: the model fits the larger "
                     "sub-sample exactly, so the test statistic is not defined"
@@ -469,13 +476,30 @@ class ChowTest(BreakTestBase):
             df_num = k
             df_denom = T - 2 * k - p
 
+            if (
+                self.exog is not None
+                and (ssr_full - ssr_unrestricted) <= 1e-10 * ssr_full
+            ):
+                redundant = (
+                    np.linalg.matrix_rank(
+                        X_unrestricted / np.linalg.norm(X_unrestricted, axis=0)
+                    )
+                    < X_unrestricted.shape[1]
+                )
+                if redundant:
+                    raise ValueError(
+                        f"break point {break_point}: the regressors that do "
+                        "not break already contain this break (a step dummy "
+                        "at the same date, for example), so there is nothing "
+                        "to test"
+                    )
             if df_denom <= 0:
                 raise ValueError(
                     f"break point {break_point}: the sample has {T} "
                     f"observations and the model with a break {2 * k + p} "
                     "coefficients, so the test cannot be computed"
                 )
-            if ssr_unrestricted <= 1e-12 * float(y_full @ y_full):
+            if ssr_unrestricted <= _EXACT_FIT * float(y_full @ y_full):
                 raise ValueError(
                     f"break point {break_point}: the model with a break fits "
                     "the data exactly, so the test statistic is not defined"

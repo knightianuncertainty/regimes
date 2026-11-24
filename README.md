@@ -177,7 +177,7 @@ fig, ax = cusum_results.plot()
 
 A path that leaves its bounds rejects stability. The observation at which it first does so is reported as `first_crossing`; it is not an estimate of the date of the change, and the CUSUM tests report no break date (use `BaiPerronTest` or `AndrewsPlobergerTest` for that).
 
-CUSUM-SQ for variance instability (significance levels 20, 10, 5, 2 and 1 percent, the levels for which the bounds of Durbin, 1969, are tabulated):
+CUSUM-SQ for variance instability (significance levels 20, 10, 5, 2 and 1 percent, the levels for which the bounds of Durbin, 1969, are tabulated; at least 20 recursive residuals):
 
 ```python
 # Simulate data with a variance change

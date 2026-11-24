@@ -30,7 +30,10 @@ Bounds.
   Table 1). It is computed with the approximation of Edgerton and Wells
   (1994), ``c_0 = a_1 / sqrt(n) + a_2 / n + a_3 / n^1.5``, as statsmodels
   does (``RecursiveLS``), and is available for the two-sided levels 20, 10,
-  5, 2 and 1 percent.
+  5, 2 and 1 percent and for at least 20 recursive residuals. The path is
+  compared with the bounds at every observation, as in statsmodels, which
+  makes the test slightly liberal in small samples (about 6 percent at a
+  nominal 5 with 60 observations).
 
 The scale estimate of the CUSUM test is ``sqrt(sum w_t^2 / (T - k))``
 (uncentered); statsmodels centers the recursive residuals first, which moves
@@ -57,6 +60,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from regimes.tests._bp_core import _orthonormal
 from regimes.tests.base import BreakTestBase, BreakTestResultsBase
 
 if TYPE_CHECKING:
@@ -89,6 +93,12 @@ _CUSUMSQ_COEFFICIENTS: dict[float, tuple[float, float, float]] = {
     0.01: (1.6276236, -0.6703724, -1.2365861),
 }
 
+# Below this number of recursive residuals the approximation of Edgerton and
+# Wells is poor: in simulations under the null the test at a nominal 5 percent
+# rejects 8 percent of the time with 16 residuals, 12 with 10, and almost
+# always with 5.
+MIN_CUSUMSQ_RESIDUALS = 20
+
 
 def cusum_sq_critical_value(significance: float, n_residuals: int) -> float:
     """Half-width ``c_0`` of the CUSUM-of-squares bounds.
@@ -105,6 +115,12 @@ def cusum_sq_critical_value(significance: float, n_residuals: int) -> float:
     float
         ``c_0`` from the approximation of Edgerton and Wells (1994) to the
         table of Durbin (1969), with ``n = (T - k) / 2 - 1``.
+
+    Raises
+    ------
+    ValueError
+        For a level that is not tabulated, or fewer than 20 recursive
+        residuals.
     """
     key = _match_level(significance, _CUSUMSQ_COEFFICIENTS)
     if key is None:
@@ -112,11 +128,14 @@ def cusum_sq_critical_value(significance: float, n_residuals: int) -> float:
             "significance must be one of "
             f"{sorted(_CUSUMSQ_COEFFICIENTS)}, got {significance}"
         )
-    n = 0.5 * n_residuals - 1.0
-    if n <= 0:
+    if n_residuals < MIN_CUSUMSQ_RESIDUALS:
         raise ValueError(
-            "the CUSUM-of-squares bounds need at least three recursive residuals"
+            f"the CUSUM-of-squares bounds are an approximation for medium and "
+            f"large samples; with {n_residuals} recursive residuals (fewer "
+            f"than {MIN_CUSUMSQ_RESIDUALS}) it is not accurate and the test "
+            "is not computed"
         )
+    n = 0.5 * n_residuals - 1.0
     a1, a2, a3 = _CUSUMSQ_COEFFICIENTS[key]
     return float(a1 / np.sqrt(n) + a2 / n + a3 / n**1.5)
 
@@ -133,7 +152,7 @@ def _compute_recursive_residuals(
     endog: NDArray[np.floating[Any]],
     exog: NDArray[np.floating[Any]],
 ) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
-    """Compute recursive residuals using Sherman-Morrison-Woodbury updating.
+    """Compute recursive residuals.
 
     Recursive residuals are one-step-ahead prediction errors from a
     recursively estimated regression. Under parameter stability, they
@@ -149,21 +168,37 @@ def _compute_recursive_residuals(
     Returns
     -------
     w : NDArray
-        Recursive residuals of shape (T - k,).
+        Recursive residuals of shape (T - m,), where ``m`` is the number of
+        observations used to start the recursion (see Notes); the first
+        residual belongs to observation ``m``.
     f : NDArray
-        Scaling factors of shape (T - k,), where
+        Scaling factors of shape (T - m,), where
         f_t = 1 + x_t' (X_{t-1}' X_{t-1})^{-1} x_t.
+
+    Raises
+    ------
+    ValueError
+        If the regressors are collinear in the whole sample, or the
+        coefficients are identified too late for a single residual.
 
     Notes
     -----
-    Uses the matrix inversion lemma (Sherman-Morrison-Woodbury) for
-    efficient O(Tk²) updating rather than O(T²k³) direct inversion.
-    The recursive residual at time t is:
+    The recursive residual at time t is
 
         w_t = (y_t - x_t' β_{t-1}) / sqrt(f_t)
 
-    where β_{t-1} is the OLS estimate using observations 1, ..., t-1,
-    and f_t = 1 + x_t' (X_{t-1}' X_{t-1})^{-1} x_t.
+    where β_{t-1} is the OLS estimate using observations 1, ..., t-1.
+
+    The recursion is run on an orthonormal basis of the regressors, which
+    spans the same space and so gives the same residuals, but keeps the
+    computation accurate when the regressors differ in scale or vary little
+    around a large mean (a trend in calendar years, a series in levels).
+
+    It starts from the first ``m >= k`` observations that identify the
+    ``k`` coefficients. Usually ``m = k``. It is larger when the regressors
+    are collinear at the start of the sample: a series whose first values
+    are equal (an AR model of simulated data that starts at zero), or a
+    dummy variable that is constant at the start.
     """
     T, k = exog.shape
 
@@ -173,50 +208,54 @@ def _compute_recursive_residuals(
             "to compute recursive residuals"
         )
 
-    # Initialize with first k observations
-    X_init = exog[:k]
-    y_init = endog[:k]
-
-    # (X'X)^{-1} for the first k observations
-    if np.linalg.matrix_rank(X_init) < k or np.linalg.cond(X_init) > 1e10:
+    basis = _orthonormal(np.asarray(exog, dtype=np.float64))
+    if basis is exog or np.linalg.matrix_rank(basis) < k:
         raise ValueError(
-            f"the first {k} observations do not identify the {k} coefficients "
-            "(the regressors are collinear there), so the recursion cannot "
-            "be started; this happens, for example, with a dummy variable "
-            "that is constant at the start of the sample"
+            "the regressors are collinear in the sample, so the recursive "
+            "residuals are not defined"
         )
-    XtX_inv = np.linalg.inv(X_init.T @ X_init)
-    beta = XtX_inv @ (X_init.T @ y_init)
+    start = _recursion_start(basis)
 
-    n_residuals = T - k
+    n_residuals = T - start
     w = np.empty(n_residuals)
     f = np.empty(n_residuals)
 
-    for t in range(k, T):
-        x_t = exog[t]  # (k,)
-        y_t = endog[t]
+    for t in range(start, T):
+        # least squares on observations 0, ..., t - 1 through a QR
+        # decomposition, which stays accurate when the first observations
+        # barely identify the coefficients (updating an inverse would carry
+        # the error of that first inverse through the whole sample)
+        _q, r = np.linalg.qr(basis[:t])
+        beta = np.linalg.solve(r, _q.T @ endog[:t])
+        x_t = basis[t]
+        v = np.linalg.solve(r.T, x_t)
 
-        # One-step-ahead prediction error
-        prediction = x_t @ beta
-        error = y_t - prediction
-
-        # Scaling factor: f_t = 1 + x_t' (X'X)^{-1} x_t
-        f_t = 1.0 + x_t @ XtX_inv @ x_t
-        f[t - k] = f_t
-
-        # Recursive residual (standardized)
-        w[t - k] = error / np.sqrt(f_t)
-
-        # Sherman-Morrison update of (X'X)^{-1}
-        # (X'X + x x')^{-1} = (X'X)^{-1} - (X'X)^{-1} x x' (X'X)^{-1} / f_t
-        v = XtX_inv @ x_t  # (k,)
-        XtX_inv = XtX_inv - np.outer(v, v) / f_t
-
-        # Update beta: β_t = β_{t-1} + (X'X)^{-1}_t * x_t * w_t * sqrt(f_t)
-        # Equivalently: β_t = β_{t-1} + (X'X)_t^{-1} x_t (y_t - x_t' β_{t-1})
-        beta = beta + XtX_inv @ x_t * error
+        # f_t = 1 + x_t' (X'X)^{-1} x_t, with X'X = R'R
+        f_t = 1.0 + v @ v
+        f[t - start] = f_t
+        w[t - start] = (endog[t] - x_t @ beta) / np.sqrt(f_t)
 
     return w, f
+
+
+# The first observations identify the coefficients when their regressor
+# matrix has a condition number below this (the moment matrix that is
+# inverted has the square of it).
+_START_CONDITION = 1e6
+
+
+def _recursion_start(basis: NDArray[np.floating[Any]]) -> int:
+    """Number of initial observations that identify the coefficients."""
+    T, k = basis.shape
+    for m in range(k, T):
+        singular = np.linalg.svd(basis[:m], compute_uv=False)
+        if singular[-1] > 0 and singular[0] / singular[-1] < _START_CONDITION:
+            return m
+    raise ValueError(
+        f"the {k} coefficients are not identified before the last "
+        "observation (the regressors are collinear until then), so no "
+        "recursive residual can be computed"
+    )
 
 
 @dataclass
@@ -244,7 +283,10 @@ class CUSUMResults(BreakTestResultsBase):
         evidence against stability became significant, not when the
         coefficients changed.
     observations : NDArray
-        Observation number of each point of the path: ``k, ..., T - 1``.
+        Observation number of each point of the path: ``m, ..., T - 1``,
+        where ``m`` is the number of observations that start the recursion
+        (the number of regressors ``k``, unless the regressors are collinear
+        at the start of the sample).
     statistic_path : NDArray
         The CUSUM statistic W_r at each time point, shape (T - k,).
     upper_bound : NDArray
@@ -288,7 +330,8 @@ class CUSUMResults(BreakTestResultsBase):
     @property
     def observations(self) -> NDArray[np.intp]:
         """Observation number of each point of the path."""
-        return np.arange(self.n_params, self.n_params + len(self.statistic_path))
+        start = self.nobs - len(self.statistic_path)
+        return np.arange(start, self.nobs)
 
     @property
     def max_statistic(self) -> float:
@@ -311,7 +354,7 @@ class CUSUMResults(BreakTestResultsBase):
             return []
         above = self.statistic_path > self.upper_bound
         below = self.statistic_path < self.lower_bound
-        crossed = np.where(above | below)[0] + self.n_params
+        crossed = np.where(above | below)[0] + self.nobs - len(self.statistic_path)
         return [int(i) for i in crossed]
 
     def plot(
@@ -401,7 +444,10 @@ class CUSUMSQResults(BreakTestResultsBase):
         the path first leaves the bounds, or None. It is not an estimate of
         the date at which the variance changed.
     observations : NDArray
-        Observation number of each point of the path: ``k, ..., T - 1``.
+        Observation number of each point of the path: ``m, ..., T - 1``,
+        where ``m`` is the number of observations that start the recursion
+        (the number of regressors ``k``, unless the regressors are collinear
+        at the start of the sample).
     critical_value : float
         Half-width ``c_0`` of the bounds.
     statistic_path : NDArray
@@ -450,7 +496,8 @@ class CUSUMSQResults(BreakTestResultsBase):
     @property
     def observations(self) -> NDArray[np.intp]:
         """Observation number of each point of the path."""
-        return np.arange(self.n_params, self.n_params + len(self.statistic_path))
+        start = self.nobs - len(self.statistic_path)
+        return np.arange(start, self.nobs)
 
     @property
     def max_deviation(self) -> float:
@@ -466,7 +513,7 @@ class CUSUMSQResults(BreakTestResultsBase):
             return []
         above = self.statistic_path > self.upper_bound
         below = self.statistic_path < self.lower_bound
-        crossed = np.where(above | below)[0] + self.n_params
+        crossed = np.where(above | below)[0] + self.nobs - len(self.statistic_path)
         return [int(i) for i in crossed]
 
     def plot(
@@ -715,7 +762,7 @@ class CUSUMTest(BreakTestBase):
 
         # First crossing, as an observation of the sample. It is not an
         # estimate of a break date, so no break is reported.
-        first_crossing = int(crossed[0]) + k if reject else None
+        first_crossing = int(crossed[0]) + (T - n) if reject else None
 
         return CUSUMResults(
             test_name="CUSUM",
@@ -933,7 +980,7 @@ class CUSUMSQTest(BreakTestBase):
 
         # First crossing, as an observation of the sample. It is not an
         # estimate of a break date, so no break is reported.
-        first_crossing = int(crossed[0]) + k if reject else None
+        first_crossing = int(crossed[0]) + (T - n) if reject else None
 
         return CUSUMSQResults(
             test_name="CUSUM-SQ",

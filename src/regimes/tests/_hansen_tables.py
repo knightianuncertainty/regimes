@@ -7,7 +7,8 @@ B. E. Hansen, "Approximate Asymptotic P Values for Structural-Change
 Tests", Journal of Business and Economic Statistics 15 (1997), 60-67
 (files ``pv_sup.R``, ``pv_exp.R`` and ``pv_ave.R``, dated April 2011, from
 https://users.ssc.wisc.edu/~bhansen/progs/jbes_97.html, downloaded
-2026-11-24). They were converted by a script that reads the R files as
+2026-11-24). They were converted by the script
+``tests/reference_data/make_hansen_tables.py``, which reads the R files as
 text.
 
 Each table is keyed by the number of coefficients tested for constancy,
