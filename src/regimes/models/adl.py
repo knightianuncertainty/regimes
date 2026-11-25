@@ -32,6 +32,7 @@ from regimes.models.base import (
     RegimesModelBase,
     _ensure_array,
     check_break_design,
+    check_unique_names,
     fit_with_covariance,
     normalize_breaks,
 )
@@ -154,7 +155,8 @@ class ADLResults(RegressionResultsBase):
         """Bayesian Information Criterion."""
         if self.llf is None:
             return np.nan
-        return -2 * self.llf + np.log(self.nobs) * self.df_model
+        bic: float = -2 * self.llf + np.log(self.nobs) * self.df_model
+        return bic
 
     @property
     def sigma_squared(self) -> float:
@@ -164,7 +166,8 @@ class ADLResults(RegressionResultsBase):
     @property
     def sigma(self) -> float:
         """Residual standard error (sigma)."""
-        return np.sqrt(self.sigma_squared)
+        sigma: float = np.sqrt(self.sigma_squared)
+        return sigma
 
     @property
     def effects_by_regime(self) -> list[tuple[int, dict[str, tuple[float, float]]]]:
@@ -287,7 +290,11 @@ class ADLResults(RegressionResultsBase):
             for bp in self._breaks:
                 lines.append(f"Break at {_obs_label(bp, index)}")
 
-            boundaries = [0] + list(self._breaks) + [nobs]
+            # The first regime starts at the first observation of the
+            # estimation sample (the observations before it are initial
+            # values for the lags), so that the counts add up to the number
+            # of observations.
+            boundaries = [nobs - self.nobs] + list(self._breaks) + [nobs]
             for i in range(len(boundaries) - 1):
                 start = boundaries[i]
                 end = boundaries[i + 1] - 1
@@ -308,7 +315,7 @@ class ADLResults(RegressionResultsBase):
                 else:
                     lines.append(f"{var_name}: breaks at {break_str}")
 
-                boundaries = [0] + list(breaks) + [nobs]
+                boundaries = [nobs - self.nobs] + list(breaks) + [nobs]
                 regime_parts = []
                 for i in range(len(boundaries) - 1):
                     start = boundaries[i]
@@ -744,7 +751,7 @@ class ADL(RegimesModelBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -770,6 +777,7 @@ class ADL(RegimesModelBase):
             param_names.extend(exog_names)
 
         X = np.column_stack(components) if components else np.ones((n_eff, 1))
+        check_unique_names(param_names)
         return y, X, param_names
 
     def _normalize_variable_breaks(
@@ -866,7 +874,7 @@ class ADL(RegimesModelBase):
         n_eff = len(y)
         k = X.shape[1]
 
-        columns = []
+        columns: list[NDArray[np.floating[Any]]] = []
         new_param_names = []
 
         for var_idx in range(k):

@@ -29,9 +29,10 @@ Yao, Y.-C. (1988). Estimating the number of change-points via Schwarz'
 
 from __future__ import annotations
 
+import operator
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
@@ -48,7 +49,7 @@ _COND_WARN = 1e6
 _EXACT_FIT = 1e-22
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Sized
 
     from numpy.typing import ArrayLike, NDArray
 
@@ -233,7 +234,7 @@ class BaiPerronResults(BreakTestResultsBase):
 
         # Build exog and variable_breaks
         exog_list = []
-        variable_breaks = {}
+        variable_breaks: dict[str | int, Sequence[int]] = {}
         col_idx = 0
 
         # Non-breaking regressors: the columns fit() used (columns of exog that
@@ -285,10 +286,6 @@ class BaiPerronResults(BreakTestResultsBase):
         str
             Formatted summary including test statistics and break dates.
         """
-        levels = _cv.LEVELS
-        cv = self.critical_values
-        opt = self.options
-        width = 78
         expected = self.nobs + self.index_offset
         if index is not None and self.index_offset and len(index) != expected:
             raise ValueError(
@@ -297,6 +294,22 @@ class BaiPerronResults(BreakTestResultsBase):
                 f"the lags and reports dates in the model's data, so it needs "
                 f"the index of that data ({expected} entries)"
             )
+        try:
+            return self._summary_text(index)
+        except IndexError:
+            if index is None:
+                raise
+            raise ValueError(
+                f"index has {len(index)} entries, too few for the dates of "
+                f"this summary (the sample has {expected} observations)"
+            ) from None
+
+    def _summary_text(self, index: IndexLike | None) -> str:
+        """The text of ``summary``."""
+        levels = _cv.LEVELS
+        cv = self.critical_values
+        opt = self.options
+        width = 78
 
         def dates(breaks: Sequence[int]) -> str:
             return ", ".join(_obs_label(int(b), index) for b in breaks)
@@ -552,7 +565,7 @@ class BaiPerronTest(BreakTestBase):
         """Initialize the Bai-Perron test."""
         # Default to constant (mean shift) if no breaking regressors specified
         if exog_break is None:
-            exog_break = np.ones((len(endog), 1))
+            exog_break = np.ones((len(cast("Sized", endog)), 1))
 
         super().__init__(endog, exog, exog_break)
 
@@ -608,6 +621,7 @@ class BaiPerronTest(BreakTestBase):
         from regimes.models.ols import OLS as OLSModel
 
         # Extract endog and exog from model
+        exog_all: NDArray[np.floating[Any]] | None
         if isinstance(model, AR):
             # For AR, build the design matrix to get effective sample
             y, X, _ = model._build_design_matrix()
@@ -679,7 +693,8 @@ class BaiPerronTest(BreakTestBase):
         """Number of breaking regressors."""
         if self.exog_break is None:
             return 0
-        return self.exog_break.shape[1]
+        q: int = self.exog_break.shape[1]
+        return q
 
     @property
     def p(self) -> int:
@@ -729,7 +744,7 @@ class BaiPerronTest(BreakTestBase):
         x = self.exog[:, cols] if cols and self.exog is not None else None
         return self.endog, z, x
 
-    def fit(  # type: ignore[override]  # explicit options instead of **kwargs
+    def fit(
         self,
         max_breaks: int = 5,
         trimming: float = 0.15,
@@ -1105,12 +1120,30 @@ class BaiPerronTest(BreakTestBase):
         """
         y, z, x = self._data()
         q = self.q
-        dates = np.asarray(list(break_indices), dtype=np.int64) - self.index_offset
+        supplied: Any = break_indices
+        if isinstance(supplied, (int, float, np.integer, np.floating)):
+            supplied = [supplied]  # a single date
+        given = []
+        for b in supplied:
+            if isinstance(b, (float, np.floating)) and float(b).is_integer():
+                b = int(b)  # 100.0 is the date 100
+            try:
+                if isinstance(b, (bool, np.bool_)):
+                    raise TypeError
+                given.append(operator.index(b))
+            except TypeError:
+                raise TypeError(
+                    f"break dates must be integers, got {list(supplied)}"
+                ) from None
+        if sorted(set(given)) != given:
+            raise ValueError(
+                f"break dates must be distinct and in increasing order, got {given}"
+            )
+        dates = np.asarray(given, dtype=np.int64) - self.index_offset
         if np.any(dates < 1) or np.any(dates >= self.nobs):
             first, last = 1 + self.index_offset, self.nobs - 1 + self.index_offset
             raise ValueError(
-                f"break dates must lie in {first}, ..., {last}, "
-                f"got {list(break_indices)}"
+                f"break dates must lie in {first}, ..., {last}, got {given}"
             )
         vb = dates - 1
         delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)

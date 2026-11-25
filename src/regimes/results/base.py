@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -190,7 +190,10 @@ class RegressionResultsBase(RegimesResultsBase):
         """
         from scipy import stats
 
-        return 2 * (1 - stats.t.cdf(np.abs(self.tvalues), self.df_resid))
+        pvalues: NDArray[np.floating[Any]] = 2 * (
+            1 - stats.t.cdf(np.abs(self.tvalues), self.df_resid)
+        )
+        return pvalues
 
     @property
     def ssr(self) -> float:
@@ -311,7 +314,7 @@ class RegressionResultsBase(RegimesResultsBase):
         """
         ci = self.conf_int()
         names = self.param_names or [f"x{i}" for i in range(len(self.params))]
-        return pd.DataFrame(
+        frame: pd.DataFrame = pd.DataFrame(
             {
                 "coef": self.params,
                 "std_err": self.bse,
@@ -320,8 +323,10 @@ class RegressionResultsBase(RegimesResultsBase):
                 "ci_lower": ci[:, 0],
                 "ci_upper": ci[:, 1],
             },
-            index=names,
+            # Any: the pandas stubs have no overload for a Sequence[str]
+            index=cast("Any", names),
         )
+        return frame
 
     def plot_diagnostics(
         self,

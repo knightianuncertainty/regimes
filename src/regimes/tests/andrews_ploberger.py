@@ -56,7 +56,12 @@ from regimes.tests._hansen_pvalues import (
     hansen_pvalue,
     pi0_from_range,
 )
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+from regimes.tests.base import (
+    BreakTestBase,
+    BreakTestResultsBase,
+    ols_ssr,
+    split_constant,
+)
 
 # A sum of squared residuals this small relative to y'y is rounding error:
 # the model fits exactly and the statistic is not defined. (The threshold
@@ -383,6 +388,7 @@ class AndrewsPlobergerTest(BreakTestBase):
         from regimes.models.ar import AR as ARModel
         from regimes.models.ols import OLS as OLSModel
 
+        exog_all: NDArray[np.floating[Any]] | None
         if isinstance(model, (ARModel, ADLModel)):
             y, X, _ = model._build_design_matrix()
             offset = int(model.maxlag)
@@ -417,14 +423,16 @@ class AndrewsPlobergerTest(BreakTestBase):
         """Number of breaking regressors (q)."""
         if self.exog_break is None:
             return 0
-        return self.exog_break.shape[1]
+        n_break: int = self.exog_break.shape[1]
+        return n_break
 
     @property
     def n_nonbreak_params(self) -> int:
         """Number of non-breaking regressors (p)."""
         if self.exog is None:
             return 0
-        return self.exog.shape[1]
+        n_nonbreak: int = self.exog.shape[1]
+        return n_nonbreak
 
     def _compute_ssr(
         self,
@@ -445,14 +453,12 @@ class AndrewsPlobergerTest(BreakTestBase):
         float
             Sum of squared residuals.
         """
-        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-        resid = y - X @ beta
-        return float(resid @ resid)
+        return ols_ssr(y, X)
 
     def _build_regressor_matrix(
         self,
-        start: int,
-        end: int,
+        start: int | np.integer[Any],
+        end: int | np.integer[Any],
     ) -> NDArray[np.floating[Any]]:
         """Build the full regressor matrix for a segment [start, end).
 

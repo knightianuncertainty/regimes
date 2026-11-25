@@ -148,8 +148,10 @@ Chow test
 * With ``exog_break`` only those regressors change at the break point; the
   regressors in ``exog`` have common coefficients.
 * A design in which the break is not identified raises: a breaking
-  regressor that is zero or collinear in a sub-sample, or a step dummy at
-  the tested date among the regressors that do not break.
+  regressor that is zero or collinear in a sub-sample (an impulse or step
+  dummy), or a step dummy at the tested date among the regressors that do
+  not break. A dummy variable belongs in ``exog``, with a coefficient that
+  does not break.
 
 CUSUM tests
 -----------
@@ -161,7 +163,30 @@ CUSUM tests
   later) they come later, and every other observation keeps its residual.
   There are always ``T - k`` residuals, and their sum of squares is the
   residual sum of squares of the regression. ``observations`` gives the
-  observation of each point of a path.
+  observation of each point of a path. Whether an observation adds to the
+  rank is decided from the linear dependencies that hold among the columns
+  in all earlier observations (a column that is zero so far, two columns
+  that are equal so far), so that it does not depend on the units of the
+  regressors or on how much a regressor grows over the sample. Differences
+  between observations of a relative 1e-9 or smaller are at the limit of
+  what can be told from rounding error: they may count as no difference,
+  or the residuals may not be computable (an error).
+* The recursive residuals are checked: their sum of squares must equal the
+  residual sum of squares of the regression. When it does not to a relative
+  1e-9, they are computed again by two other methods (the last is that of
+  version 0.5.0), and the computation that comes closest is used. If none
+  comes within a relative 1e-6, an error is raised; this happens for a
+  cubic trend in monthly calendar years and a quartic trend in quarterly
+  calendar years. A regression that fits the data exactly, and data with
+  NaN or infinite values, also raise an error.
+* The check does not show that each residual is accurate to many digits.
+  A polynomial trend in calendar time gives about eight digits (quadratic,
+  quarterly calendar years), four (cubic) or three (quadratic in daily date
+  ordinals near 730000); the same trend measured from the start of the sample gives
+  twelve or more. Measure trends from the start of the sample.
+* The Chow and Andrews-Ploberger tests compute their sums of squared
+  residuals from regressors scaled to unit length, so the statistics do not
+  depend on the units of the regressors.
 * The CUSUM scale estimate is ``sqrt(sum w^2 / (T - k))`` (uncentered).
 * CUSUM bounds: the lines of Brown, Durbin and Evans (1975) with
   ``a = 1.143, 0.948, 0.850`` for 1, 5 and 10 percent.

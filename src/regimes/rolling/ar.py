@@ -221,7 +221,7 @@ class RollingAR(RollingEstimatorBase):
         )
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))
@@ -268,7 +268,7 @@ class RollingAR(RollingEstimatorBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms
@@ -489,7 +489,7 @@ class RecursiveAR(RollingEstimatorBase):
         )
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))
@@ -536,7 +536,7 @@ class RecursiveAR(RollingEstimatorBase):
         n_eff = len(y)
 
         # Build design matrix components
-        components = []
+        components: list[NDArray[Any]] = []
         param_names: list[str] = []
 
         # Deterministic terms

@@ -16,6 +16,25 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from numpy.typing import ArrayLike, NDArray
+    from typing_extensions import Self
+
+
+def ols_ssr(y: NDArray[np.floating[Any]], X: NDArray[np.floating[Any]]) -> float:
+    """Sum of squared residuals of the least-squares regression of y on X.
+
+    The columns are scaled to unit length first. Least squares drops
+    directions whose singular value is below rounding error relative to the
+    largest one, so that without the scaling a regressor measured in units
+    fourteen orders of magnitude smaller than another would be dropped and
+    the sum of squares would depend on the units of the data.
+    """
+    if X.shape[1] == 0:
+        return float(y @ y)
+    norms = np.linalg.norm(X, axis=0)
+    scaled = X / np.where(norms > 0.0, norms, 1.0)
+    beta, *_ = np.linalg.lstsq(scaled, y, rcond=None)
+    resid = y - scaled @ beta
+    return float(resid @ resid)
 
 
 def split_constant(
@@ -127,7 +146,7 @@ class BreakTestBase(ABC):
     index_offset: int = 0
 
     @classmethod
-    def _create(cls, index_offset: int, *args: Any, **kwargs: Any) -> Any:
+    def _create(cls, index_offset: int, *args: Any, **kwargs: Any) -> Self:
         """Construct a test and record the offset of its first observation."""
         test = cls(*args, **kwargs)
         test.index_offset = int(index_offset)
@@ -171,7 +190,7 @@ class BreakTestBase(ABC):
         return len(self.endog)
 
     @abstractmethod
-    def fit(self, **kwargs: Any) -> BreakTestResultsBase:
+    def fit(self, *args: Any, **kwargs: Any) -> BreakTestResultsBase:
         """Perform the structural break test.
 
         Returns

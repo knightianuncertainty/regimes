@@ -456,9 +456,14 @@ class _StubModel:
     k_params = 1
     start_params = np.array([0.0])
 
-    def __init__(self, converged_at: dict[float, bool] | None = None) -> None:
+    def __init__(
+        self,
+        converged_at: dict[float, bool] | None = None,
+        converges_when_continued: bool = False,
+    ) -> None:
         self.calls: list[tuple[float, int, str]] = []
         self.converged_at = converged_at or {}
+        self.converges_when_continued = converges_when_continued
 
     def loglike(self, params: Any, transformed: bool = True) -> float:
         # the plain likelihood prefers the point 0, by one unit
@@ -470,7 +475,10 @@ class _StubModel:
     def fit(self, start_params: Any = None, **kwargs: Any) -> _StubResults:
         point = 0.0 if start_params is None else float(start_params[0])
         self.calls.append((point, kwargs["maxiter"], kwargs["cov_type"]))
-        return _StubResults([point], self.converged_at.get(point, True))
+        converged = self.converged_at.get(point, True)
+        if self.converges_when_continued and kwargs["maxiter"] > 100:
+            converged = True
+        return _StubResults([point], converged)
 
     def smooth(self, params: Any, transformed: bool, cov_type: str) -> _StubResults:
         self.calls.append((float(params[0]), -1, cov_type))
@@ -515,6 +523,16 @@ class TestObjectiveSearch:
         # continued once from the best point, with five times the iterations
         assert (0.0, 500, "none") in model.calls
         assert results.mle_retvals == {"converged": False}
+
+    def test_a_continued_fit_that_converges_is_reported_as_converged(self) -> None:
+        """It ends at the same value as the fit it continues; the flag used
+        to stay at "not converged"."""
+        model = _StubModel(converged_at={0.0: False}, converges_when_continued=True)
+        results = _objective_search_fit(
+            model, "bfgs", 100, 5, 0, None, [np.array([1.0])], None, True
+        )
+        assert results.params[0] == 0.0
+        assert results.mle_retvals == {"converged": True}
 
     def test_convergence_flag_reaches_the_results(self) -> None:
         """It was lost: every model of a selection reported "converged"."""
@@ -601,6 +619,25 @@ class TestPenaltyInTheFits:
         assert np.max(np.abs(gradient(False))) > 0.1
         # the log-likelihood reported is the plain one
         assert fitted[2]["llf"] == pytest.approx(objective(free, False), abs=1e-8)
+
+    def test_model_that_did_not_converge_is_noted(self, monkeypatch: Any) -> None:
+        from types import SimpleNamespace
+
+        def unconverged(k: int, *args: Any, **kwargs: Any) -> Any:
+            fit = _fake_fit(-80.0 + k, k)
+            fit["results"] = SimpleNamespace(llf=fit["llf"], converged=k != 3)
+            return fit
+
+        test = RegimeNumberSelection(np.zeros(50), k_max=3, method="bic")
+        monkeypatch.setattr(test, "_fit_k1", lambda endog=None: _fake_fit(-100.0, 1))
+        monkeypatch.setattr(test, "_fit_k_regimes", unconverged)
+        monkeypatch.setattr(test, "_select_by_ic", lambda table, criterion: 2)
+        results = test.fit()
+        assert results.notes == [
+            "the optimizer did not converge for the model with 3 regimes; its "
+            "log-likelihood is the highest value reached"
+        ]
+        assert "did not converge" in results.summary()
 
     def test_k_max_is_flagged_for_a_criterion_too(self, monkeypatch: Any) -> None:
         test = RegimeNumberSelection(np.zeros(50), k_max=2, method="aic")

@@ -106,7 +106,18 @@ Chow, CUSUM and Andrews-Ploberger
      - statsmodels ``RecursiveLS``, and a brute-force recursive least
        squares for regressors that are collinear at the start or contain a
        dummy variable: differences of 1e-14; the sum of squared recursive
-       residuals equals the residual sum of squares (test, same file)
+       residuals equals the residual sum of squares, also for regressors
+       that grow by nine orders of magnitude over the sample; the
+       observations without a residual are those at which the rank rises
+       in exact rational arithmetic, for about two hundred designs with
+       exact linear dependencies in part of the sample, first observations
+       that are almost equal, kinked regressors, and one very large value
+       (tests, same file: ``TestDependenciesAgainstExactArithmetic``,
+       ``TestDesignsFromTheSecondReview``); agreement with the computation
+       of version 0.5.0 to 1e-11 for standardized regressors (1e-8 for
+       regressors with levels of 1e3 to 1e5); a cubic in calendar
+       years against the same trend measured from the start of the sample:
+       differences below 2e-3
    * - CUSUM-of-squares path and bounds
      - statsmodels ``RecursiveLS`` (test, same file)
    * - Sequence of F statistics, SupF, AveF, ExpF and their p-values

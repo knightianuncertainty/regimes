@@ -56,12 +56,12 @@ Edgerton, D., & Wells, C. (1994). Critical values for the CUSUMSQ statistic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from regimes.tests._bp_core import _orthonormal
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase
+from regimes.tests.base import BreakTestBase, BreakTestResultsBase, ols_ssr
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike, NDArray
@@ -69,6 +69,18 @@ if TYPE_CHECKING:
     from regimes.models.adl import ADL
     from regimes.models.ar import AR
     from regimes.models.ols import OLS
+
+    _Residuals = tuple[
+        NDArray[np.floating[Any]], NDArray[np.floating[Any]], NDArray[np.intp]
+    ]
+    _Begun = tuple[
+        NDArray[np.floating[Any]],  # the regressors, columns scaled
+        list[int],  # the pivot columns
+        int,  # the first observation after the rank is complete
+        list[float],  # residuals before that
+        list[float],  # their scaling factors
+        list[int],  # their observations
+    ]
 
 
 # Constant a of the CUSUM boundary lines for significance levels 0.01, 0.05,
@@ -177,7 +189,10 @@ def _compute_recursive_residuals(
     Raises
     ------
     ValueError
-        If the regressors are collinear in the whole sample.
+        If the data contain NaN or infinite values; if the regressors are
+        collinear in the whole sample; if the regression fits the data
+        exactly; or if the residuals cannot be computed accurately (see
+        Notes).
 
     Notes
     -----
@@ -187,25 +202,52 @@ def _compute_recursive_residuals(
 
     where β_{t-1} is the least-squares estimate from observations before t.
 
-    An observation whose regressors are not a combination of those before
-    it adds to the rank of the design: it is fitted exactly and has no
-    residual. There are exactly ``k`` such observations. Usually they are
-    the first ``k``, and the residuals belong to observations ``k, ..., T -
-    1``. When the regressors are collinear at the start of the sample they
-    come later: with a dummy variable that is zero until observation 150,
-    observation 150 has no residual and all the others from the second on
-    do. (Before the rank is complete the prediction ``x_t' β`` is still
-    unique, because ``x_t`` is then a combination of earlier regressors.)
-    The sum of squared recursive residuals equals the residual sum of
-    squares of the regression in every case.
+    An observation whose regressors are not a linear combination of those
+    before it adds to the rank of the design: it is fitted exactly and has
+    no residual. There are exactly ``k`` such observations. Usually they
+    are the first ``k``, and the residuals belong to observations ``k, ...,
+    T - 1``. When the regressors are linearly dependent at the start of the
+    sample they come later: with a dummy variable that is zero until
+    observation 150, observation 150 has no residual and all the others
+    from the second on do. (Before the rank is complete the prediction
+    ``x_t' β`` is still unique, because ``x_t`` is then a combination of
+    earlier regressors.) The ``T - k`` residuals are an orthonormal
+    transformation of ``y``, and their sum of squares is the residual sum
+    of squares of the regression.
 
-    The computation uses an orthonormal basis of the regressors, which
-    spans the same space and gives the same residuals, and updates a QR
-    decomposition, so that it stays accurate when the regressors differ in
-    scale or vary little around a large mean (a trend in calendar years, a
-    series in levels). Rank is decided with a relative tolerance of 1e-6 on
-    the singular values: first observations that almost coincide count as
-    collinear.
+    Whether an observation adds to the rank is decided from the linear
+    dependencies among the columns that hold in all earlier observations (a
+    column that is zero so far, two columns that are equal so far): the
+    observation adds to the rank when it breaks one of them by more than a
+    relative 1e-13 plus a bound on the rounding error of the dependency.
+    The decision does not depend on the units of the regressors or on how
+    much a regressor grows over the sample. The residuals are computed from
+    a QR decomposition updated row by row.
+
+    The identity above is the check of the computation: a regressor
+    wrongly treated as absent in the first observations, or a dependency
+    wrongly taken to be broken, changes the sum of squares. When the sum of
+    squared recursive residuals equals the residual sum of squares of the
+    regression to a relative 1e-9, the residuals are returned. Otherwise
+    they are computed again in an orthonormal basis of the regressors, and
+    then by the method of version 0.5.0 (the rank of the first observations
+    from the singular values of that basis, with a tolerance of 1e-6). The
+    method of 0.5.0 is used only when the first computation gave no result
+    or when it leaves out the same observations: a rank that rises on a
+    difference of the size of rounding error reproduces the sum of squares
+    too, so the check alone cannot choose between two sets of observations.
+    The computation that reproduces the residual sum of squares best is
+    used. If none does to a relative 1e-6, an error is raised. For a
+    dependent variable with a very large level relative to the residuals
+    both limits are wider: a hundred times the precision of the arithmetic
+    times ``sqrt(y'y / SSR)``.
+
+    The check does not show that each residual is accurate to many digits.
+    That is limited by how close to collinear the regressors are in the
+    first observations: a polynomial trend in calendar years or date
+    numbers gives fewer accurate digits than the same trend measured from
+    the start of the sample (four digits against twelve for a cubic trend
+    in quarterly data).
     """
     T, k = exog.shape
 
@@ -216,8 +258,91 @@ def _compute_recursive_residuals(
         )
 
     y = np.asarray(endog, dtype=np.float64)
-    basis = _orthonormal(np.asarray(exog, dtype=np.float64))
-    if basis is exog or np.linalg.matrix_rank(basis) < k:
+    X = np.asarray(exog, dtype=np.float64)
+    if not (np.all(np.isfinite(y)) and np.all(np.isfinite(X))):
+        raise ValueError(
+            "the data contain NaN or infinite values, so the recursive "
+            "residuals are not defined"
+        )
+
+    ssr = ols_ssr(y, X)
+    y_squared = float(y @ y)
+    precision = float(np.finfo(np.float64).eps)
+    # what the arithmetic can deliver when y is large relative to the residuals
+    attainable = (
+        100.0 * precision * float(np.sqrt(y_squared / ssr)) if ssr > 0.0 else np.inf
+    )
+
+    computed: list[tuple[float, _Residuals]] = []
+    failures: list[ValueError] = []
+
+    def consider(candidate: _Residuals) -> bool:
+        """Record a computation; True when it need not be improved on."""
+        total = float(candidate[0] @ candidate[0])
+        largest = max(ssr, total)
+        error = abs(total - ssr) / largest if largest > 0.0 else 0.0
+        computed.append((error, candidate))
+        return error <= max(_SSR_ACCURATE, attainable)
+
+    done = False
+    try:
+        begun = _begin_from_dependencies(y, X)
+        scaled, pivots = begun[0], begun[1]
+        done = consider(_finish_from_dependencies(y, scaled[:, pivots], begun))
+        if not done:
+            done = consider(_finish_from_dependencies(y, _orthonormal(scaled), begun))
+    except ValueError as exc:  # includes LinAlgError
+        failures.append(exc)
+    if not done:
+        try:
+            released = _residuals_in_sample_basis(y, X)
+            # Not when it leaves out other observations than the first
+            # computation: a rank that rises on a difference of the size of
+            # rounding error reproduces the sum of squares and would win.
+            if not computed or np.array_equal(released[2], computed[0][1][2]):
+                consider(released)
+        except ValueError as exc:
+            failures.append(exc)
+
+    if not computed:
+        raise failures[-1]  # the message of version 0.5.0
+    if ssr <= _EXACT_FIT * y_squared:
+        raise ValueError(
+            "the regression fits the data exactly, or its residuals are "
+            "below the precision of the arithmetic relative to the size of "
+            "the dependent variable; the recursive residuals would be "
+            "rounding error and the test is not defined"
+        )
+    error, best = min(computed, key=lambda item: item[0])
+    if error > max(_SSR_TOLERANCE, attainable):
+        raise ValueError(
+            "the recursive residuals could not be computed accurately: the "
+            "relative difference between their sum of squares and the "
+            f"residual sum of squares of the regression is {error:.1e}. The "
+            "regressors are too close to collinear in the first "
+            "observations (a trend with a very large origin, for example: "
+            "measure it from the start of the sample)"
+        )
+    return best
+
+
+def _residuals_in_sample_basis(
+    y: NDArray[np.floating[Any]], X: NDArray[np.floating[Any]]
+) -> _Residuals:
+    """Recursive residuals as version 0.5.0 computed them.
+
+    In an orthonormal basis of the regressors over the whole sample, an
+    observation adds to the rank when the first ``t + 1`` rows of the basis
+    have one more singular value above ``_BASIS_RANK_TOLERANCE`` of the
+    largest. Right for ordinary designs; wrong when a regressor is very
+    small early in the sample relative to its size later (the first rows of
+    the basis are then parallel to within the tolerance). Used when the
+    computation from dependencies does not reproduce the residual sum of
+    squares.
+    """
+    T, k = X.shape
+    basis = _orthonormal(X)
+    if basis is X or np.linalg.matrix_rank(basis) < k:
         raise ValueError(
             "the regressors are collinear in the sample, so the recursive "
             "residuals are not defined"
@@ -232,14 +357,14 @@ def _compute_recursive_residuals(
     t = 0
     while rank < k and t < T:
         singular = np.linalg.svd(basis[: t + 1], compute_uv=False)
-        new_rank = int(np.sum(singular > _RANK_TOLERANCE * singular[0]))
+        new_rank = int(np.sum(singular > _BASIS_RANK_TOLERANCE * singular[0]))
         if new_rank > rank:
             rank = new_rank  # fitted exactly: no residual
         else:
             if t == 0:
                 prediction, leverage = 0.0, 0.0
             else:
-                inverse = np.linalg.pinv(basis[:t], rcond=_RANK_TOLERANCE)
+                inverse = np.linalg.pinv(basis[:t], rcond=_BASIS_RANK_TOLERANCE)
                 prediction = float(basis[t] @ (inverse @ y[:t]))
                 leverage = float(np.sum((basis[t] @ inverse) ** 2))
             f_t = 1.0 + leverage
@@ -254,7 +379,7 @@ def _compute_recursive_residuals(
         )
 
     # From there on: the triangular factor of [X, y], updated row by row.
-    triangular = np.linalg.qr(np.column_stack([basis[:t], y[:t]]), mode="r")
+    triangular = _triangular_factor(np.column_stack([basis[:t], y[:t]]))
     for s in range(t, T):
         r_xx = triangular[:k, :k]
         beta = np.linalg.solve(r_xx, triangular[:k, k])
@@ -264,9 +389,7 @@ def _compute_recursive_residuals(
         residuals.append(float(y[s] - x_s @ beta) / np.sqrt(f_s))
         scales.append(f_s)
         positions.append(s)
-        triangular = np.linalg.qr(
-            np.vstack([triangular, np.append(x_s, y[s])]), mode="r"
-        )
+        triangular = _triangular_factor(np.vstack([triangular, np.append(x_s, y[s])]))
 
     return (
         np.asarray(residuals, dtype=np.float64),
@@ -275,9 +398,212 @@ def _compute_recursive_residuals(
     )
 
 
-# Singular values below this fraction of the largest count as zero when the
-# rank of the first observations is decided.
-_RANK_TOLERANCE = 1e-6
+def _begin_from_dependencies(
+    y: NDArray[np.floating[Any]], X: NDArray[np.floating[Any]]
+) -> _Begun:
+    """Recursive residuals until the rank is complete, with the rank decided
+    from the dependencies among the columns.
+
+    For each column that is not (yet) linearly independent of the pivot
+    columns there is a vector ``n`` with ``X[:t] @ n = 0``. Observation t
+    adds to the rank when ``x_t @ n`` is not zero for one of them: more
+    than ``_DEPENDENCY_TOLERANCE`` times the sizes of the terms that went
+    into the dependency. Exact zeros and exact equalities in the data are
+    preserved by the scaling of the columns, so the decision does not
+    depend on the units of the regressors or on how much a regressor grows
+    over the sample.
+    """
+    T, k = X.shape
+    scale = np.max(np.abs(X), axis=0)
+    if np.any(scale == 0.0) or np.linalg.matrix_rank(X / scale) < k:
+        raise ValueError(
+            "the regressors are collinear in the sample, so the recursive "
+            "residuals are not defined"
+        )
+    X = X / scale
+
+    residuals: list[float] = []
+    scales: list[float] = []
+    positions: list[int] = []
+
+    pivots: list[int] = []
+    # before the first observation every column is "dependent"
+    dependencies: dict[int, NDArray[np.floating[Any]]] = {
+        j: np.eye(k)[j] for j in range(k)
+    }
+    # For each dependency, the sizes of the terms that went into it. An
+    # entry that is zero in exact arithmetic can be left at about 1e-17 by
+    # an elimination; measured against these sizes it stays rounding error.
+    magnitudes: dict[int, NDArray[np.floating[Any]]] = {
+        j: np.eye(k)[j] for j in range(k)
+    }
+    # How far each dependency may be from the exact one. The multiplier of
+    # an elimination is a ratio of two values. When the pivot value is small
+    # relative to its terms (two first observations that almost coincide),
+    # the ratio has a relative error of rounding error over that strength,
+    # and the dependency is off by that much times the dependency of the
+    # pivot. doubts[j][b] bounds the coefficient of the dependency of pivot
+    # b (kept in `retired`) in the error of dependency j.
+    retired: dict[int, tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]] = {}
+    doubts: dict[int, dict[int, float]] = {j: {} for j in range(k)}
+    unit = k * float(np.finfo(np.float64).eps)
+    # triangular factor of [X[:t, pivots], y[:t]]
+    triangular: NDArray[np.floating[Any]] = np.zeros((1, 1))
+
+    complete_at = T
+    for t in range(T):
+        if len(pivots) == k:
+            complete_at = t
+            break
+        x_t = X[t]
+        abs_x = np.abs(x_t)
+        # the retired dependencies at this observation, with their rounding
+        retired_at = {
+            b: abs(float(np.sum(x_t * n_b))) + unit * float(np.sum(abs_x * m_b))
+            for b, (n_b, m_b) in retired.items()
+        }
+        broken, strength = -1, 0.0
+        value_at: dict[int, float] = {}
+        doubt_at: dict[int, float] = {}
+        for j, n in dependencies.items():
+            size = float(np.sum(abs_x * magnitudes[j]))
+            value = float(np.sum(x_t * n))
+            doubt = unit * size + sum(c * retired_at[b] for b, c in doubts[j].items())
+            doubt_at[j] = doubt
+            margin = abs(value) - _DEPENDENCY_TOLERANCE * size - doubt
+            if not (size > 0.0 and margin > 0.0):
+                value = 0.0  # the dependency holds for this observation
+            elif margin / size > strength:
+                broken, strength = j, margin / size
+            value_at[j] = value
+        if broken >= 0:
+            # the rank rises: column `broken` becomes a pivot, the remaining
+            # dependencies are made to hold for this observation too, and the
+            # observation is fitted exactly (no residual)
+            n_star = dependencies.pop(broken)
+            m_star = magnitudes.pop(broken)
+            d_star = doubts.pop(broken)
+            for j in dependencies:
+                multiplier = value_at[j] / value_at[broken]
+                d_mult = (doubt_at[j] + abs(multiplier) * doubt_at[broken]) / abs(
+                    value_at[broken]
+                )
+                if multiplier != 0.0:
+                    dependencies[j] = dependencies[j] - multiplier * n_star
+                    magnitudes[j] = magnitudes[j] + abs(multiplier) * m_star
+                if doubt_at[j] > 0.0 or multiplier != 0.0:
+                    for b, c in d_star.items():
+                        doubts[j][b] = (
+                            doubts[j].get(b, 0.0) + (abs(multiplier) + d_mult) * c
+                        )
+                    doubts[j][broken] = d_mult
+            retired[broken] = (n_star, m_star)
+            pivots.append(broken)
+            triangular = _triangular_factor(
+                np.column_stack([X[: t + 1][:, pivots], y[: t + 1]])
+            )
+            continue
+
+        r = len(pivots)
+        if r == 0:
+            prediction, leverage = 0.0, 0.0
+        else:
+            r_xx = triangular[:r, :r]
+            z_t = x_t[pivots]
+            prediction = float(z_t @ np.linalg.solve(r_xx, triangular[:r, r]))
+            v = np.linalg.solve(r_xx.T, z_t)
+            leverage = float(v @ v)
+        f_t = 1.0 + leverage
+        residuals.append((y[t] - prediction) / np.sqrt(f_t))
+        scales.append(f_t)
+        positions.append(t)
+        triangular = _triangular_factor(
+            np.vstack([triangular, np.append(x_t[pivots], y[t])])
+        )
+
+    if len(pivots) < k:
+        # the sample has full rank (checked above)
+        raise ValueError(
+            "the recursive residuals could not be computed accurately: a "
+            "linear dependency among the regressors in the first "
+            "observations could not be told from rounding error"
+        )
+    return X, pivots, complete_at, residuals, scales, positions
+
+
+def _finish_from_dependencies(
+    y: NDArray[np.floating[Any]], Z: NDArray[np.floating[Any]], begun: _Begun
+) -> _Residuals:
+    """The residuals after the rank is complete, in the basis ``Z`` of the
+    regressors, joined to those before.
+
+    Any basis gives the same residuals in exact arithmetic. The scaled
+    pivot columns keep regressors that grow by orders of magnitude
+    accurate; an orthonormal basis of the whole sample can be the more
+    accurate one for columns that are nearly collinear.
+    """
+    _scaled, _pivots, complete_at, residuals, scales, positions = begun
+    tail_w, tail_f = _complete_rank_residuals(Z, y, complete_at)
+    return (
+        np.concatenate([np.asarray(residuals, dtype=np.float64), tail_w]),
+        np.concatenate([np.asarray(scales, dtype=np.float64), tail_f]),
+        np.concatenate(
+            [np.asarray(positions, dtype=np.intp), np.arange(complete_at, len(y))]
+        ).astype(np.intp),
+    )
+
+
+def _triangular_factor(a: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
+    """The triangular factor of a QR decomposition."""
+    return cast("NDArray[np.floating[Any]]", np.linalg.qr(a, mode="r"))
+
+
+def _complete_rank_residuals(
+    Z: NDArray[np.floating[Any]], y: NDArray[np.floating[Any]], first: int
+) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
+    """Recursive residuals of observations ``first, ..., T - 1``.
+
+    ``Z[:first]`` has full column rank. The triangular factor of
+    ``[Z[:t], y[:t]]`` is updated one row at a time.
+    """
+    T, k = Z.shape
+    w = np.empty(T - first)
+    f = np.empty(T - first)
+    triangular = _triangular_factor(np.column_stack([Z[:first], y[:first]]))
+    if triangular.shape[0] < k + 1:
+        # exactly as many observations as columns: no row for y yet
+        triangular = np.vstack([triangular, np.zeros((1, k + 1))])
+    for t in range(first, T):
+        r_zz = triangular[:k, :k]
+        z_t = Z[t]
+        prediction = float(z_t @ np.linalg.solve(r_zz, triangular[:k, k]))
+        v = np.linalg.solve(r_zz.T, z_t)
+        f_t = 1.0 + float(v @ v)
+        w[t - first] = (y[t] - prediction) / np.sqrt(f_t)
+        f[t - first] = f_t
+        triangular = _triangular_factor(np.vstack([triangular, np.append(z_t, y[t])]))
+    return w, f
+
+
+# Version 0.5.0's rule: singular values of the first rows of the orthonormal
+# basis below this fraction of the largest count as zero.
+_BASIS_RANK_TOLERANCE = 1e-6
+
+# An observation adds to the rank of the design when it breaks a linear
+# dependency among the columns by more than this, relative to the sizes of
+# the terms that went into the dependency (rounding error is about 1e-16
+# per operation).
+_DEPENDENCY_TOLERANCE = 1e-13
+
+# A residual sum of squares this small relative to y'y is rounding error
+# (the square of about fifty times the precision of the arithmetic).
+_EXACT_FIT = 1e-28
+
+# The sum of squared recursive residuals must equal the residual sum of
+# squares of the regression: a computation within the first limit is
+# returned at once; one outside the second is an error.
+_SSR_ACCURATE = 1e-9
+_SSR_TOLERANCE = 1e-6
 
 
 @dataclass
@@ -744,7 +1070,8 @@ class CUSUMTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,
@@ -961,7 +1288,8 @@ class CUSUMSQTest(BreakTestBase):
     @property
     def n_params(self) -> int:
         """Number of regressors (k)."""
-        return self._exog.shape[1]
+        n_params: int = self._exog.shape[1]
+        return n_params
 
     def fit(
         self,

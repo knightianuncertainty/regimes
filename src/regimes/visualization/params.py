@@ -7,7 +7,7 @@ parameter estimates as step functions over the sample period.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -142,7 +142,8 @@ def _get_nobs(result: Any) -> int:
     """
     # For regression results with breaks, use original nobs if available
     if hasattr(result, "_nobs_original") and result._nobs_original is not None:
-        return result._nobs_original
+        nobs_original: int = result._nobs_original
+        return nobs_original
     return getattr(result, "nobs", 0)
 
 
@@ -307,8 +308,10 @@ def _extract_baiperron_param_data(
     # Get regime estimates
     regime_estimates = test.get_regime_estimates(break_indices)
 
-    # Compute boundaries
-    boundaries = [0] + list(break_indices) + [nobs]
+    # Compute boundaries, in the observations the break dates are in (those
+    # of the model's data for a test built from an AR or ADL model)
+    offset = int(getattr(test, "index_offset", 0))
+    boundaries = [offset] + list(break_indices) + [nobs + offset]
 
     # Parameter names
     if q == 1:
@@ -331,7 +334,7 @@ def _extract_baiperron_param_data(
 
             # Get the design matrix for this segment
             if test.exog_break is not None:
-                X_seg = test.exog_break[start:end]
+                X_seg = test.exog_break[start - offset : end - offset]
                 try:
                     XtX_inv = np.linalg.inv(X_seg.T @ X_seg)
                     se = np.sqrt(np.diag(sigma2 * XtX_inv))
@@ -568,7 +571,7 @@ def plot_params_over_time(
             else:
                 # Single axes provided
                 axes = np.array([[ax]])
-                fig = ax.get_figure()
+                fig = cast("Figure", cast("Axes", ax).get_figure())
 
         # Flatten axes for easy iteration
         axes_flat = axes.flatten()

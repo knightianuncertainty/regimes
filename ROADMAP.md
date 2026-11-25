@@ -177,6 +177,7 @@ These features are deferred and may be added in future versions based on need:
 | 0.3.2 | Complete | Fix Bai-Perron partial structural change & multicollinearity (PR #4), R cross-validation, 903 tests |
 | 0.4.0 | Complete | Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), date-aware summaries, 1030 tests |
 | 0.5.0 | Complete | Corrections of the Markov switching tests, the Chow, CUSUM and Andrews-Ploberger tests, the models and rolling estimators; one convention for break dates of AR and ADL models; API reference, conventions and validation pages; 1434 tests |
+| 0.5.1 | Complete | Corrections to 0.5.0 from a review after the release: recursive residuals for regressors with a very wide range, the Chow test with dummy variables among the regressors; type check passes in strict mode |
 | 0.6.0 | In development | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics-inspired model selection, dual representation |
 | 0.7.0 | Planned | Real data examples, example notebooks, hosted documentation, PyPI stable release |
 | 0.8.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |

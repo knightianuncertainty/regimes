@@ -10,7 +10,7 @@ mimicking the style of OxMetrics/PcGive. The four main diagnostic plots are:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -130,7 +130,7 @@ def plot_actual_fitted(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot actual and fitted
         ax.plot(
@@ -239,9 +239,10 @@ def plot_scaled_residuals(
     if band_color is None:
         band_color = REGIMES_COLORS["red"]
 
-    # Get residuals and sigma
+    # Get residuals and sigma (sigma is defined by the results classes of
+    # the models, not by RegressionResultsBase)
     resid = np.asarray(results.resid)
-    sigma = results.sigma
+    sigma: float = cast("Any", results).sigma
 
     # Compute scaled residuals
     scaled_resid = resid / sigma
@@ -264,7 +265,7 @@ def plot_scaled_residuals(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot scaled residuals as vertical lines
         ax.vlines(
@@ -376,9 +377,10 @@ def plot_residual_distribution(
     if normal_color is None:
         normal_color = REGIMES_COLORS["red"]
 
-    # Get residuals and sigma
+    # Get residuals and sigma (sigma is defined by the results classes of
+    # the models, not by RegressionResultsBase)
     resid = np.asarray(results.resid)
-    sigma = results.sigma
+    sigma: float = cast("Any", results).sigma
 
     # Compute scaled residuals
     scaled_resid = resid / sigma
@@ -388,7 +390,7 @@ def plot_residual_distribution(
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
-            fig = ax.get_figure()  # type: ignore[union-attr]
+            fig = cast("Figure", ax.get_figure())
 
         # Plot histogram
         ax.hist(
@@ -503,7 +505,7 @@ def plot_residual_acf(
             fig, axes = plt.subplots(1, 2, figsize=figsize)
         else:
             axes = np.asarray(ax)
-            fig = axes[0].get_figure()  # type: ignore[union-attr]
+            fig = axes[0].get_figure()
 
         lags = np.arange(nlags + 1)
 
@@ -625,7 +627,7 @@ def plot_diagnostics(
         # Get data
         fitted = np.asarray(results.fittedvalues)
         resid = np.asarray(results.resid)
-        sigma = results.sigma
+        sigma: float = cast("Any", results).sigma
         n = len(resid)
 
         if endog is None:
