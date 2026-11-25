@@ -42,3 +42,23 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
+      # The action hides Claude's output. When the review fails, print the
+      # final message (an authentication or usage-limit error, for example).
+      - name: Show why the review failed
+        if: failure()
+        run: |
+          f="${RUNNER_TEMP}/claude-execution-output.json"
+          if [ ! -f "$f" ]; then echo "no execution file"; exit 0; fi
+          if jq -r '
+              .. | objects
+              | if .type? == "result" then
+                  "result (\(.subtype // "?"), is_error \(.is_error // false)): \((.result // .error // .errors // "no text") | tostring)"
+                elif .type? == "assistant" then
+                  ((.message.content // []) | if type == "array" then map(.text? // empty) | join(" ") else tostring end
+                   | select(length > 0) | "assistant: " + .)
+                else empty end
+            ' "$f" > "${RUNNER_TEMP}/review-messages.txt"; then
+            cut -c1-600 "${RUNNER_TEMP}/review-messages.txt" | tail -n 5
+          else
+            tail -c 800 "$f"
+          fi
