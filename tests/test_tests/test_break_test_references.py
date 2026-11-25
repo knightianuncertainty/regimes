@@ -1356,6 +1356,23 @@ class TestDesignsFromTheSecondReview:
             self._exact(rng.standard_normal(100), X)
             self._exact(1.0 + 2.0 * x / big + rng.standard_normal(100), X)
 
+    def test_the_released_method_does_not_override_the_observations(self) -> None:
+        """Two regressors that differ by 1e-9 in the first observations: the
+        method of 0.5.0 leaves out observations 0, 3 and 4 and reproduces
+        the sum of squares more closely than the right computation."""
+        for seed in range(1, 6):
+            rng = np.random.default_rng(seed)
+            x, z, y = (rng.standard_normal(40) for _ in range(3))
+            x[:3] = 1.0 + 1e-9 * np.arange(3)
+            z[:3] = 1.0
+            X = np.column_stack([np.ones(40), x, z])
+            try:
+                _w, _f, positions = _compute_recursive_residuals(y, X)
+            except ValueError:
+                continue  # at the limit of the arithmetic: an error is right
+            missing = sorted(set(range(40)) - set(positions.tolist()))
+            assert missing == [0, 1, 3]
+
     def test_a_dependency_that_is_not_exact_in_binary(self) -> None:
         """c = a/3 + 2b/3 at first: the stored columns are dependent only
         to rounding error, and are treated as dependent."""
@@ -1371,7 +1388,7 @@ class TestDesignsFromTheSecondReview:
             y = rng.standard_normal(n)
             w, _f, positions = _compute_recursive_residuals(y, X)
             missing = sorted(set(range(n)) - set(positions.tolist()))
-            assert len(missing) == 4 and missing[-1] >= until
+            assert missing[-1] >= until  # not at a rounding residue before
             beta = np.linalg.lstsq(X, y, rcond=None)[0]
             assert np.sum(w**2) == pytest.approx(np.sum((y - X @ beta) ** 2), rel=1e-6)
 

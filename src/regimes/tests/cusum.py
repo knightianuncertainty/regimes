@@ -224,15 +224,19 @@ def _compute_recursive_residuals(
     much a regressor grows over the sample. The residuals are computed from
     a QR decomposition updated row by row.
 
-    The identity above is the check of the computation: an observation
-    wrongly taken to add to the rank, or wrongly taken not to, changes the
-    sum of squares by about one squared residual. When the sum of squared
-    recursive residuals equals the residual sum of squares of the
+    The identity above is the check of the computation: a regressor
+    wrongly treated as absent in the first observations, or a dependency
+    wrongly taken to be broken, changes the sum of squares. When the sum of
+    squared recursive residuals equals the residual sum of squares of the
     regression to a relative 1e-9, the residuals are returned. Otherwise
     they are computed again in an orthonormal basis of the regressors, and
     then by the method of version 0.5.0 (the rank of the first observations
-    from the singular values of that basis, with a tolerance of 1e-6), and
-    the computation that reproduces the residual sum of squares best is
+    from the singular values of that basis, with a tolerance of 1e-6). The
+    method of 0.5.0 is used only when the first computation gave no result
+    or when it leaves out the same observations: a rank that rises on a
+    difference of the size of rounding error reproduces the sum of squares
+    too, so the check alone cannot choose between two sets of observations.
+    The computation that reproduces the residual sum of squares best is
     used. If none does to a relative 1e-6, an error is raised. For a
     dependent variable with a very large level relative to the residuals
     both limits are wider: a hundred times the precision of the arithmetic
@@ -291,7 +295,12 @@ def _compute_recursive_residuals(
         failures.append(exc)
     if not done:
         try:
-            consider(_residuals_in_sample_basis(y, X))
+            released = _residuals_in_sample_basis(y, X)
+            # Not when it leaves out other observations than the first
+            # computation: a rank that rises on a difference of the size of
+            # rounding error reproduces the sum of squares and would win.
+            if not computed or np.array_equal(released[2], computed[0][1][2]):
+                consider(released)
         except ValueError as exc:
             failures.append(exc)
 

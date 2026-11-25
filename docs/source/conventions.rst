@@ -166,8 +166,11 @@ CUSUM tests
   observation of each point of a path. Whether an observation adds to the
   rank is decided from the linear dependencies that hold among the columns
   in all earlier observations (a column that is zero so far, two columns
-  that are equal so far), with a relative tolerance of 1e-13; the decision
-  does not change when a regressor is rescaled.
+  that are equal so far), so that it does not depend on the units of the
+  regressors or on how much a regressor grows over the sample. Differences
+  between observations of a relative 1e-9 or smaller are at the limit of
+  what can be told from rounding error: they may count as no difference,
+  or the residuals may not be computable (an error).
 * The recursive residuals are checked: their sum of squares must equal the
   residual sum of squares of the regression. When it does not to a relative
   1e-9, they are computed again by two other methods (the last is that of
@@ -179,7 +182,7 @@ CUSUM tests
 * The check does not show that each residual is accurate to many digits.
   A polynomial trend in calendar time gives about eight digits (quadratic,
   quarterly calendar years), four (cubic) or three (quadratic in daily date
-  numbers); the same trend measured from the start of the sample gives
+  ordinals near 730000); the same trend measured from the start of the sample gives
   twelve or more. Measure trends from the start of the sample.
 * The Chow and Andrews-Ploberger tests compute their sums of squared
   residuals from regressors scaled to unit length, so the statistics do not

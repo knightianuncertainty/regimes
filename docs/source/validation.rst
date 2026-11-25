@@ -114,7 +114,8 @@ Chow, CUSUM and Andrews-Ploberger
        that are almost equal, kinked regressors, and one very large value
        (tests, same file: ``TestDependenciesAgainstExactArithmetic``,
        ``TestDesignsFromTheSecondReview``); agreement with the computation
-       of version 0.5.0 on ordinary designs to 1e-11; a cubic in calendar
+       of version 0.5.0 to 1e-11 for standardized regressors (1e-8 for
+       regressors with levels of 1e3 to 1e5); a cubic in calendar
        years against the same trend measured from the start of the sample:
        differences below 2e-3
    * - CUSUM-of-squares path and bounds
