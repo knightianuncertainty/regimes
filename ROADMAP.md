@@ -118,9 +118,23 @@ can depend on the seed, rolling estimation supports two covariance types.
 
 ### Phase 6: v0.6.0 - Model Selection & Indicator Saturation
 
-- [ ] Autometrics-inspired general-to-specific model-selection algorithm
-- [ ] Step-indicator saturation (SIS)
-- [ ] Multiplicative step-indicator saturation
+- [x] Autometrics-inspired general-to-specific model-selection algorithm (`gets_search()`)
+  - [x] Bounded iterative search with multi-path exploration (up to 5 paths)
+  - [x] Encompassing tests and diagnostic checks
+  - [x] `GETSResults` and `TerminalModel` dataclasses
+- [x] Indicator saturation (`isat()`) with split-half block procedure
+  - [x] Step indicator saturation (SIS) — level shifts in the intercept
+  - [x] Impulse indicator saturation (IIS) — one-time outliers
+  - [x] Multiplicative indicator saturation (MIS) — coefficient shifts
+  - [x] Trend indicator saturation (TIS) — broken linear trends
+  - [x] User-supplied custom indicators
+- [x] Dual representation: shifts ↔ regime levels with SE propagation via delta method
+  - [x] `ShiftsRepresentation`, `RegimeLevelsRepresentation`, `ParameterRegime` dataclasses
+  - [x] `shifts_to_levels()` / `levels_to_shifts()` conversion functions
+- [x] GETS visualization: `plot_sis_coefficients()`, `plot_mis_coefficients()`, `plot_regime_levels()`
+- [x] `.isat()` convenience methods on OLS, AR, and ADL models
+- [x] Example notebook: `05_gets_indicator_saturation.ipynb`
+- [x] 166 new tests (1069 total, 86% coverage)
 - [ ] Target: 88%+ test coverage
 
 ### Phase 7: v0.7.0 - Examples & Release
@@ -164,7 +178,7 @@ These features are deferred and may be added in future versions based on need:
 | 0.4.0 | Complete | Bai-Perron procedure ported from OxRegimes (corrected BIC/LWZ, sequential test, critical values, confidence intervals; validated against Perron's program), date-aware summaries, 1030 tests |
 | 0.5.0 | Complete | Corrections of the Markov switching tests, the Chow, CUSUM and Andrews-Ploberger tests, the models and rolling estimators; one convention for break dates of AR and ADL models; API reference, conventions and validation pages; 1434 tests |
 | 0.5.1 | Complete | Corrections to 0.5.0 from a review after the release: recursive residuals for regressors with a very wide range, the Chow test with dummy variables among the regressors; type check passes in strict mode |
-| 0.6.0 | In development | Autometrics-inspired model selection, step-indicator saturation |
+| 0.6.0 | In development | GETS indicator saturation (SIS/IIS/MIS/TIS), Autometrics-inspired model selection, dual representation |
 | 0.7.0 | Planned | Real data examples, example notebooks, hosted documentation, PyPI stable release |
 | 0.8.0 | Planned | Advanced models: VAR, cointegration, panel data, bootstrap |
 | 0.9.0+ | Future | End-to-end forecasting workflow with structural change |
