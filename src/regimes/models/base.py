@@ -84,10 +84,16 @@ def normalize_breaks(
     """
     if breaks is None:
         return []
-    if isinstance(breaks, (int, float, str, np.number)):
+    if isinstance(breaks, (int, float, str, np.number)) or (
+        isinstance(breaks, np.ndarray) and breaks.ndim == 0
+    ):
+        hint = (
+            f"; write [{int(breaks)}] for a single break"
+            if isinstance(breaks, (int, np.integer)) and not isinstance(breaks, bool)
+            else ""
+        )
         raise TypeError(
-            f"{what}: break dates are given as a list, got {breaks!r}; "
-            f"write [{breaks!r}] for a single break"
+            f"{what}: break dates are given as a list of integers, got {breaks!r}{hint}"
         )
     dates = []
     for b in breaks:
@@ -154,6 +160,33 @@ def check_break_design(
             f"coefficients but the regressors have rank {rank}. A regime has "
             "fewer observations than coefficients, or its regressors are "
             "collinear within the regime"
+        )
+
+
+def check_unique_names(param_names: Sequence[str]) -> None:
+    """Parameter names must be unique.
+
+    The names of the regressors come from the columns of a DataFrame. A
+    column called ``const``, ``trend`` or like a lag (``y.L1``, ``x.L1``)
+    would give two parameters the same name, and ``variable_breaks`` or
+    ``exog_lags`` by name could not tell them apart.
+
+    Raises
+    ------
+    ValueError
+        Naming the duplicated names.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for name in param_names:
+        if name in seen and name not in duplicates:
+            duplicates.append(name)
+        seen.add(name)
+    if duplicates:
+        raise ValueError(
+            f"parameter names are not unique: {duplicates}. Two regressors "
+            "have the same name, or a regressor has the name the model gives "
+            "to its constant, trend or a lag; rename the column"
         )
 
 
@@ -476,7 +509,7 @@ class TimeSeriesModelBase(RegimesModelBase):
         super().__init__(endog, exog, breaks)
 
         # Process lags
-        if isinstance(lags, int):
+        if isinstance(lags, (int, np.integer)):
             self.lags: list[int] = list(range(1, lags + 1))
         else:
             self.lags = sorted(list(lags))

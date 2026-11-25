@@ -20,7 +20,12 @@ import numpy as np
 from scipy import stats
 
 from regimes.tests._bp_core import independent_columns
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+from regimes.tests.base import (
+    BreakTestBase,
+    BreakTestResultsBase,
+    ols_ssr,
+    split_constant,
+)
 
 
 def _scaled_rank(X: NDArray[np.floating[Any]]) -> int:
@@ -362,11 +367,7 @@ class ChowTest(BreakTestBase):
             Sum of squared residuals.
         """
         try:
-            beta, residuals, _rank, _s = np.linalg.lstsq(X, y, rcond=None)
-            if len(residuals) > 0:
-                return float(residuals[0])
-            else:
-                return float(np.sum((y - X @ beta) ** 2))
+            return ols_ssr(y, X)
         except np.linalg.LinAlgError:
             return np.inf
 
@@ -441,7 +442,12 @@ class ChowTest(BreakTestBase):
                 if n1 >= total_params_per_sub
                 else slice(break_point, T)
             )
-            if _scaled_rank(X_full[large]) < _scaled_rank(X_full):
+            if _scaled_rank(X_full) < X_full.shape[1]:
+                raise ValueError(
+                    f"break point {label}: the regressors are collinear in "
+                    "the sample, so the test cannot be computed"
+                )
+            if _scaled_rank(X_full[large]) < X_full.shape[1]:
                 raise ValueError(
                     f"break point {label}: a regressor is zero or collinear "
                     "with the others outside the sub-sample that is predicted "
@@ -506,6 +512,17 @@ class ChowTest(BreakTestBase):
                 y1 = self.endog[:break_point]
                 y2 = self.endog[break_point:]
 
+                if _scaled_rank(X1) < X1.shape[1] or _scaled_rank(X2) < X2.shape[1]:
+                    raise ValueError(
+                        f"break point {label}: the model with a break is not "
+                        "identified. A regressor is zero or collinear with "
+                        "the others in one of the sub-samples (an impulse or "
+                        "step dummy, for example). Pass such a regressor as "
+                        "`exog`, with a coefficient that does not break, and "
+                        "the regressors that break as `exog_break` (build "
+                        "the test from the arrays; `from_model` lets either "
+                        "all coefficients or the constant break)"
+                    )
                 ssr1 = self._compute_ssr(y1, X1)
                 ssr2 = self._compute_ssr(y2, X2)
                 ssr_unrestricted = ssr1 + ssr2
@@ -596,7 +613,9 @@ class ChowTest(BreakTestBase):
         ):
             break_points = [int(break_points)]
         else:
-            if isinstance(break_points, (bool, float, str)):
+            if isinstance(break_points, (bool, float, str)) or (
+                isinstance(break_points, np.ndarray) and break_points.ndim == 0
+            ):
                 raise TypeError(f"break points must be integers, got {break_points!r}")
             points = []
             for bp in break_points:

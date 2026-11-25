@@ -938,3 +938,118 @@ class TestSecondReview:
         if os.name == "nt":
             assert _warn._inside_package(inside.upper())
             assert _warn._inside_package(inside.lower())
+
+
+class TestAfterRelease:
+    """Small corrections made after v0.5.0."""
+
+    def test_regime_counts_in_summaries_add_up(self) -> None:
+        """The first regime of an AR or ADL model starts at the first
+        observation of the estimation sample (it used to count the initial
+        observations for the lags)."""
+        rng = np.random.default_rng(56)
+        n = 200
+        x = rng.standard_normal(n)
+        y = np.zeros(n)
+        for t in range(2, n):
+            y[t] = (0.0 if t < 100 else 2.0) + 0.4 * y[t - 1] + rng.standard_normal()
+        ar = rg.AR(y, lags=2, breaks=[100]).fit().summary(diagnostics=False)
+        assert "No. Observations:           198" in ar
+        assert "Regime 1: 2-99 (n=98)" in ar
+        assert "Regime 2: 100-199 (n=100)" in ar
+        adl = rg.ADL(y, x, lags=1, exog_lags=3, breaks=[100]).fit()
+        text = adl.summary(diagnostics=False)
+        assert "Regime 1: 3-99 (n=97)" in text
+        assert "Regime 2: 100-199 (n=100)" in text
+        partial = rg.ADL(
+            y, x, lags=1, exog_lags=3, variable_breaks={"const": [100]}
+        ).fit()
+        assert "Regime 1: 3-99, Regime 2: 100-199" in partial.summary(diagnostics=False)
+        # a regression has no initial observations
+        ols = rg.OLS(
+            y, np.column_stack([np.ones(n), x]), has_constant=False, breaks=[100]
+        ).fit()
+        assert "Regime 1: 0-99 (n=100)" in ols.summary(diagnostics=False)
+
+    @pytest.mark.parametrize("name", ["const", "y.L1", "trend"])
+    def test_regressor_with_the_name_of_a_model_term(self, name: str) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(57)
+        y = rng.standard_normal(120)
+        frame = pd.DataFrame(rng.standard_normal((120, 2)), columns=[name, "rate"])
+        trend = "ct" if name == "trend" else "c"
+        with pytest.raises(ValueError, match="parameter names are not unique"):
+            rg.ADL(y, frame, lags=1, exog_lags=0, trend=trend).fit()
+        with pytest.raises(ValueError, match="parameter names are not unique"):
+            rg.AR(y, lags=1, exog=frame, trend=trend).fit()
+        # other names are fine
+        renamed = frame.rename(columns={name: "income"})
+        assert (
+            "income"
+            in rg.ADL(y, renamed, lags=1, exog_lags=0, trend=trend).fit().param_names
+        )
+
+
+class TestIntegerTypesAndNames:
+    """Cases the tests of v0.5.0 did not reach."""
+
+    def test_numpy_integer_lags_of_an_autoregression(self) -> None:
+        y = np.random.default_rng(58).standard_normal(120)
+        plain = rg.AR(y, lags=2).fit()
+        numpy_int = rg.AR(y, lags=np.int64(2)).fit()
+        np.testing.assert_allclose(numpy_int.params, plain.params)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            rolling = rg.RollingAR(y, lags=np.int64(2), window=50).fit()
+            recursive = rg.RecursiveAR(y, lags=np.int64(2), min_nobs=30).fit()
+        assert list(rolling.param_names) == list(plain.param_names)
+        assert list(recursive.param_names) == list(plain.param_names)
+
+    def test_numpy_integers_and_names_in_rolling_adl(self) -> None:
+        import pandas as pd
+
+        y, x = _adl_data(seed=59, n=150)
+        names = ["const", "y.L1", "x0", "x0.L1", "x0.L2"]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for estimator in (
+                rg.RollingADL(y, x, lags=1, exog_lags=np.int64(2), window=60),
+                rg.RecursiveADL(y, x, lags=1, exog_lags=np.int64(2), min_nobs=40),
+                rg.RollingADL(
+                    y, x, lags=1, exog_lags={np.int64(0): np.int64(2)}, window=60
+                ),
+            ):
+                assert list(estimator.fit().param_names) == names
+            series = pd.Series(x, name="income")
+            named = rg.RollingADL(y, series, lags=1, exog_lags=1, window=60).fit()
+            markov = rg.MarkovADL(y, x, k_regimes=2, ar_order=1, exog_lags=np.int64(1))
+        assert list(named.param_names) == ["const", "y.L1", "income", "income.L1"]
+        assert markov._process_exog_lags() == {0: [0, 1]}
+
+    def test_messages_for_break_dates_that_are_not_a_list(self) -> None:
+        for bad, hint in (
+            (50, True),
+            (np.int64(50), True),
+            (50.0, False),
+            ("50", False),
+        ):
+            with pytest.raises(TypeError, match="list of integers") as info:
+                normalize_breaks(bad, 200)  # type: ignore[arg-type]
+            assert ("write [50] for a single break" in str(info.value)) is hint
+        with pytest.raises(TypeError, match="list of integers"):
+            normalize_breaks(np.array(50), 200)  # type: ignore[arg-type]
+
+    def test_break_dates_from_any_iterable(self) -> None:
+        """Sets and generators were accepted in 0.5.0 and still are."""
+        assert normalize_breaks({120, 40}, 200) == [40, 120]
+        assert normalize_breaks((b for b in (120, 40)), 200) == [40, 120]
+        assert normalize_breaks(np.array([120, 40]), 200) == [40, 120]
+
+    def test_two_columns_with_the_same_name(self) -> None:
+        import pandas as pd
+
+        rng = np.random.default_rng(60)
+        frame = pd.DataFrame(rng.standard_normal((80, 2)), columns=["rate", "rate"])
+        with pytest.raises(ValueError, match="Two regressors have the same name"):
+            rg.ADL(rng.standard_normal(80), frame, lags=1, exog_lags=0).fit()

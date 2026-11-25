@@ -29,6 +29,7 @@ Yao, Y.-C. (1988). Estimating the number of change-points via Schwarz'
 
 from __future__ import annotations
 
+import operator
 import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -285,10 +286,6 @@ class BaiPerronResults(BreakTestResultsBase):
         str
             Formatted summary including test statistics and break dates.
         """
-        levels = _cv.LEVELS
-        cv = self.critical_values
-        opt = self.options
-        width = 78
         expected = self.nobs + self.index_offset
         if index is not None and self.index_offset and len(index) != expected:
             raise ValueError(
@@ -297,6 +294,22 @@ class BaiPerronResults(BreakTestResultsBase):
                 f"the lags and reports dates in the model's data, so it needs "
                 f"the index of that data ({expected} entries)"
             )
+        try:
+            return self._summary_text(index)
+        except IndexError:
+            if index is None:
+                raise
+            raise ValueError(
+                f"index has {len(index)} entries, too few for the dates of "
+                f"this summary (the sample has {expected} observations)"
+            ) from None
+
+    def _summary_text(self, index: IndexLike | None) -> str:
+        """The text of ``summary``."""
+        levels = _cv.LEVELS
+        cv = self.critical_values
+        opt = self.options
+        width = 78
 
         def dates(breaks: Sequence[int]) -> str:
             return ", ".join(_obs_label(int(b), index) for b in breaks)
@@ -1107,12 +1120,30 @@ class BaiPerronTest(BreakTestBase):
         """
         y, z, x = self._data()
         q = self.q
-        dates = np.asarray(list(break_indices), dtype=np.int64) - self.index_offset
+        supplied: Any = break_indices
+        if isinstance(supplied, (int, float, np.integer, np.floating)):
+            supplied = [supplied]  # a single date
+        given = []
+        for b in supplied:
+            if isinstance(b, (float, np.floating)) and float(b).is_integer():
+                b = int(b)  # 100.0 is the date 100
+            try:
+                if isinstance(b, (bool, np.bool_)):
+                    raise TypeError
+                given.append(operator.index(b))
+            except TypeError:
+                raise TypeError(
+                    f"break dates must be integers, got {list(supplied)}"
+                ) from None
+        if sorted(set(given)) != given:
+            raise ValueError(
+                f"break dates must be distinct and in increasing order, got {given}"
+            )
+        dates = np.asarray(given, dtype=np.int64) - self.index_offset
         if np.any(dates < 1) or np.any(dates >= self.nobs):
             first, last = 1 + self.index_offset, self.nobs - 1 + self.index_offset
             raise ValueError(
-                f"break dates must lie in {first}, ..., {last}, "
-                f"got {list(break_indices)}"
+                f"break dates must lie in {first}, ..., {last}, got {given}"
             )
         vb = dates - 1
         delta, _, resid, _, _ = _bp.estimate(y, z, x, vb)

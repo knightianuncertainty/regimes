@@ -33,7 +33,7 @@ from regimes.tests._hansen_pvalues import (
     hansen_pvalue,
     pi0_from_range,
 )
-from regimes.tests.cusum import cusum_sq_critical_value
+from regimes.tests.cusum import _compute_recursive_residuals, cusum_sq_critical_value
 
 REF = Path(__file__).resolve().parents[1] / "reference_data"
 
@@ -524,8 +524,8 @@ class TestRecursiveResidualsNumerics:
         )
 
     def test_nearly_collinear_start(self) -> None:
-        """Two first observations that almost coincide count as one design
-        point: the second has a residual, the third completes the rank."""
+        """Two first observations that differ by 1e-9 are two design points:
+        the second completes the rank, as in exact arithmetic."""
         rng = np.random.default_rng(52)
         x = rng.standard_normal(60)
         x[1] = x[0] + 1e-9
@@ -533,15 +533,17 @@ class TestRecursiveResidualsNumerics:
         y = 1.0 + 0.5 * x + rng.standard_normal(60)
         results = rg.CUSUMTest(y, exog=X).fit()
         assert len(results.recursive_residuals) == 58
+        np.testing.assert_array_equal(results.observations[:3], [2, 3, 4])
+        assert np.sum(results.recursive_residuals**2) == pytest.approx(
+            sm.OLS(y, X).fit().ssr, rel=1e-8
+        )
+        # observations that are exactly equal are one design point
+        x[1] = x[0]
+        X = np.column_stack([np.ones(60), x])
+        results = rg.CUSUMTest(y, exog=X).fit()
         np.testing.assert_array_equal(results.observations[:3], [1, 3, 4])
         assert results.recursive_residuals[0] == pytest.approx(
-            (y[1] - y[0]) / np.sqrt(2), abs=1e-6
-        )
-        np.testing.assert_allclose(
-            results.recursive_residuals[1:], self._direct(y, X, 3), atol=1e-6
-        )
-        assert np.sum(results.recursive_residuals**2) == pytest.approx(
-            sm.OLS(y, X).fit().ssr, rel=1e-6
+            (y[1] - y[0]) / np.sqrt(2)
         )
 
     def test_series_that_starts_at_zero(self) -> None:
@@ -874,3 +876,545 @@ class TestChowDegenerateDesigns:
         y = np.concatenate([np.zeros(30), np.ones(30)])
         with pytest.raises(ValueError, match="exactly"):
             rg.AndrewsPlobergerTest(y).fit()
+
+
+class TestRecursiveResidualsDoNotDependOnScale:
+    """The rank decision used a tolerance relative to the largest singular
+    value of the whole sample: a regressor that is small early in the sample
+    was treated as absent there, and the tests rejected a stable model."""
+
+    @staticmethod
+    def _check(y: np.ndarray, X: np.ndarray, no_residual: list[int]) -> None:
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        expected = [t for t in range(len(y)) if t not in no_residual]
+        np.testing.assert_array_equal(positions, expected)
+        scaled = X / np.max(np.abs(X), axis=0)
+        beta, *_ = np.linalg.lstsq(scaled, y, rcond=None)
+        ssr = float(np.sum((y - scaled @ beta) ** 2))
+        assert np.sum(w**2) == pytest.approx(ssr, rel=2e-6)
+
+    @pytest.mark.parametrize("rate", [0.05, 0.07])
+    def test_regressor_that_grows_by_orders_of_magnitude(self, rate: float) -> None:
+        rng = np.random.default_rng(72)
+        n = 300
+        x = np.exp(rate * np.arange(n))  # up to 3e6 and 1e9
+        X = np.column_stack([np.ones(n), x])
+        y = 1.0 + x + rng.standard_normal(n)
+        self._check(y, X, [0, 1])
+        # the coefficients are stable: with rate 0.07 the sum of squared
+        # residuals was 3.7 million where the regression has 291, and both
+        # tests rejected
+        assert not rg.CUSUMTest(y, exog=X).fit().reject
+        assert not rg.CUSUMSQTest(y, exog=X).fit().reject
+
+    def test_one_very_large_value(self) -> None:
+        rng = np.random.default_rng(73)
+        n = 300
+        x = rng.standard_normal(n)
+        x[200] = 1e8
+        X = np.column_stack([np.ones(n), x])
+        y = 1.0 + x + rng.standard_normal(n)
+        self._check(y, X, [0, 1])
+        assert not rg.CUSUMSQTest(y, exog=X).fit().reject
+
+    def test_long_polynomial_trends(self) -> None:
+        """The first k observations complete the rank (the old rule dropped
+        observation 8 of a quadratic trend with 2000 observations)."""
+        rng = np.random.default_rng(74)
+        for n, degree in ((2000, 2), (500, 3)):
+            t = np.arange(n, dtype=float)
+            X = np.column_stack([t**j for j in range(degree + 1)])
+            self._check(rng.standard_normal(n), X, list(range(degree + 1)))
+
+    def test_rescaling_a_regressor_changes_nothing(self) -> None:
+        rng = np.random.default_rng(75)
+        n = 120
+        step = (np.arange(n) >= 40).astype(float)
+        X = np.column_stack([np.ones(n), rng.standard_normal(n), step])
+        y = rng.standard_normal(n)
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        for factors in ([1.0, 1e8, 1.0], [1e-6, 1.0, 1e9]):
+            w2, _f2, positions2 = _compute_recursive_residuals(y, X * factors)
+            np.testing.assert_array_equal(positions2, positions)
+            np.testing.assert_allclose(w2, w, rtol=1e-8, atol=1e-10)
+
+    def test_polynomials_in_calendar_years(self) -> None:
+        """A cubic in quarterly calendar years is computed, to about four
+        digits; a quartic is beyond double precision and raises."""
+        rng = np.random.default_rng(76)
+        years = 1990 + np.arange(60) / 4
+        elapsed = years - years[0]
+        y = rng.standard_normal(60)
+        calendar = rg.CUSUMTest(
+            y, exog=np.column_stack([years**j for j in range(4)])
+        ).fit()
+        from_start = rg.CUSUMTest(
+            y, exog=np.column_stack([elapsed**j for j in range(4)])
+        ).fit()
+        np.testing.assert_array_equal(calendar.observations, np.arange(4, 60))
+        np.testing.assert_allclose(
+            calendar.recursive_residuals, from_start.recursive_residuals, atol=2e-3
+        )
+        assert calendar.reject == from_start.reject
+        years = 1990 + np.arange(80) / 4
+        with pytest.raises(ValueError, match="could not be computed accurately"):
+            rg.CUSUMTest(
+                rng.standard_normal(80),
+                exog=np.column_stack([years**j for j in range(5)]),
+            ).fit()
+
+
+class TestCrossingBeforeALateDummy:
+    """Positions when the observation without a residual comes late."""
+
+    def test_cusum_crossing_and_plot(self) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        rng = np.random.default_rng(77)
+        n = 200
+        impulse = np.zeros(n)
+        impulse[150] = 1.0
+        X = np.column_stack([np.ones(n), impulse])
+        y = rng.standard_normal(n)
+        y[40:] += 3.0  # the mean shifts long before the dummy
+        results = rg.CUSUMTest(y, exog=X).fit()
+        assert results.reject
+        outside = np.where(
+            (results.statistic_path > results.upper_bound)
+            | (results.statistic_path < results.lower_bound)
+        )[0]
+        # residual number i belongs to observation i + 1 before the dummy
+        assert results.first_crossing == outside[0] + 1
+        assert results.first_crossing < 150
+        assert results.crossing_indices[0] == results.first_crossing
+        fig, ax = results.plot()
+        np.testing.assert_array_equal(
+            ax.lines[0].get_xdata(), [t for t in range(n) if t not in (0, 150)]
+        )
+        plt.close(fig)
+
+
+class TestChowWhenEveryCoefficientBreaks:
+    def test_dummy_among_the_regressors(self) -> None:
+        """It returned F(3, 94) = 0.71 where the test of the two coefficients
+        that can change is F(2, 95) = 1.08."""
+        rng = np.random.default_rng(78)
+        n = 100
+        x = rng.standard_normal(n)
+        impulse = np.zeros(n)
+        impulse[10] = 1.0
+        y = 1.0 + 0.5 * x + rng.standard_normal(n)
+        X = np.column_stack([np.ones(n), x, impulse])
+        with pytest.raises(ValueError, match="Pass such a regressor as `exog`"):
+            rg.ChowTest(y, exog_break=X).fit(break_points=50)
+        with pytest.raises(ValueError, match="not identified"):
+            rg.ChowTest.from_model(rg.OLS(y, X, has_constant=False)).fit(
+                break_points=50
+            )
+        # the way out that the message names
+        results = rg.ChowTest(y, exog=impulse, exog_break=X[:, :2]).fit(break_points=50)
+        assert (results.df_num[50], results.df_denom[50]) == (2, 95)
+        reference = sm.OLS(
+            y,
+            np.column_stack(
+                [
+                    X[:, :2] * (np.arange(n) < 50)[:, None],
+                    X[:, :2] * (np.arange(n) >= 50)[:, None],
+                    impulse,
+                ]
+            ),
+        ).fit()
+        restricted = sm.OLS(y, X).fit()
+        f_stat = ((restricted.ssr - reference.ssr) / 2) / (reference.ssr / 95)
+        assert results.f_stats[50] == pytest.approx(f_stat, rel=1e-9)
+
+    def test_other_unidentified_designs(self) -> None:
+        rng = np.random.default_rng(79)
+        n = 100
+        x = rng.standard_normal(n)
+        y = rng.standard_normal(n)
+        step = (np.arange(n) >= 50).astype(float)
+        late = np.where(np.arange(n) >= 60, x, 0.0)
+        for X in (
+            np.column_stack([np.ones(n), x, step]),  # the break itself
+            np.column_stack([np.ones(n), x, x]),  # a duplicated column
+            np.column_stack([np.ones(n), late]),  # zero before the break
+        ):
+            with pytest.raises(ValueError, match="not identified|collinear"):
+                rg.ChowTest(y, exog_break=X).fit(break_points=50)
+        # predictive variant with collinear regressors
+        with pytest.raises(ValueError, match="collinear in the sample"):
+            rg.ChowTest(y, exog_break=np.column_stack([np.ones(n), x, x])).fit(
+                break_points=98
+            )
+        # and an ordinary design is not affected
+        results = rg.ChowTest(y, exog_break=np.column_stack([np.ones(n), x])).fit(
+            break_points=[50, 99]
+        )
+        assert results.df_num[50] == 2
+        assert results.is_predictive[99]
+
+    def test_break_points_given_as_an_array_scalar(self) -> None:
+        y = np.random.default_rng(80).standard_normal(60)
+        with pytest.raises(TypeError, match="must be integers"):
+            rg.ChowTest(y).fit(break_points=np.array(30.5))
+
+
+def _exact_rank_rises(X: np.ndarray) -> list[int]:
+    """Observations that raise the rank of the design, in rational arithmetic."""
+    from fractions import Fraction
+
+    k = X.shape[1]
+    rows: list[tuple[int, list[Fraction]]] = []
+    rises = []
+    for t in range(X.shape[0]):
+        v = [Fraction(float(a)) for a in X[t]]
+        for pivot, row in rows:
+            if v[pivot] != 0:
+                c = v[pivot] / row[pivot]
+                v = [a - c * b for a, b in zip(v, row)]
+        nonzero = [j for j in range(k) if v[j] != 0]
+        if nonzero:
+            rows.append((nonzero[0], v))
+            rises.append(t)
+    return rises
+
+
+class TestDependenciesAgainstExactArithmetic:
+    """Which observations have no recursive residual, against rational
+    arithmetic, for designs with exact linear dependencies among the columns
+    in part of the sample."""
+
+    @staticmethod
+    def _check(y: np.ndarray, X: np.ndarray) -> None:
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        missing = sorted(set(range(len(y))) - set(positions.tolist()))
+        assert missing == _exact_rank_rises(X)
+        scaled = X / np.max(np.abs(X), axis=0)
+        beta, *_ = np.linalg.lstsq(scaled, y, rcond=None)
+        ssr = float(np.sum((y - scaled @ beta) ** 2))
+        assert np.sum(w**2) == pytest.approx(ssr, rel=1e-8)
+
+    def test_a_rate_with_zeros_and_its_first_regime(self) -> None:
+        """Elimination left 5e-17 where a coefficient is exactly zero; at an
+        observation where the rate is zero that residue looked like a broken
+        dependency, and an ordinary design (condition number 3.5) raised."""
+        x = np.array(
+            [1.0, 3, 0, 2, 0, -1, 2, 0, 3, -2, 7, 0, -5]
+            + [2, 0, 2, -7, 0, 2, 5, 0, -2, 2, 0, 0, 6]
+        )
+        n = len(x)
+        X = np.column_stack([np.ones(n), x, np.where(np.arange(n) < 10, x, 0.0)])
+        y = np.sin(1.7 * np.arange(n)) + 0.3 * x
+        self._check(y, X)
+        results = rg.CUSUMTest(y, exog=X).fit()
+        expected = [t for t in range(n) if t not in (0, 1, 10)]
+        np.testing.assert_array_equal(results.observations, expected)
+
+    def test_random_designs(self) -> None:
+        rng = np.random.default_rng(2026)
+        steps = [0, 0, 0, 0.25, -0.25, 0.5, -0.5, 0.75, 1.0, -1.25, 1.75]
+        for _ in range(60):
+            n = int(rng.integers(20, 45))
+            x = rng.choice(steps, size=n)
+            tau = int(rng.integers(5, n - 5))
+            X = np.column_stack([np.ones(n), x, np.where(np.arange(n) < tau, x, 0.0)])
+            if len(_exact_rank_rises(X)) == 3:
+                self._check(rng.standard_normal(n), X)
+        for _ in range(40):
+            k = int(rng.integers(4, 9))
+            n = int(rng.integers(3 * k, 5 * k))
+            X = rng.integers(-3, 4, size=(n, k)).astype(float)
+            for j in range(1, k):
+                if rng.random() < 0.6:
+                    until = int(rng.integers(1, n - k))
+                    others = rng.choice(j, size=min(j, 2), replace=False)
+                    # coefficients that are exact in binary arithmetic
+                    coefs = rng.choice(
+                        [1.0, 2.0, -1.0, 0.5, 3.0, -1.5], size=len(others)
+                    )
+                    X[:until, j] = X[:until, others] @ coefs
+            X[:, 0] = 1.0
+            if len(_exact_rank_rises(X)) == k:
+                self._check(rng.standard_normal(n), X)
+
+    def test_two_dependencies_broken_by_one_observation(self) -> None:
+        rng = np.random.default_rng(81)
+        n = 40
+        a = rng.integers(1, 5, size=n).astype(float)
+        b, c = 2 * a, a.copy()
+        b[12:] = rng.integers(-3, 4, size=n - 12)
+        c[12:] = rng.integers(-3, 4, size=n - 12)
+        self._check(rng.standard_normal(n), np.column_stack([a, b, c]))
+
+
+class TestRecursiveResidualsEdges:
+    def test_exact_fit_raises(self) -> None:
+        """The residuals would be rounding error (the tests used to run on
+        it: CUSUM-of-squares rejected)."""
+        rng = np.random.default_rng(82)
+        X = np.column_stack([np.ones(60), rng.standard_normal(60)])
+        for y in (np.zeros(60), np.full(60, 3.0), X @ [1.0, 2.0]):
+            with pytest.raises(ValueError, match="fits the data exactly"):
+                rg.CUSUMTest(y, exog=X).fit()
+            with pytest.raises(ValueError, match="fits the data exactly"):
+                rg.CUSUMSQTest(y, exog=X).fit()
+
+    def test_missing_values_raise(self) -> None:
+        y = np.random.default_rng(83).standard_normal(40)
+        for bad in (np.nan, np.inf):
+            y_bad = y.copy()
+            y_bad[7] = bad
+            with pytest.raises(ValueError, match="NaN or infinite"):
+                rg.CUSUMTest(y_bad).fit()
+
+    def test_large_level_of_the_dependent_variable(self) -> None:
+        """A level of 1e8 with residuals of 1e-3: the sum of squares cannot
+        be reproduced to 1e-6 in double precision, and need not be."""
+        for seed in range(10):
+            rng = np.random.default_rng(seed)
+            noise = 1e-3 * rng.standard_normal(60)
+            w, _f, positions = _compute_recursive_residuals(
+                1e8 + noise, np.ones((60, 1))
+            )
+            reference, _f, _p = _compute_recursive_residuals(noise, np.ones((60, 1)))
+            np.testing.assert_array_equal(positions, np.arange(1, 60))
+            np.testing.assert_allclose(w, reference, atol=1e-6)
+
+
+class TestTheCheckOfTheRecursiveResiduals:
+    """The sum of squared recursive residuals must equal the residual sum
+    of squares; the computations are tried in turn until one does."""
+
+    @staticmethod
+    def _data(seed: int = 84, n: int = 80) -> tuple[np.ndarray, np.ndarray]:
+        rng = np.random.default_rng(seed)
+        return rng.standard_normal(n), np.column_stack(
+            [np.ones(n), rng.standard_normal(n)]
+        )
+
+    def test_ordinary_design_uses_the_first_computation(self, monkeypatch: Any) -> None:
+        import regimes.tests.cusum as module
+
+        def not_needed(*args: Any) -> Any:
+            raise AssertionError("second computation used")
+
+        monkeypatch.setattr(module, "_residuals_in_sample_basis", not_needed)
+        monkeypatch.setattr(module, "_orthonormal", not_needed)
+        y, X = self._data()
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        np.testing.assert_array_equal(positions, np.arange(2, 80))
+        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        assert np.sum(w**2) == pytest.approx(np.sum((y - X @ beta) ** 2), rel=1e-12)
+
+    def test_the_computations_agree_on_ordinary_designs(self) -> None:
+        import regimes.tests.cusum as module
+
+        for seed in range(20):
+            y, X = self._data(seed)
+            w, f, positions = _compute_recursive_residuals(y, X)
+            w_050, f_050, positions_050 = module._residuals_in_sample_basis(y, X)
+            np.testing.assert_array_equal(positions, positions_050)
+            np.testing.assert_allclose(w, w_050, atol=1e-11)
+            np.testing.assert_allclose(f, f_050, rtol=1e-10)
+
+    def test_falls_back_when_the_first_computation_fails(
+        self, monkeypatch: Any
+    ) -> None:
+        import regimes.tests.cusum as module
+
+        y, X = self._data()
+        expected = module._residuals_in_sample_basis(y, X)
+
+        def fails(*args: Any) -> Any:
+            raise ValueError("could not be told from rounding error")
+
+        monkeypatch.setattr(module, "_begin_from_dependencies", fails)
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        np.testing.assert_array_equal(w, expected[0])
+        np.testing.assert_array_equal(positions, expected[2])
+
+    def test_falls_back_when_the_first_computation_is_wrong(
+        self, monkeypatch: Any
+    ) -> None:
+        import regimes.tests.cusum as module
+
+        y, X = self._data()
+        expected = module._residuals_in_sample_basis(y, X)
+        original = module._finish_from_dependencies
+
+        def wrong(*args: Any) -> Any:
+            w, f, positions = original(*args)
+            return w * (1 + 5e-5), f, positions  # sum of squares off by 1e-4
+
+        monkeypatch.setattr(module, "_finish_from_dependencies", wrong)
+        w, _f, _positions = _compute_recursive_residuals(y, X)
+        np.testing.assert_array_equal(w, expected[0])
+
+    def test_error_when_no_computation_reproduces_the_sum_of_squares(
+        self, monkeypatch: Any
+    ) -> None:
+        import regimes.tests.cusum as module
+
+        y, X = self._data()
+        finish = module._finish_from_dependencies
+        released = module._residuals_in_sample_basis
+
+        def off(function: Any) -> Any:
+            def wrapped(*args: Any) -> Any:
+                w, f, positions = function(*args)
+                return w * (1 + 5e-5), f, positions
+
+            return wrapped
+
+        monkeypatch.setattr(module, "_finish_from_dependencies", off(finish))
+        monkeypatch.setattr(module, "_residuals_in_sample_basis", off(released))
+        with pytest.raises(ValueError, match="could not be computed accurately"):
+            _compute_recursive_residuals(y, X)
+
+    def test_the_best_computation_is_used(self, monkeypatch: Any) -> None:
+        """Neither within 1e-9, both within 1e-6: the closer one."""
+        import regimes.tests.cusum as module
+
+        y, X = self._data()
+        finish = module._finish_from_dependencies
+        released = module._residuals_in_sample_basis
+
+        def off(function: Any, by: float) -> Any:
+            def wrapped(*args: Any) -> Any:
+                w, f, positions = function(*args)
+                return w * (1 + by), f, positions
+
+            return wrapped
+
+        monkeypatch.setattr(module, "_finish_from_dependencies", off(finish, 2e-7))
+        monkeypatch.setattr(module, "_residuals_in_sample_basis", off(released, 2e-8))
+        w, _f, _positions = _compute_recursive_residuals(y, X)
+        np.testing.assert_array_equal(w, released(y, X)[0] * (1 + 2e-8))
+
+    def test_collinear_in_the_sample(self) -> None:
+        y, X = self._data()
+        with pytest.raises(ValueError, match="collinear in the sample"):
+            _compute_recursive_residuals(y, np.column_stack([X, 2 * X[:, 1]]))
+
+
+class TestDesignsFromTheSecondReview:
+    """Designs on which a version of the computation from dependencies
+    raised or left out the wrong observations."""
+
+    @staticmethod
+    def _exact(y: np.ndarray, X: np.ndarray) -> None:
+        w, _f, positions = _compute_recursive_residuals(y, X)
+        missing = sorted(set(range(len(y))) - set(positions.tolist()))
+        assert missing == _exact_rank_rises(X)
+        scaled = X / np.linalg.norm(X, axis=0)
+        beta = np.linalg.lstsq(scaled, y, rcond=None)[0]
+        ssr = float(np.sum((y - scaled @ beta) ** 2))
+        assert np.sum(w**2) == pytest.approx(ssr, rel=1e-6)
+
+    def test_first_two_observations_almost_equal(self) -> None:
+        """The elimination multiplier is a ratio with a small denominator;
+        its rounding error looked like a broken dependency."""
+        x = np.r_[100.0, 100.001, 101.0 + np.arange(28)]
+        t = np.arange(30)
+        X = np.column_stack([np.ones(30), x, np.where(t < 20, x, 0.0)])
+        y = np.sin(1.7 * t)
+        self._exact(y, X)
+        results = rg.CUSUMTest(y, exog=X).fit()
+        expected = [s for s in range(30) if s not in (0, 1, 20)]
+        np.testing.assert_array_equal(results.observations, expected)
+
+    def test_small_first_steps_and_kinks(self) -> None:
+        rng = np.random.default_rng(424242)
+        for _ in range(60):
+            n = int(rng.integers(30, 80))
+            step = 10.0 ** -rng.integers(1, 6)
+            walk = step + np.cumsum(rng.standard_normal(n - 2))
+            x = 100.0 + np.concatenate([[0.0, step], walk])
+            tau = int(rng.integers(8, n - 8))
+            X = np.column_stack([np.ones(n), x, np.where(np.arange(n) < tau, x, 0.0)])
+            self._exact(rng.standard_normal(n), X)
+        for _ in range(40):
+            n = int(rng.integers(30, 80))
+            x = 5.0 + np.cumsum(rng.standard_normal(n))
+            cap = float(np.quantile(x, rng.uniform(0.3, 0.8)))
+            X = np.column_stack([np.ones(n), x, np.minimum(x, cap)])
+            self._exact(rng.standard_normal(n), X)
+
+    def test_one_very_large_value(self) -> None:
+        """Also when the dependent variable is unrelated to the regressor:
+        the computation of version 0.5.0 reproduces the sum of squares
+        there, with the last observation left out instead of the second."""
+        for big in (1e8, 1e11):
+            rng = np.random.default_rng(86)
+            x = rng.standard_normal(100)
+            x[-1] = big
+            X = np.column_stack([np.ones(100), x])
+            self._exact(rng.standard_normal(100), X)
+            self._exact(1.0 + 2.0 * x / big + rng.standard_normal(100), X)
+
+    def test_the_released_method_does_not_override_the_observations(self) -> None:
+        """Two regressors that differ by 1e-9 in the first observations: the
+        method of 0.5.0 leaves out observations 0, 3 and 4 and reproduces
+        the sum of squares more closely than the right computation."""
+        for seed in range(1, 6):
+            rng = np.random.default_rng(seed)
+            x, z, y = (rng.standard_normal(40) for _ in range(3))
+            x[:3] = 1.0 + 1e-9 * np.arange(3)
+            z[:3] = 1.0
+            X = np.column_stack([np.ones(40), x, z])
+            try:
+                _w, _f, positions = _compute_recursive_residuals(y, X)
+            except ValueError:
+                continue  # at the limit of the arithmetic: an error is right
+            missing = sorted(set(range(40)) - set(positions.tolist()))
+            assert missing == [0, 1, 3]
+
+    def test_a_dependency_that_is_not_exact_in_binary(self) -> None:
+        """c = a/3 + 2b/3 at first: the stored columns are dependent only
+        to rounding error, and are treated as dependent."""
+        rng = np.random.default_rng(87)
+        for _ in range(30):
+            n = int(rng.integers(24, 60))
+            a = rng.integers(-5, 6, size=n).astype(float)
+            b = rng.integers(-5, 6, size=n).astype(float)
+            c = a / 3 + 2 * b / 3
+            until = int(rng.integers(6, n - 8))
+            c[until:] = rng.integers(-5, 6, size=n - until) + 0.5
+            X = np.column_stack([np.ones(n), a, b, c])
+            y = rng.standard_normal(n)
+            w, _f, positions = _compute_recursive_residuals(y, X)
+            missing = sorted(set(range(n)) - set(positions.tolist()))
+            assert missing[-1] >= until  # not at a rounding residue before
+            beta = np.linalg.lstsq(X, y, rcond=None)[0]
+            assert np.sum(w**2) == pytest.approx(np.sum((y - X @ beta) ** 2), rel=1e-6)
+
+
+class TestChowDoesNotDependOnUnits:
+    def test_rescaled_regressors(self) -> None:
+        """Least squares dropped a column fourteen orders of magnitude
+        smaller than another, and the statistic changed with the units."""
+        rng = np.random.default_rng(1)
+        n = 100
+        a, b, y = rng.normal(size=n), rng.normal(size=n), rng.normal(size=n)
+        well = rg.ChowTest(y, exog_break=np.column_stack([np.ones(n), a, b])).fit(50)
+        badly = rg.ChowTest(
+            y, exog_break=np.column_stack([np.ones(n), 0.01 * a, 1e12 * b])
+        ).fit(50)
+        assert badly.f_stats[50] == pytest.approx(well.f_stats[50], rel=1e-8)
+        sup_well = rg.AndrewsPlobergerTest(
+            y, exog_break=np.column_stack([np.ones(n), a, b])
+        ).fit()
+        sup_badly = rg.AndrewsPlobergerTest(
+            y, exog_break=np.column_stack([np.ones(n), 0.01 * a, 1e12 * b])
+        ).fit()
+        assert sup_badly.sup_f == pytest.approx(sup_well.sup_f, rel=1e-8)
+
+    def test_break_points_from_any_iterable(self) -> None:
+        y = np.random.default_rng(85).standard_normal(120)
+        test = rg.ChowTest(y)
+        assert sorted(test.fit({60, 70}).f_stats) == [60, 70]
+        assert sorted(test.fit(b for b in (40, 80)).f_stats) == [40, 80]

@@ -56,7 +56,12 @@ from regimes.tests._hansen_pvalues import (
     hansen_pvalue,
     pi0_from_range,
 )
-from regimes.tests.base import BreakTestBase, BreakTestResultsBase, split_constant
+from regimes.tests.base import (
+    BreakTestBase,
+    BreakTestResultsBase,
+    ols_ssr,
+    split_constant,
+)
 
 # A sum of squared residuals this small relative to y'y is rounding error:
 # the model fits exactly and the statistic is not defined. (The threshold
@@ -448,9 +453,7 @@ class AndrewsPlobergerTest(BreakTestBase):
         float
             Sum of squared residuals.
         """
-        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-        resid = y - X @ beta
-        return float(resid @ resid)
+        return ols_ssr(y, X)
 
     def _build_regressor_matrix(
         self,
